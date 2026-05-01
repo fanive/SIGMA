@@ -436,6 +436,9 @@ class FmpService {
   Future<List<dynamic>> searchExchangeVariants(String query) =>
       SigmaApiService.search(query);
 
+    Future<Map<String, dynamic>> getLogo(String ticker) =>
+      SigmaApiService.getLogo(ticker);
+
   // ── AI context builder ────────────────────────────────────────────────────
 
   Future<String> getFmpContext(String ticker) async {

@@ -46,6 +46,7 @@ class SigmaProvider extends ChangeNotifier {
 
   List<dynamic> searchResults = [];
   bool isSearching = false;
+  int _searchRequestId = 0;
   bool isMarketLoading = false;
   bool isAnalysisLoading = false;
   bool isSynthesisStreaming = false;
@@ -555,69 +556,74 @@ class SigmaProvider extends ChangeNotifier {
   }
 
   Future<void> updateSearchResults(String query) async {
-    if (query.isEmpty) {
+    final normalized = query.trim();
+    if (normalized.isEmpty) {
+      _searchRequestId++;
       searchResults = [];
       isSearching = false;
       notifyListeners();
       return;
     }
 
+    final requestId = ++_searchRequestId;
     isSearching = true;
     notifyListeners();
 
     try {
-      // Parallelize searches for maximum speed
-      final searches = await Future.wait([
-        _sigmaService.fmpService
-            .searchTickerSymbols(query)
-            .catchError((_) => <Map<String, dynamic>>[]),
-        _sigmaService.fmpService
-            .searchSymbol(query)
-            .catchError((_) => <Map<String, dynamic>>[]),
-      ]);
+      // Single backend search call + local ranking (faster than dual duplicate calls).
+      final fmpSearchResults = await _sigmaService.fmpService
+          .searchTickerSymbols(normalized)
+          .catchError((_) => <Map<String, dynamic>>[]);
 
-      final fmpSearchResults = searches[0] as List<dynamic>;
-      final fmpResults = searches[1] as List<dynamic>;
+      if (requestId != _searchRequestId) return;
+
+      int rankItem(Map<String, dynamic> item) {
+        final symbol = (item['symbol'] ?? '').toString().toUpperCase();
+        final name = (item['name'] ?? item['description'] ?? '')
+            .toString()
+            .toLowerCase();
+        final q = normalized.toUpperCase();
+        final qLower = normalized.toLowerCase();
+        if (symbol == q) return 0;
+        if (symbol.startsWith(q)) return 1;
+        if (name.startsWith(qLower)) return 2;
+        if (symbol.contains(q)) return 3;
+        if (name.contains(qLower)) return 4;
+        return 5;
+      }
+
+      final sorted = [...fmpSearchResults]
+        ..sort((a, b) => rankItem(a).compareTo(rankItem(b)));
 
       final Map<String, Map<String, dynamic>> mergedResults = {};
       final List<String> symbolsToQuote = [];
+      final List<String> symbolsToLogo = [];
 
-      // 1. Process FMP search results
-      for (var item in fmpSearchResults.take(15)) {
+      // 1) Build results immediately (autocomplete UX first).
+      for (final item in sorted.take(20)) {
         final symbol = (item['symbol'] ?? '').toString().toUpperCase();
         if (symbol.isEmpty) continue;
         if (!mergedResults.containsKey(symbol)) {
           mergedResults[symbol] = _mapToSearchItem(item, symbol);
           symbolsToQuote.add(symbol);
+          symbolsToLogo.add(symbol);
         }
       }
 
-      // 2. Process FMP symbol search (top-up)
-      if (mergedResults.length < 10) {
-        for (var item in fmpResults.take(5)) {
-          final symbol = (item['symbol'] ?? '').toString().toUpperCase();
-          if (symbol.isEmpty) continue;
-          if (!mergedResults.containsKey(symbol)) {
-            mergedResults[symbol] = {
-              'symbol': symbol,
-              'description': item['name'] ?? symbol,
-              'displaySymbol': symbol,
-              'stockExchange': item['stockExchange'] ?? '',
-              'type': 'EQUITY',
-              'logo':
-                  'https://financialmodelingprep.com/image-stock/$symbol.png',
-              'source': 'FMP',
-            };
-            symbolsToQuote.add(symbol);
-          }
-        }
-      }
+      if (requestId != _searchRequestId) return;
 
-      // 4. Multi-Source Price Consolidation (FMP)
+      searchResults = mergedResults.values.toList();
+      isSearching = false;
+      notifyListeners();
+
+      // 2) Hydrate prices + logos asynchronously (keep UI responsive).
       if (symbolsToQuote.isNotEmpty) {
         final quotes = await _sigmaService.fmpService
-            .getQuotes(symbolsToQuote.take(20).toList());
-        for (var quote in quotes) {
+            .getQuotes(symbolsToQuote.take(20).toList())
+            .catchError((_) => <dynamic>[]);
+
+        if (requestId != _searchRequestId) return;
+        for (final quote in quotes) {
           final s = quote['symbol']?.toString().toUpperCase();
           if (s != null && mergedResults.containsKey(s)) {
             mergedResults[s]!['price'] = quote['price'] ?? 0.0;
@@ -628,13 +634,40 @@ class SigmaProvider extends ChangeNotifier {
         }
       }
 
+      if (symbolsToLogo.isNotEmpty) {
+        final logoResults = await Future.wait(symbolsToLogo.take(10).map((s) async {
+          final logoData = await _sigmaService.fmpService.getLogo(s);
+          return {'symbol': s, 'logo': logoData};
+        }));
+
+        if (requestId != _searchRequestId) return;
+        for (final row in logoResults) {
+          final s = row['symbol']?.toString().toUpperCase();
+          final logo = row['logo'] as Map<String, dynamic>?;
+          if (s != null && mergedResults.containsKey(s) && logo != null) {
+            final urls = (logo['logoUrls'] as Map?)?.cast<String, dynamic>();
+            mergedResults[s]!['logo'] = logo['logoUrl'] ??
+                urls?['primary'] ??
+                urls?['parqet'] ??
+                urls?['fmp'] ??
+                mergedResults[s]!['logo'];
+          }
+        }
+      }
+
+      if (requestId != _searchRequestId) return;
       searchResults = mergedResults.values.toList();
+      notifyListeners();
     } catch (e) {
       dev.log('❌ Global Search Convergence Failure: $e', name: 'SigmaProvider');
-      searchResults = [];
+      if (requestId == _searchRequestId) {
+        searchResults = [];
+      }
     } finally {
-      isSearching = false;
-      notifyListeners();
+      if (requestId == _searchRequestId) {
+        isSearching = false;
+        notifyListeners();
+      }
     }
   }
 

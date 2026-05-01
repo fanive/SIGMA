@@ -60,7 +60,7 @@ class AIProviderFactory {
         final ollamaKey = dotenv.env['OLLAMA_API_KEY'] ?? '';
         final ollamaUrl =
             dotenv.env['OLLAMA_BASE_URL'] ?? AIConfig.ollamaBaseUrl;
-        final ollamaModel = dotenv.env['OLLAMA_MODEL'] ?? 'minimax-m2.7:cloud';
+        final ollamaModel = dotenv.env['OLLAMA_MODEL'] ?? 'minimax-m2.7-cloud';
         
         final ollamaFallback = OllamaProvider(
           apiKey: ollamaKey,
@@ -80,7 +80,8 @@ class AIProviderFactory {
       default:
         return NvidiaProvider(
           apiKey: apiKey,
-          modelName: AIConfig.nvidiaModels['nemotron-70b']!,
+          modelName: AIConfig.getModelName(
+              AIConfig.providerNvidia, AIConfig.defaultNvidiaModel),
           fallbackModels: AIConfig.nvidiaFallbackChain,
           baseUrl: AIConfig.nvidiaBaseUrl,
         );

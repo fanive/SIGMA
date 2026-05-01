@@ -104,7 +104,7 @@ class _OmnibarState extends State<Omnibar> with SingleTickerProviderStateMixin {
       _hideOverlay();
       return;
     }
-    _debounce = Timer(const Duration(milliseconds: 300), () {
+    _debounce = Timer(const Duration(milliseconds: 160), () {
       if (!mounted) return;
       context.read<SigmaProvider>().updateSearchResults(query.trim());
       _showOverlay();
@@ -112,13 +112,32 @@ class _OmnibarState extends State<Omnibar> with SingleTickerProviderStateMixin {
   }
 
   void _onSubmit(String value) {
-    final query = value.trim().toUpperCase();
+    final raw = value.trim();
+    final query = raw.toUpperCase();
     if (query.isEmpty) return;
+
+    // Autocomplete: if an exact symbol doesn't exist, open the best match.
+    final sp = context.read<SigmaProvider>();
+    String selected = query;
+    if (sp.searchResults.isNotEmpty) {
+      final exact = sp.searchResults.firstWhere(
+        (r) => (r['symbol'] ?? '').toString().toUpperCase() == query,
+        orElse: () => <String, dynamic>{},
+      );
+      if ((exact['symbol'] ?? '').toString().isEmpty) {
+        final prefix = sp.searchResults.firstWhere(
+          (r) => (r['symbol'] ?? '').toString().toUpperCase().startsWith(query),
+          orElse: () => sp.searchResults.first,
+        );
+        selected = (prefix['symbol'] ?? query).toString().toUpperCase();
+      }
+    }
+
     _controller.clear();
     _focusNode.unfocus();
     _hideOverlay();
     setState(() {});
-    _openAnalysis(query);
+    _openAnalysis(selected);
   }
 
   void _onResultTapped(dynamic result) {
@@ -264,6 +283,44 @@ class _OmnibarState extends State<Omnibar> with SingleTickerProviderStateMixin {
   }
 }
 
+class _TickerLogo extends StatelessWidget {
+  final String symbol;
+  final String? logoUrl;
+
+  const _TickerLogo({required this.symbol, this.logoUrl});
+
+  @override
+  Widget build(BuildContext context) {
+    final fallback = Container(
+      width: 26,
+      height: 26,
+      alignment: Alignment.center,
+      decoration: BoxDecoration(
+        color: AppTheme.primary.withValues(alpha: 0.12),
+        borderRadius: BorderRadius.circular(8),
+      ),
+      child: Text(
+        symbol.isNotEmpty ? symbol[0] : '?',
+        style: AppTheme.compactTitle(context, size: 10, color: AppTheme.primary),
+      ),
+    );
+
+    final url = logoUrl?.trim() ?? '';
+    if (url.isEmpty) return fallback;
+
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(8),
+      child: Image.network(
+        url,
+        width: 26,
+        height: 26,
+        fit: BoxFit.cover,
+        errorBuilder: (_, __, ___) => fallback,
+      ),
+    );
+  }
+}
+
 // ─── Floating results overlay ─────────────────────────────────────────────────
 
 class _ResultsOverlay extends StatelessWidget {
@@ -365,7 +422,7 @@ class _OmniLoadingState extends StatelessWidget {
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
-          SizedBox(
+          const SizedBox(
             width: 14,
             height: 14,
             child: CircularProgressIndicator(
@@ -412,6 +469,7 @@ class _OmniResultRow extends StatelessWidget {
         (result['description'] ?? result['name'] ?? '').toString();
     final exchange =
         (result['stockExchange'] ?? result['exchange'] ?? '').toString();
+    final logoUrl = (result['logo'] ?? result['logoUrl']).toString();
     final double price = (result['price'] ?? 0.0).toDouble();
     final double change = (result['change'] ?? 0.0).toDouble();
     final bool isUp = change >= 0;
@@ -422,7 +480,9 @@ class _OmniResultRow extends StatelessWidget {
         padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
         child: Row(
           children: [
-            // Ticker chip
+            // Logo + ticker chip
+            _TickerLogo(symbol: symbol, logoUrl: logoUrl),
+            const SizedBox(width: 8),
             Container(
               width: 44,
               height: 30,
