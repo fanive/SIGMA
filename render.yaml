@@ -3,7 +3,7 @@ services:
     name: sigma-yfinance-api
     runtime: docker
     rootDir: backend
-    plan: starter
+    plan: free
     autoDeploy: true
     healthCheckPath: /
     envVars:
