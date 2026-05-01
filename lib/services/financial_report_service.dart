@@ -108,7 +108,8 @@ $langDirective
     final ticker = analysis.ticker;
     dev.log('Generating financial report for $ticker...', name: 'FinancialReportService');
 
-    final contextPrompt = _buildContextPrompt(analysis, language);
+    final endpointData = await _fetchEndpointData(ticker);
+    final contextPrompt = _buildContextPrompt(analysis, language, endpointData);
 
     try {
       // Direct call with timeout and internal fallback
@@ -125,6 +126,7 @@ $langDirective
           );
 
       final report = _parseReport(rawContent, analysis);
+      _enrichReportWithEndpointData(report, analysis, endpointData);
       await _syncPeerPrices(report);
       return report;
     } catch (e) {
@@ -146,6 +148,7 @@ $langDirective
         ).timeout(const Duration(seconds: 90));
         
         final fallbackReport = _parseReport(fallbackContent, analysis);
+        _enrichReportWithEndpointData(fallbackReport, analysis, endpointData);
         await _syncPeerPrices(fallbackReport);
         return fallbackReport;
       } catch (f) {
@@ -161,7 +164,15 @@ $langDirective
     String language = 'fr',
   }) {
     final ticker = analysis.ticker;
-    final contextPrompt = _buildContextPrompt(analysis, language);
+    final contextPrompt = _buildContextPrompt(analysis, language, const {
+      'snapshot': <String, dynamic>{},
+      'analysis': <String, dynamic>{},
+      'events': <String, dynamic>{},
+      'ownership': <String, dynamic>{},
+      'news': <Map<String, dynamic>>[],
+      'financials': <String, dynamic>{},
+      'logo': <String, dynamic>{},
+    });
     
     final langDirective = language == 'fr'
         ? 'LANGUE : Rédige l\'INTÉGRALITÉ du rapport EN FRANÇAIS. '
@@ -187,7 +198,11 @@ $langDirective
   // =========================================================================
   // Construction du prompt contextualisé avec les données financières réelles
   // =========================================================================
-  String _buildContextPrompt(AnalysisData analysis, String language) {
+  String _buildContextPrompt(
+    AnalysisData analysis,
+    String language,
+    Map<String, dynamic> endpointData,
+  ) {
     final ticker = analysis.ticker;
     final company = analysis.companyName ?? ticker;
     final price = analysis.price;
@@ -236,6 +251,8 @@ $langDirective
         })
         .join('\n');
 
+      final endpointAddon = _buildEndpointPromptAddon(endpointData);
+
     final langInstruction = language == 'fr'
         ? 'Write the ENTIRE JSON in French.'
         : 'Write the ENTIRE JSON in English.';
@@ -253,6 +270,9 @@ ${targetPrice != null ? 'SIGMA Price Target: \$$targetPrice' : ''}
 
 ===== HISTORICAL PERFORMANCE (ACTUALS) =====
 $historicalData
+
+===== LIVE ENDPOINT PAYLOADS (GROUND TRUTH) =====
+$endpointAddon
 
 ===== KEY FINANCIALS =====
 $financials
@@ -324,6 +344,266 @@ IMPORTANT: "price_target" MUST be your OWN calculated fair-value estimate based 
 ${language == 'fr' ? '\nLe JSON doit être intégralement en FRANÇAIS.' : ''}''';
   }
 
+  Future<Map<String, dynamic>> _fetchEndpointData(String ticker) async {
+    try {
+      final results = await Future.wait([
+        SigmaApiService.getSnapshot(ticker).catchError((_) => <String, dynamic>{}),
+        SigmaApiService.getAnalysis(ticker).catchError((_) => <String, dynamic>{}),
+        SigmaApiService.getEvents(ticker).catchError((_) => <String, dynamic>{}),
+        SigmaApiService.getOwnership(ticker).catchError((_) => <String, dynamic>{}),
+        SigmaApiService.getNews(ticker).catchError((_) => <Map<String, dynamic>>[]),
+        SigmaApiService.getFinancials(ticker).catchError((_) => <String, dynamic>{}),
+        SigmaApiService.getLogo(ticker).catchError((_) => <String, dynamic>{}),
+      ]);
+
+      return {
+        'snapshot': results[0] as Map<String, dynamic>,
+        'analysis': results[1] as Map<String, dynamic>,
+        'events': results[2] as Map<String, dynamic>,
+        'ownership': results[3] as Map<String, dynamic>,
+        'news': results[4] as List<Map<String, dynamic>>,
+        'financials': results[5] as Map<String, dynamic>,
+        'logo': results[6] as Map<String, dynamic>,
+      };
+    } catch (e) {
+      dev.log('Endpoint context fetch failed: $e', name: 'FinancialReportService');
+      return {
+        'snapshot': <String, dynamic>{},
+        'analysis': <String, dynamic>{},
+        'events': <String, dynamic>{},
+        'ownership': <String, dynamic>{},
+        'news': <Map<String, dynamic>>[],
+        'financials': <String, dynamic>{},
+        'logo': <String, dynamic>{},
+      };
+    }
+  }
+
+  String _buildEndpointPromptAddon(Map<String, dynamic> endpointData) {
+    final snapshot = endpointData['snapshot'] as Map<String, dynamic>? ?? {};
+    final analysis = endpointData['analysis'] as Map<String, dynamic>? ?? {};
+    final events = endpointData['events'] as Map<String, dynamic>? ?? {};
+    final ownership = endpointData['ownership'] as Map<String, dynamic>? ?? {};
+    final news = endpointData['news'] as List? ?? [];
+    final financials = endpointData['financials'] as Map<String, dynamic>? ?? {};
+
+    final quote = (snapshot['quote'] as Map?)?.cast<String, dynamic>() ?? {};
+    final target = (analysis['analystPriceTargets'] as Map?)?.cast<String, dynamic>() ?? {};
+    final recs = (analysis['recommendations'] as List?) ?? [];
+    final latestRec = recs.isNotEmpty && recs.first is Map
+        ? Map<String, dynamic>.from(recs.first)
+        : <String, dynamic>{};
+    final calendar = (events['calendar'] as Map?)?.cast<String, dynamic>() ?? {};
+    final inst = (ownership['institutionalHolders'] as List?) ?? [];
+    final major = (ownership['majorHolders'] as List?) ?? [];
+    final annualIncome = (financials['annualIncomeStatement'] as List?) ?? [];
+
+    final newsLines = news.take(5).map((n) {
+      final title = (n['title'] ?? '').toString();
+      final date = (n['publishedAt'] ?? n['publishedDate'] ?? '').toString();
+      return '  - [$date] $title';
+    }).join('\n');
+
+    final histLines = annualIncome.take(4).whereType<Map>().map((row) {
+      final m = Map<String, dynamic>.from(row);
+      final period = (m['index'] ?? '').toString();
+      final revenue = m['TotalRevenue'] ?? m['revenue'];
+      final net = m['NetIncome'] ?? m['NetIncomeLoss'] ?? m['netIncome'];
+      return '  - $period | Revenue: $revenue | NetIncome: $net';
+    }).join('\n');
+
+    return '''
+SNAPSHOT_QUOTE:
+  price: ${quote['price'] ?? quote['lastPrice']}
+  marketCap: ${quote['marketCap']}
+  pe: ${quote['pe']}
+  eps: ${quote['eps']}
+
+ANALYST_TARGETS:
+  current: ${target['current']}
+  mean: ${target['mean']}
+  high: ${target['high']}
+  low: ${target['low']}
+
+ANALYST_CONSENSUS_LATEST:
+  strongBuy: ${latestRec['strongBuy']}
+  buy: ${latestRec['buy']}
+  hold: ${latestRec['hold']}
+  sell: ${latestRec['sell']}
+  strongSell: ${latestRec['strongSell']}
+
+EVENTS_CALENDAR:
+  earningsDate: ${calendar['Earnings Date']}
+  earningsAvg: ${calendar['Earnings Average']}
+  revenueAvg: ${calendar['Revenue Average']}
+  dividendDate: ${calendar['Dividend Date']}
+
+OWNERSHIP:
+  institutionalCount: ${inst.length}
+  majorHoldersRows: ${major.length}
+
+LATEST_NEWS:
+$newsLines
+
+ANNUAL_FINANCIALS:
+$histLines
+''';
+  }
+
+  void _enrichReportWithEndpointData(
+    FinancialReport report,
+    AnalysisData analysis,
+    Map<String, dynamic> endpointData,
+  ) {
+    final j = report.jsonContent;
+
+    final snapshot = endpointData['snapshot'] as Map<String, dynamic>? ?? {};
+    final quote = (snapshot['quote'] as Map?)?.cast<String, dynamic>() ??
+        (snapshot['price'] is Map
+            ? (snapshot['price'] as Map).cast<String, dynamic>()
+            : <String, dynamic>{});
+
+    final analysisData = endpointData['analysis'] as Map<String, dynamic>? ?? {};
+    final target =
+        (analysisData['analystPriceTargets'] as Map?)?.cast<String, dynamic>() ?? {};
+    final recommendations = (analysisData['recommendations'] as List?) ?? [];
+    final latestRec = recommendations.isNotEmpty && recommendations.first is Map
+        ? Map<String, dynamic>.from(recommendations.first)
+        : <String, dynamic>{};
+
+    final events = endpointData['events'] as Map<String, dynamic>? ?? {};
+    final calendar = (events['calendar'] as Map?)?.cast<String, dynamic>() ?? {};
+
+    final news = endpointData['news'] as List<Map<String, dynamic>>? ?? [];
+    final financials = endpointData['financials'] as Map<String, dynamic>? ?? {};
+    final logo = endpointData['logo'] as Map<String, dynamic>? ?? {};
+
+    // Ensure KPI strip is always populated from real endpoint values.
+    final generatedKpis = [
+      {
+        'label': 'PRICE',
+        'value': (quote['price'] ?? analysis.price).toString(),
+        'trend': 'stable',
+      },
+      {
+        'label': 'MARKET CAP',
+        'value': (quote['marketCap'] ?? '').toString(),
+        'trend': 'stable',
+      },
+      {
+        'label': 'P/E',
+        'value': (quote['pe'] ?? '').toString(),
+        'trend': 'stable',
+      },
+      {
+        'label': 'EPS',
+        'value': (quote['eps'] ?? '').toString(),
+        'trend': 'stable',
+      },
+    ].where((k) => (k['value'] ?? '').toString().isNotEmpty).toList();
+
+    if ((j['kpis'] as List?) == null || (j['kpis'] as List).isEmpty) {
+      j['kpis'] = generatedKpis;
+    }
+
+    // Analyst consensus from /analysis endpoint.
+    if (j['analyst_consensus'] == null ||
+        (j['analyst_consensus'] is Map &&
+            (j['analyst_consensus'] as Map).isEmpty)) {
+      j['analyst_consensus'] = {
+        'strong_buy': latestRec['strongBuy'] ?? 0,
+        'buy': latestRec['buy'] ?? 0,
+        'hold': latestRec['hold'] ?? 0,
+        'sell': latestRec['sell'] ?? 0,
+        'strong_sell': latestRec['strongSell'] ?? 0,
+      };
+    }
+
+    // Historical financials from /financials endpoint.
+    if (j['historical_financials'] == null ||
+        (j['historical_financials'] is Map &&
+            (j['historical_financials'] as Map).isEmpty)) {
+      final annualIncome = (financials['annualIncomeStatement'] as List?) ?? [];
+      final revenue = <Map<String, dynamic>>[];
+      final earnings = <Map<String, dynamic>>[];
+      for (final row in annualIncome.take(4)) {
+        if (row is! Map) continue;
+        final m = Map<String, dynamic>.from(row);
+        final period = (m['index'] ?? '').toString();
+        final year = period.isNotEmpty ? period.split('-').first : 'N/A';
+        final rev = (m['TotalRevenue'] ?? m['revenue'] ?? 0) as num;
+        final ni = (m['NetIncome'] ?? m['NetIncomeLoss'] ?? m['netIncome'] ?? 0) as num;
+        revenue.add({'period': year, 'value': rev / 1e9});
+        earnings.add({'period': year, 'value': ni / 1e9});
+      }
+      if (revenue.isNotEmpty || earnings.isNotEmpty) {
+        j['historical_financials'] = {
+          'revenue': revenue,
+          'earnings': earnings,
+        };
+      }
+    }
+
+    // Catalysts / risks grounded in endpoint events + news.
+    if ((j['catalysts'] as List?) == null || (j['catalysts'] as List).isEmpty) {
+      final catalysts = <String>[];
+      final earningsDate = calendar['Earnings Date'];
+      if (earningsDate != null) {
+        catalysts.add('Upcoming earnings date: $earningsDate');
+      }
+      if (calendar['Dividend Date'] != null) {
+        catalysts.add('Dividend date: ${calendar['Dividend Date']}');
+      }
+      for (final n in news.take(2)) {
+        final title = (n['title'] ?? '').toString();
+        if (title.isNotEmpty) catalysts.add(title);
+      }
+      if (catalysts.isNotEmpty) j['catalysts'] = catalysts;
+    }
+
+    if ((j['risk_factors'] as List?) == null || (j['risk_factors'] as List).isEmpty) {
+      final risks = <String>[];
+      final low = (target['low'] as num?)?.toDouble();
+      final high = (target['high'] as num?)?.toDouble();
+      if (low != null && high != null && high > 0) {
+        final dispersion = ((high - low) / high) * 100;
+        risks.add('Analyst target dispersion is ${dispersion.toStringAsFixed(1)}%, indicating valuation uncertainty.');
+      }
+      if ((latestRec['sell'] ?? 0) > 0 || (latestRec['strongSell'] ?? 0) > 0) {
+        risks.add('Sell-side recommendations include active Sell/Strong Sell ratings.');
+      }
+      if (risks.isNotEmpty) j['risk_factors'] = risks;
+    }
+
+    // Ensure price target reflects endpoint target if model omitted it.
+    if ((j['price_target'] == null || j['price_target'].toString().isEmpty) &&
+        target['mean'] != null) {
+      j['price_target'] = target['mean'];
+    }
+
+    if ((j['current_price'] == null || j['current_price'].toString().isEmpty) &&
+        quote['price'] != null) {
+      j['current_price'] = quote['price'];
+    }
+
+    // Ensure peers exist if analysis screen had them.
+    if ((j['sector_peers'] as List?) == null || (j['sector_peers'] as List).isEmpty) {
+      final peers = analysis.sectorPeers.take(6).map((p) => {
+            'ticker': p.ticker,
+            'name': p.name,
+            'price': p.price,
+            'verdict': p.verdict,
+          }).toList();
+      if (peers.isNotEmpty) j['sector_peers'] = peers;
+    }
+
+    // Logo from /logo endpoint if model response omitted it.
+    if ((j['ticker_image_url'] == null || j['ticker_image_url'].toString().isEmpty)) {
+      final logoUrls = (logo['logoUrls'] as Map?)?.cast<String, dynamic>();
+      j['ticker_image_url'] = logo['logoUrl'] ?? logoUrls?['primary'] ?? logoUrls?['fmp'];
+    }
+  }
+
 
   // =========================================================================
   // Parse la réponse en FinancialReport structuré
@@ -353,7 +633,7 @@ ${language == 'fr' ? '\nLe JSON doit être intégralement en FRANÇAIS.' : ''}''
       generatedAt: DateTime.now(),
       rating: jsonContent['rating']?.toString().toUpperCase() ?? analysis.verdict,
       priceTarget: double.tryParse(jsonContent['price_target']?.toString() ?? '') ?? analysis.targetPriceValue,
-      currentPrice: analysis.price,
+      currentPrice: jsonContent['current_price']?.toString() ?? analysis.price,
       jsonContent: jsonContent,
       tickerImageUrl: jsonContent['ticker_image_url']?.toString(),
       providerName: _provider.providerName,
