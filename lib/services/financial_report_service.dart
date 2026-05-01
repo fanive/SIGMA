@@ -8,7 +8,7 @@ import '../config/ai_config.dart';
 import 'ai_provider_factory.dart';
 import 'ai_provider_interface.dart';
 import 'ai/fallback_provider.dart';
-import 'fmp_service.dart';
+import 'sigma_api_service.dart';
 
 /// ========================================================================
 /// SIGMA Financial Report Service
@@ -377,10 +377,9 @@ ${language == 'fr' ? '\nLe JSON doit être intégralement en FRANÇAIS.' : ''}''
 
       if (tickers.isEmpty) return;
 
-      final FmpService fmp = FmpService();
-      final quotes = await fmp.getQuotes(tickers);
+      final quotes = await SigmaApiService.getMultiQuote(tickers);
       final Map<String, String> priceMap = {};
-      
+
       for (var q in quotes) {
         final sym = q['symbol']?.toString().toUpperCase();
         final price = q['price'];

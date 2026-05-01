@@ -2684,9 +2684,7 @@ STRUCTURE JSON (STRICTE, PAS DE TEXTE SUPERFLU) :
       // 1. PRIMARY: OpenInsider (free, complete SEC Form 4 data with cluster detection)
       final oiTrades = await _openInsider.getLatestTrades(
         days: 7,
-        tradeType: 'all',
-        minValue: 50000,
-        count: 100,
+        limit: 100,
       );
       if (oiTrades.isNotEmpty) {
         dev.log('✅ OpenInsider: SUCCESS - Retrieved ${oiTrades.length} trades',
