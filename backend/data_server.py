@@ -416,19 +416,19 @@ async def news(symbol: str):
         raw = t.news or []
         items = []
         for item in raw[:20]:
-            # yfinance >=0.2.50 wraps articles under item["content"]
-            content = item.get("content") or item
+            c = item.get("content") or item
+            thumbnail = c.get("thumbnail") or {}
+            resolutions = thumbnail.get("resolutions") or []
+            thumb_url = thumbnail.get("originalUrl") or (resolutions[0].get("url") if resolutions else None)
             items.append({
-                "title": content.get("title"),
-                "publisher": (content.get("provider") or {}).get("displayName")
-                             or content.get("publisher"),
-                "link": (content.get("canonicalUrl") or {}).get("url")
-                        or content.get("link"),
-                "publishedAt": _safe(
-                    content.get("pubDate")
-                    or content.get("providerPublishTime")
-                ),
-                "type": content.get("contentType") or content.get("type"),
+                "title": c.get("title"),
+                "summary": c.get("summary") or c.get("description"),
+                "publisher": (c.get("provider") or {}).get("displayName"),
+                "link": (c.get("canonicalUrl") or {}).get("url")
+                        or (c.get("clickThroughUrl") or {}).get("url"),
+                "publishedAt": c.get("pubDate") or _safe(c.get("providerPublishTime")),
+                "type": c.get("contentType") or c.get("type"),
+                "thumbnail": thumb_url,
             })
         return {"symbol": sym, "articles": items, "source": "yfinance"}
 
