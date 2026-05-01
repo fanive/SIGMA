@@ -311,18 +311,41 @@ async def logo(symbol: str):
     """Return logo URLs for a symbol based on the company website."""
     sym = symbol.upper().strip()
 
+    def _symbol_fallback_urls() -> dict[str, str]:
+        # Last-resort fallback when upstream website/domain is unavailable.
+        return {
+            "primary": f"https://ui-avatars.com/api/?name={sym}&size=128&background=0f172a&color=ffffff&format=png",
+            "fallback": f"https://robohash.org/{sym}.png?size=128x128",
+            "favicon": f"https://www.google.com/s2/favicons?domain={sym}.com&sz=128",
+            "domain": "",
+        }
+
     def _fetch():
+        # Reuse website from last successful quote cache if present.
+        stale_quote = _stale.get(f"{id(_cache_price)}:{sym}")
+        if isinstance(stale_quote, dict):
+            stale_urls = _logo_urls(stale_quote.get("website"))
+            if stale_urls:
+                return {
+                    "symbol": sym,
+                    "website": stale_quote.get("website"),
+                    "logoUrl": stale_urls.get("primary"),
+                    "logoUrls": stale_urls,
+                    "source": "derived-from-stale-quote",
+                }
+
         t = yf.Ticker(sym)
         info = t.info or {}
         website = info.get("website")
         urls = _logo_urls(website)
         if not urls:
+            fallback = _symbol_fallback_urls()
             return {
                 "symbol": sym,
                 "website": website,
-                "logoUrl": None,
-                "logoUrls": None,
-                "source": "yfinance",
+                "logoUrl": fallback.get("primary"),
+                "logoUrls": fallback,
+                "source": "symbol-fallback",
             }
         return {
             "symbol": sym,
@@ -334,8 +357,17 @@ async def logo(symbol: str):
 
     try:
         return _cached(_cache_price, f"logo:{sym}", _fetch)
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"logo failed for {sym}: {e}")
+    except Exception:
+        fallback = _symbol_fallback_urls()
+        return {
+            "symbol": sym,
+            "website": None,
+            "logoUrl": fallback.get("primary"),
+            "logoUrls": fallback,
+            "source": "symbol-fallback",
+            "_stale": True,
+            "_stale_reason": "upstream_unavailable",
+        }
 
 
 # ---------------------------------------------------------------------------
