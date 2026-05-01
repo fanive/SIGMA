@@ -577,6 +577,38 @@ class SigmaProvider extends ChangeNotifier {
 
       if (requestId != _searchRequestId) return;
 
+      bool isEligibleTicker(String symbol) {
+        // Keep primary listed instruments and common TSX suffixes.
+        final s = symbol.toUpperCase();
+        return RegExp(r'^[A-Z]{1,6}(\.(TO|V))?$').hasMatch(s);
+      }
+
+      bool isEligibleType(Map<String, dynamic> item) {
+        final t = (item['type'] ?? item['typeDisp'] ?? item['quoteType'] ?? '')
+            .toString()
+            .toUpperCase();
+        if (t.isEmpty) return true;
+        return t.contains('EQUITY') ||
+            t.contains('ETF') ||
+            t.contains('ADR') ||
+            t.contains('REIT') ||
+            t.contains('FUND');
+      }
+
+      int venuePenalty(Map<String, dynamic> item) {
+        final venue = (item['stockExchange'] ??
+                item['exchangeShortName'] ??
+                item['exchange'] ??
+                '')
+            .toString()
+            .toUpperCase();
+        if (venue.contains('NASDAQ') || venue.contains('NYSE')) return 0;
+        if (venue.contains('TSX') || venue.contains('TORONTO')) return 1;
+        if (venue.contains('AMEX') || venue.contains('ARCA')) return 2;
+        if (venue.isEmpty) return 3;
+        return 4;
+      }
+
       int rankItem(Map<String, dynamic> item) {
         final symbol = (item['symbol'] ?? '').toString().toUpperCase();
         final name = (item['name'] ?? item['description'] ?? '')
@@ -584,15 +616,23 @@ class SigmaProvider extends ChangeNotifier {
             .toLowerCase();
         final q = normalized.toUpperCase();
         final qLower = normalized.toLowerCase();
-        if (symbol == q) return 0;
-        if (symbol.startsWith(q)) return 1;
-        if (name.startsWith(qLower)) return 2;
-        if (symbol.contains(q)) return 3;
-        if (name.contains(qLower)) return 4;
-        return 5;
+        if (symbol == q) return 0 + venuePenalty(item);
+        if (symbol.startsWith(q)) return 5 + venuePenalty(item);
+        if (name.startsWith(qLower)) return 10 + venuePenalty(item);
+        if (symbol.contains(q)) return 15 + venuePenalty(item);
+        if (name.contains(qLower)) return 20 + venuePenalty(item);
+        return 30 + venuePenalty(item);
       }
 
-      final sorted = [...fmpSearchResults]
+      final institutionals = fmpSearchResults.where((item) {
+        final symbol = (item['symbol'] ?? '').toString().toUpperCase();
+        if (symbol.isEmpty) return false;
+        return isEligibleTicker(symbol) && isEligibleType(item);
+      }).toList();
+
+      final baseList = institutionals.isNotEmpty ? institutionals : fmpSearchResults;
+
+      final sorted = [...baseList]
         ..sort((a, b) => rankItem(a).compareTo(rankItem(b)));
 
       final Map<String, Map<String, dynamic>> mergedResults = {};
@@ -600,7 +640,7 @@ class SigmaProvider extends ChangeNotifier {
       final List<String> symbolsToLogo = [];
 
       // 1) Build results immediately (autocomplete UX first).
-      for (final item in sorted.take(20)) {
+      for (final item in sorted.take(16)) {
         final symbol = (item['symbol'] ?? '').toString().toUpperCase();
         if (symbol.isEmpty) continue;
         if (!mergedResults.containsKey(symbol)) {

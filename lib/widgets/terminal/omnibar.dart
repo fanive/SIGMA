@@ -469,6 +469,8 @@ class _OmniResultRow extends StatelessWidget {
         (result['description'] ?? result['name'] ?? '').toString();
     final exchange =
         (result['stockExchange'] ?? result['exchange'] ?? '').toString();
+    final type =
+      (result['type'] ?? result['quoteType'] ?? 'EQUITY').toString().toUpperCase();
     final logoUrl = (result['logo'] ?? result['logoUrl']).toString();
     final double price = (result['price'] ?? 0.0).toDouble();
     final double change = (result['change'] ?? 0.0).toDouble();
@@ -510,10 +512,33 @@ class _OmniResultRow extends StatelessWidget {
                       style: AppTheme.compactBody(context,
                           size: 13,
                           color: AppTheme.getPrimaryText(context))),
-                  if (exchange.isNotEmpty)
-                    Text(exchange,
-                        style: AppTheme.overline(context,
-                            color: AppTheme.getSecondaryText(context))),
+                  Row(
+                    children: [
+                      if (exchange.isNotEmpty)
+                        Flexible(
+                          child: Text(exchange.toUpperCase(),
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: AppTheme.overline(context,
+                                  color: AppTheme.getSecondaryText(context))),
+                        ),
+                      const SizedBox(width: 6),
+                      Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                        decoration: BoxDecoration(
+                          color: AppTheme.primary.withValues(alpha: 0.08),
+                          borderRadius: BorderRadius.circular(6),
+                        ),
+                        child: Text(
+                          type,
+                          style: AppTheme.overline(
+                            context,
+                            color: AppTheme.primary,
+                          ).copyWith(fontWeight: FontWeight.w700),
+                        ),
+                      ),
+                    ],
+                  ),
                 ],
               ),
             ),
