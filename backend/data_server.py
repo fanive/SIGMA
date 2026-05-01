@@ -237,6 +237,26 @@ async def quote(symbol: str):
         website = info.get("website")
         logo = _logo_urls(website, symbol=sym)
 
+        # --- CEO from officers list ---
+        officers = info.get("companyOfficers") or []
+        ceo = next(
+            (o.get("name") for o in officers
+             if "ceo" in (o.get("title") or "").lower()
+             or "chief executive" in (o.get("title") or "").lower()),
+            None,
+        )
+
+        # --- 52-week range string (FMP style "low-high") ---
+        wk52_low = _num(info.get("fiftyTwoWeekLow"))
+        wk52_high = _num(info.get("fiftyTwoWeekHigh"))
+        wk52_range = f"{wk52_low}-{wk52_high}" if wk52_low and wk52_high else None
+
+        # --- quoteType-derived booleans ---
+        quote_type = info.get("quoteType") or ""
+        is_etf = quote_type.upper() == "ETF"
+        is_fund = quote_type.upper() in ("MUTUALFUND", "FUND")
+        is_adr = bool(info.get("isAdr")) or "adr" in (info.get("longName") or "").lower()
+
         price = _num(
             info.get("currentPrice")
             or info.get("regularMarketPrice")
@@ -321,12 +341,28 @@ async def quote(symbol: str):
             "sector": info.get("sector"),
             "industry": info.get("industry"),
             "country": info.get("country"),
+            # --- Profile / company identity (FMP-aligned) ---
+            "companyName": info.get("shortName") or info.get("longName") or sym,
+            "ceo": ceo,
+            "phone": info.get("phone"),
+            "address": info.get("address1"),
+            "city": info.get("city"),
+            "state": info.get("state"),
+            "zip": info.get("zip"),
+            "exchangeFullName": info.get("fullExchangeName") or info.get("exchange") or "",
+            "ipoDate": info.get("ipoDate"),
+            "range": wk52_range,
+            "image": logo.get("primary"),
+            "isEtf": is_etf,
+            "isFund": is_fund,
+            "isAdr": is_adr,
+            "isActivelyTrading": info.get("tradeable", True),
             "website": website,
-            "logoUrl": (logo or {}).get("primary"),
+            "logoUrl": logo.get("primary"),
             "logoUrls": logo,
             "fullTimeEmployees": _safe(info.get("fullTimeEmployees")),
             "description": info.get("longBusinessSummary"),
-            "quoteType": info.get("quoteType"),
+            "quoteType": quote_type,
             "source": "yfinance",
         }
 
