@@ -52,6 +52,8 @@ def _is_rate_limit(exc: Exception) -> bool:
 
 def _cached(cache: TTLCache, key: str, fn, retries: int = 2, backoff: float = 1.5):
     """Thread-safe cache get-or-set with retry and stale fallback on rate limit."""
+    # Namespace stale keys by cache instance to avoid cross-endpoint data collisions.
+    stale_key = f"{id(cache)}:{key}"
     with _LOCK:
         if key in cache:
             return cache[key]
@@ -61,14 +63,14 @@ def _cached(cache: TTLCache, key: str, fn, retries: int = 2, backoff: float = 1.
             result = fn()
             with _LOCK:
                 cache[key] = result
-            _stale[key] = result  # persist last good value
+            _stale[stale_key] = result  # persist last good value per endpoint/cache
             return result
         except Exception as exc:
             last_exc = exc
             if _is_rate_limit(exc):
-                if key in _stale:
+                if stale_key in _stale:
                     # Return stale data rather than crashing
-                    return {**_stale[key], "_stale": True, "_stale_reason": "rate_limited"}
+                    return {**_stale[stale_key], "_stale": True, "_stale_reason": "rate_limited"}
                 if attempt < retries - 1:
                     time.sleep(backoff * (attempt + 1))
             else:
