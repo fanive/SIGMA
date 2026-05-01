@@ -166,6 +166,13 @@ class SigmaApiService {
       _setCache(key, list, const Duration(minutes: 5));
       return list;
     }
+    if (data is Map && data['articles'] is List) {
+      final list = (data['articles'] as List)
+          .map((e) => Map<String, dynamic>.from(e))
+          .toList();
+      _setCache(key, list, const Duration(minutes: 5));
+      return list;
+    }
     return [];
   }
 
