@@ -152,17 +152,47 @@ def _domain_from_website(website: str | None) -> str | None:
     return host or None
 
 
-def _logo_urls(website: str | None) -> dict[str, str] | None:
+def _logo_urls(website: str | None, symbol: str | None = None) -> dict[str, str]:
+    """Build a prioritised set of logo URLs for a ticker.
+
+    Priority order (all free, no API key):
+      1. Parqet   — ticker-based SVG (best coverage, no key)
+      2. FMP      — ticker-based PNG
+      3. Clearbit — derived from company website domain
+      4. ui-avatars — letter-based placeholder (always works)
+    """
     domain = _domain_from_website(website)
-    if not domain:
-        return None
-    # clearbit generally provides full-color company logos; others are no-key fallbacks.
-    return {
-        "primary": f"https://logo.clearbit.com/{domain}",
-        "fallback": f"https://icons.duckduckgo.com/ip3/{domain}.ico",
-        "favicon": f"https://www.google.com/s2/favicons?domain={domain}&sz=128",
-        "domain": domain,
-    }
+    sym = (symbol or "").upper().strip()
+
+    result: dict[str, str] = {}
+
+    # 1. Parqet: works for equities and ETFs, not crypto pairs like BTC-USD
+    if sym:
+        result["parqet"] = f"https://assets.parqet.com/logos/symbol/{sym}?format=svg"
+
+    # 2. FMP public logo (no key for PNG)
+    if sym and "-" not in sym:   # crypto pairs (BTC-USD) not supported
+        result["fmp"] = f"https://financialmodelingprep.com/image-stock/{sym}.png"
+
+    # 3. Clearbit via company website domain
+    if domain:
+        result["clearbit"] = f"https://logo.clearbit.com/{domain}"
+        result["favicon"] = f"https://www.google.com/s2/favicons?domain={domain}&sz=128"
+
+    # 4. Universal fallback — always generates a coloured letter logo
+    result["placeholder"] = (
+        f"https://ui-avatars.com/api/?name={sym or 'X'}"
+        f"&size=128&background=0f172a&color=38bdf8&bold=true&format=png"
+    )
+    result["domain"] = domain or ""
+
+    # Primary = first available in priority order
+    result["primary"] = (
+        result.get("parqet")
+        or result.get("clearbit")
+        or result.get("placeholder")
+    )
+    return result
 
 
 @app.get("/")
@@ -205,7 +235,7 @@ async def quote(symbol: str):
         info = t.info or {}
         fi = t.fast_info
         website = info.get("website")
-        logo = _logo_urls(website)
+        logo = _logo_urls(website, symbol=sym)
 
         price = _num(
             info.get("currentPrice")
@@ -308,65 +338,43 @@ async def quote(symbol: str):
 
 @app.get("/logo/{symbol}")
 async def logo(symbol: str):
-    """Return logo URLs for a symbol based on the company website."""
+    """Return logo URLs for a symbol. Ticker-based (Parqet/FMP) + domain fallback."""
     sym = symbol.upper().strip()
 
-    def _symbol_fallback_urls() -> dict[str, str]:
-        # Last-resort fallback when upstream website/domain is unavailable.
-        return {
-            "primary": f"https://ui-avatars.com/api/?name={sym}&size=128&background=0f172a&color=ffffff&format=png",
-            "fallback": f"https://robohash.org/{sym}.png?size=128x128",
-            "favicon": f"https://www.google.com/s2/favicons?domain={sym}.com&sz=128",
-            "domain": "",
-        }
-
     def _fetch():
-        # Reuse website from last successful quote cache if present.
+        # Try to get website from stale quote cache first (avoids a yfinance call)
+        website = None
         stale_quote = _stale.get(f"{id(_cache_price)}:{sym}")
         if isinstance(stale_quote, dict):
-            stale_urls = _logo_urls(stale_quote.get("website"))
-            if stale_urls:
-                return {
-                    "symbol": sym,
-                    "website": stale_quote.get("website"),
-                    "logoUrl": stale_urls.get("primary"),
-                    "logoUrls": stale_urls,
-                    "source": "derived-from-stale-quote",
-                }
+            website = stale_quote.get("website")
+        else:
+            try:
+                t = yf.Ticker(sym)
+                website = (t.info or {}).get("website")
+            except Exception:
+                pass  # fallback gracefully to ticker-only URLs
 
-        t = yf.Ticker(sym)
-        info = t.info or {}
-        website = info.get("website")
-        urls = _logo_urls(website)
-        if not urls:
-            fallback = _symbol_fallback_urls()
-            return {
-                "symbol": sym,
-                "website": website,
-                "logoUrl": fallback.get("primary"),
-                "logoUrls": fallback,
-                "source": "symbol-fallback",
-            }
+        urls = _logo_urls(website, symbol=sym)
+        source = "ticker+website" if website else "ticker-only"
         return {
             "symbol": sym,
             "website": website,
             "logoUrl": urls.get("primary"),
             "logoUrls": urls,
-            "source": "derived-from-website",
+            "source": source,
         }
 
     try:
         return _cached(_cache_price, f"logo:{sym}", _fetch)
     except Exception:
-        fallback = _symbol_fallback_urls()
+        # Even if everything fails, return ticker-based URLs (always valid)
+        urls = _logo_urls(None, symbol=sym)
         return {
             "symbol": sym,
             "website": None,
-            "logoUrl": fallback.get("primary"),
-            "logoUrls": fallback,
-            "source": "symbol-fallback",
-            "_stale": True,
-            "_stale_reason": "upstream_unavailable",
+            "logoUrl": urls.get("primary"),
+            "logoUrls": urls,
+            "source": "ticker-only",
         }
 
 
