@@ -1,0 +1,80 @@
+{
+  "version": 1,
+  "skills": {
+    "discord-reader": {
+      "source": "himself65/finance-skills",
+      "sourceType": "github",
+      "computedHash": "a7efd87027820aec5fbfc4ded4703b299a6fa7fb66bcd6aa7937a047a0c8d887"
+    },
+    "earnings-recap": {
+      "source": "himself65/finance-skills",
+      "sourceType": "github",
+      "computedHash": "e4061935d04fc994047dd3159add0336b70b60da6e944db50b5156e49a2c2304"
+    },
+    "finance-sentiment": {
+      "source": "himself65/finance-skills",
+      "sourceType": "github",
+      "computedHash": "426440699b53481a864ad7a5d5c76e2114270a683c49691b664eca5c8ac3e12d"
+    },
+    "funda-data": {
+      "source": "himself65/finance-skills",
+      "sourceType": "github",
+      "computedHash": "38a52281d03181c3895a3f56453dd75dc946831dca757a649acc32b2e61a05e5"
+    },
+    "generative-ui": {
+      "source": "himself65/finance-skills",
+      "sourceType": "github",
+      "computedHash": "ccd92a36e9d9742f9361b887407f83e1bdd8b4b409f76cb507fd1da6fa4c159a"
+    },
+    "hormuz-strait": {
+      "source": "himself65/finance-skills",
+      "sourceType": "github",
+      "computedHash": "3b8ef804efccefa3e8ba12545560b6fc43ebdef9f6ea1b2e2b48e40f0da2a3e7"
+    },
+    "linkedin-reader": {
+      "source": "himself65/finance-skills",
+      "sourceType": "github",
+      "computedHash": "3aeb1ed27da75631a14bea3e0e2ec548874d52236bbaffdbd1f40fb6a564a35e"
+    },
+    "options-payoff": {
+      "source": "himself65/finance-skills",
+      "sourceType": "github",
+      "computedHash": "44580cda3e574470d02ce566f4f799f7dce7e0cd689f2ac0e7c94ca7f7558b60"
+    },
+    "skill-creator": {
+      "source": "himself65/finance-skills",
+      "sourceType": "github",
+      "computedHash": "a4a5b7954d38f6c01b9ca5bef1c4326c5dfe11c2687e12851eec6bcc6be8238b"
+    },
+    "startup-analysis": {
+      "source": "himself65/finance-skills",
+      "sourceType": "github",
+      "computedHash": "04bd001736d104bccb969574caa85a81bf8a4068b2b505696076b99541ba2b42"
+    },
+    "stock-correlation": {
+      "source": "himself65/finance-skills",
+      "sourceType": "github",
+      "computedHash": "f17c9d51929bdd2c9ca63c99712ccf077a4858b934c55a40e5e1b89f9d3dc883"
+    },
+    "stock-liquidity": {
+      "source": "himself65/finance-skills",
+      "sourceType": "github",
+      "computedHash": "163d13fdd46aa57edb55564dbd7416c764a9defe91901a7dcf81f432e59a236b"
+    },
+    "telegram-reader": {
+      "source": "himself65/finance-skills",
+      "sourceType": "github",
+      "computedHash": "f6ad92fa5ba94d8c3b7aef98fe80329da5f02442650ded76aefc7f3e073c9432"
+    },
+    "twitter-reader": {
+      "source": "himself65/finance-skills",
+      "sourceType": "github",
+      "computedHash": "d31b144e0d37234c4dd1e7cd27000c0290850ed7a5b7411a8a154abedd50de07"
+    },
+    "yfinance-data": {
+      "source": "himself65/finance-skills",
+      "sourceType": "github",
+      "computedHash": "3e86b791d410041e60c239cd70116ad234c08a1853a9c51c19dff97738a222ba"
+    }
+  }
+}

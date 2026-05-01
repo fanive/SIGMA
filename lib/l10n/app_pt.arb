@@ -1,0 +1,62 @@
+{
+  "@@locale": "pt",
+
+  "appName": "SIGMA",
+  "appTagline": "Análise Financeira Inteligente",
+
+  "navDashboard": "Painel",
+  "navDiscover": "Descobrir",
+  "navPortfolio": "Portfólio",
+  "navNews": "Notícias",
+  "navProfile": "Perfil",
+
+  "dashboardTitle": "VISÃO DO MERCADO",
+  "worldIndices": "ÍNDICES MUNDIAIS",
+  "commodities": "COMMODITIES",
+  "yourWatchlist": "SUA WATCHLIST",
+  "liveData": "DADOS AO VIVO",
+
+  "searchHint": "Buscar ticker, empresa...",
+  "searchNoResults": "Nenhum resultado encontrado",
+
+  "verdictBuy": "COMPRAR",
+  "verdictStrongBuy": "COMPRA FORTE",
+  "verdictHold": "MANTER",
+  "verdictSell": "VENDER",
+  "verdictStrongSell": "VENDA FORTE",
+
+  "sigmaScore": "PONTUAÇÃO SIGMA",
+  "confidence": "Confiança",
+  "riskLevel": "Nível de risco",
+  "riskLow": "Baixo",
+  "riskMedium": "Médio",
+  "riskHigh": "Alto",
+
+  "technicalAnalysis": "ANÁLISE TÉCNICA",
+  "fundamentalAnalysis": "ANÁLISE FUNDAMENTAL",
+  "aiSynthesis": "SÍNTESE IA",
+
+  "settingsTitle": "CONFIGURAÇÕES",
+  "settingsThemeDark": "Escuro",
+  "settingsThemeLight": "Claro",
+  "settingsThemeSystem": "Sistema",
+  "settingsLanguage": "IDIOMA",
+
+  "loading": "Carregando...",
+  "noData": "Sem dados disponíveis",
+  "cancel": "Cancelar",
+  "confirm": "Confirmar",
+  "close": "Fechar",
+
+  "onboardingTitle1": "Análise Inteligente",
+  "onboardingDesc1": "Dados em tempo real de múltiplas fontes combinados com insights de IA para decisões de investimento mais inteligentes.",
+  "onboardingTitle2": "Excelência Técnica",
+  "onboardingDesc2": "Indicadores técnicos de nível profissional: RSI, MACD, Bandas de Bollinger e mais — todos calculados em tempo real.",
+  "onboardingTitle3": "Inteligência Global",
+  "onboardingDesc3": "Acompanhe mercados mundiais com dados institucionais, análise de sentimento e notícias enriquecidas por IA.",
+  "onboardingGetStarted": "Começar",
+  "onboardingSkip": "Pular",
+  "onboardingNext": "Próximo",
+
+  "disclaimer": "SIGMA não fornece aconselhamento financeiro. Todos os dados são apenas para fins informativos. Invista por sua conta e risco."
+}

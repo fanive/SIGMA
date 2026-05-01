@@ -1,0 +1,11 @@
+services:
+  - type: web
+    name: sigma-yfinance-api
+    runtime: docker
+    rootDir: backend
+    plan: starter
+    autoDeploy: true
+    healthCheckPath: /
+    envVars:
+      - key: PYTHONUNBUFFERED
+        value: "1"

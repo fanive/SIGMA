@@ -1,0 +1,93 @@
+{
+  "@@locale": "es",
+
+  "appName": "SIGMA",
+  "appTagline": "Análisis Financiero Inteligente",
+
+  "navDashboard": "Panel",
+  "navDiscover": "Descubrir",
+  "navPortfolio": "Portafolio",
+  "navNews": "Noticias",
+  "navProfile": "Perfil",
+
+  "dashboardTitle": "VISIÓN DEL MERCADO",
+  "worldIndices": "ÍNDICES MUNDIALES",
+  "commodities": "MATERIAS PRIMAS",
+  "yourWatchlist": "TU WATCHLIST",
+  "liveData": "DATOS EN VIVO",
+  "marketClosed": "MERCADO CERRADO",
+  "marketOpen": "MERCADO ABIERTO",
+  "preMarket": "PRE-APERTURA",
+  "afterHours": "FUERA DE HORARIO",
+
+  "searchHint": "Buscar ticker, empresa...",
+  "searchNoResults": "Sin resultados",
+  "searchRecent": "BÚSQUEDAS RECIENTES",
+  "searchTrending": "TENDENCIAS",
+
+  "analysisTitle": "ANÁLISIS",
+  "analysisLoading": "Analizando {ticker}...",
+  "analysisError": "El análisis falló",
+  "analysisRetry": "Reintentar",
+
+  "verdictBuy": "COMPRAR",
+  "verdictStrongBuy": "COMPRA FUERTE",
+  "verdictHold": "MANTENER",
+  "verdictSell": "VENDER",
+  "verdictStrongSell": "VENTA FUERTE",
+
+  "sigmaScore": "PUNTUACIÓN SIGMA",
+  "confidence": "Confianza",
+  "riskLevel": "Nivel de riesgo",
+  "riskLow": "Bajo",
+  "riskMedium": "Medio",
+  "riskHigh": "Alto",
+
+  "tabOverview": "Resumen",
+  "tabAnalysis": "Análisis",
+  "tabFinancials": "Finanzas",
+  "tabNews": "Noticias",
+
+  "technicalAnalysis": "ANÁLISIS TÉCNICO",
+  "fundamentalAnalysis": "ANÁLISIS FUNDAMENTAL",
+  "aiSynthesis": "SÍNTESIS IA",
+  "neuralSynthesis": "SÍNTESIS INSTITUCIONAL",
+  "companyProfile": "PERFIL DE LA EMPRESA",
+  "keyMetrics": "INDICADORES CLAVE",
+
+  "analystConsensus": "CONSENSO DE ANALISTAS",
+  "strongBuy": "Compra fuerte",
+  "buy": "Comprar",
+  "hold": "Mantener",
+  "sell": "Vender",
+  "strongSell": "Venta fuerte",
+  "analysts": "analistas",
+
+  "settingsTitle": "AJUSTES",
+  "settingsTheme": "Tema",
+  "settingsThemeDark": "Oscuro",
+  "settingsThemeLight": "Claro",
+  "settingsThemeSystem": "Sistema",
+  "settingsLanguage": "IDIOMA",
+  "settingsLanguageAuto": "Detección automática",
+
+  "loading": "Cargando...",
+  "noData": "Sin datos disponibles",
+  "cancel": "Cancelar",
+  "confirm": "Confirmar",
+  "save": "Guardar",
+  "close": "Cerrar",
+  "refresh": "Actualizar",
+
+  "onboardingTitle1": "Análisis Inteligente",
+  "onboardingDesc1": "Datos en tiempo real de múltiples fuentes combinados con análisis IA para decisiones de inversión más inteligentes.",
+  "onboardingTitle2": "Excelencia Técnica",
+  "onboardingDesc2": "Indicadores técnicos de nivel profesional: RSI, MACD, Bandas de Bollinger y más — todos calculados en tiempo real.",
+  "onboardingTitle3": "Inteligencia Global",
+  "onboardingDesc3": "Seguimiento de mercados mundiales con datos institucionales, análisis de sentimiento y noticias enriquecidas por IA.",
+  "onboardingGetStarted": "Comenzar",
+  "onboardingSkip": "Omitir",
+  "onboardingNext": "Siguiente",
+
+  "disclaimer": "SIGMA no proporciona asesoramiento financiero. Todos los datos son solo informativos. Invierta bajo su propio riesgo."
+}
