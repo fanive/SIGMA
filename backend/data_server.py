@@ -5,6 +5,10 @@ import threading
 from datetime import datetime, timezone
 from typing import Any
 
+import re as _re
+
+import requests as _requests
+from bs4 import BeautifulSoup as _BS
 import pandas as pd
 import yfinance as yf
 from cachetools import TTLCache
@@ -33,6 +37,8 @@ _cache_ownership  = TTLCache(maxsize=200, ttl=14400)   # 4h   — holders
 _cache_options    = TTLCache(maxsize=200, ttl=300)     # 5min — options chain
 _cache_events     = TTLCache(maxsize=200, ttl=3600)    # 1h   — calendar/divs
 _cache_news       = TTLCache(maxsize=200, ttl=300)     # 5min — news
+_cache_insider    = TTLCache(maxsize=200, ttl=14400)   # 4h   — OpenInsider SEC Form 4
+_cache_sec        = TTLCache(maxsize=100, ttl=86400)   # 24h  — SEC EDGAR facts
 
 # Stale cache (no TTL) — keeps last known good value across restarts
 _stale: dict = {}
@@ -524,3 +530,190 @@ async def macro():
         return result
 
     return _cached(_cache_price, "__macro__", _fetch)
+
+
+# ---------------------------------------------------------------------------
+# /insider/{symbol} — SEC Form 4 insider trades via OpenInsider scraper
+# ---------------------------------------------------------------------------
+_OI_HEADERS = {
+    "User-Agent": "SIGMA-App/1.0 contact@sigma.app",
+    "Accept-Language": "en-US,en;q=0.9",
+}
+_OI_COLS = [
+    "flag", "filing_date", "trade_date", "ticker", "insider_name",
+    "title", "transaction_type", "price", "qty", "owned",
+    "delta_own_pct", "value", "perf_1d", "perf_1w", "perf_1m", "perf_6m",
+]
+
+
+def _parse_oi_html(html: str, sym: str) -> list[dict]:
+    """Parse the tinytable from OpenInsider HTML into a list of trade dicts."""
+    soup = _BS(html, "html.parser")
+    table = soup.find("table", class_="tinytable")
+    if not table:
+        return []
+    rows = table.find_all("tr")
+    result = []
+    for row in rows[1:]:  # skip header
+        cells = row.find_all(["td", "th"])
+        values = [c.get_text(strip=True) for c in cells]
+        if len(values) < len(_OI_COLS):
+            values += [""] * (len(_OI_COLS) - len(values))
+        trade = dict(zip(_OI_COLS, values))
+        # ticker cell is clean via BeautifulSoup (no JS noise)
+        # Normalize price/qty/value: strip $ , +
+        for field in ("price", "qty", "owned", "value"):
+            trade[field] = _re.sub(r"[+$,]", "", trade[field]).strip()
+        result.append(trade)
+    return result
+
+
+@app.get("/insider/{symbol}")
+async def insider(symbol: str, days: int = Query(default=365, ge=1, le=1825)):
+    """SEC Form 4 insider buys & sells from OpenInsider. Cached 4h.
+    `days` controls the lookback window (default 365, max 1825)."""
+    sym = symbol.upper().strip()
+    cache_key = f"insider:{sym}:{days}"
+
+    def _fetch():
+        url = (
+            f"http://openinsider.com/screener"
+            f"?s={sym}&fd={days}&xp=1&xs=1&cnt=40"
+        )
+        resp = _requests.get(url, headers=_OI_HEADERS, timeout=15)
+        resp.raise_for_status()
+        trades = _parse_oi_html(resp.text, sym)
+        return {"symbol": sym, "days": days, "count": len(trades), "trades": trades, "source": "openinsider.com"}
+
+    try:
+        return _cached(_cache_insider, cache_key, _fetch)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"insider fetch failed for {sym}: {e}")
+
+
+# ---------------------------------------------------------------------------
+# /sec/{symbol} — SEC EDGAR XBRL company facts (key financial metrics)
+# ---------------------------------------------------------------------------
+_EDGAR_HEADERS = {"User-Agent": "SIGMA-App/1.0 contact@sigma.app"}
+_CIK_MAP: dict = {}  # ticker -> zero-padded CIK string, loaded once
+_CIK_MAP_LOCK = threading.Lock()
+
+# Key XBRL facts to extract: (label, taxonomy, concept)
+_EDGAR_FACTS = [
+    ("revenue", "us-gaap", "RevenueFromContractWithCustomerExcludingAssessedTax"),
+    ("revenue", "us-gaap", "Revenues"),
+    ("revenue", "us-gaap", "SalesRevenueNet"),
+    ("net_income", "us-gaap", "NetIncomeLoss"),
+    ("eps_basic", "us-gaap", "EarningsPerShareBasic"),
+    ("eps_diluted", "us-gaap", "EarningsPerShareDiluted"),
+    ("total_assets", "us-gaap", "Assets"),
+    ("total_liabilities", "us-gaap", "Liabilities"),
+    ("stockholders_equity", "us-gaap", "StockholdersEquity"),
+    ("operating_income", "us-gaap", "OperatingIncomeLoss"),
+    ("gross_profit", "us-gaap", "GrossProfit"),
+    ("shares_outstanding", "dei", "EntityCommonStockSharesOutstanding"),
+]
+
+
+def _load_cik_map() -> dict:
+    global _CIK_MAP
+    with _CIK_MAP_LOCK:
+        if _CIK_MAP:
+            return _CIK_MAP
+        resp = _requests.get(
+            "https://www.sec.gov/files/company_tickers.json",
+            headers=_EDGAR_HEADERS,
+            timeout=20,
+        )
+        resp.raise_for_status()
+        raw = resp.json()
+        # Format: {"0": {"cik_str": 320193, "ticker": "AAPL", "title": "..."}, ...}
+        mapping = {
+            v["ticker"].upper(): str(v["cik_str"]).zfill(10)
+            for v in raw.values()
+        }
+        _CIK_MAP = mapping
+        return mapping
+
+
+def _extract_edgar_series(facts_json: dict, taxonomy: str, concept: str, limit: int = 12) -> list[dict]:
+    """Pull the most recent annual (10-K) or quarterly (10-Q) entries for a concept."""
+    try:
+        units = facts_json["facts"][taxonomy][concept]["units"]
+    except KeyError:
+        return []
+    # Prefer USD, fallback to shares or pure numbers
+    for unit_key in ("USD", "shares", "pure"):
+        entries = units.get(unit_key, [])
+        if entries:
+            # Keep only 10-K/10-Q filings, sort descending by end date
+            filtered = [
+                e for e in entries
+                if e.get("form") in ("10-K", "10-Q") and e.get("end")
+            ]
+            filtered.sort(key=lambda e: e["end"], reverse=True)
+            # Deduplicate by end date (keep first = most recent filing for that period)
+            seen: set = set()
+            deduped = []
+            for e in filtered:
+                key = (e["end"], e.get("form"))
+                if key not in seen:
+                    seen.add(key)
+                    deduped.append({
+                        "end": e["end"],
+                        "value": e.get("val"),
+                        "form": e.get("form"),
+                        "filed": e.get("filed"),
+                    })
+                if len(deduped) >= limit:
+                    break
+            return deduped
+    return []
+
+
+@app.get("/sec/{symbol}")
+async def sec_facts(symbol: str):
+    """Key financial facts from SEC EDGAR XBRL data. Cached 24h.
+    Returns revenue, net income, EPS, assets, equity and more."""
+    sym = symbol.upper().strip()
+
+    def _fetch():
+        cik_map = _load_cik_map()
+        cik = cik_map.get(sym)
+        if not cik:
+            raise HTTPException(status_code=404, detail=f"No SEC CIK found for ticker {sym}")
+
+        url = f"https://data.sec.gov/api/xbrl/companyfacts/CIK{cik}.json"
+        resp = _requests.get(url, headers=_EDGAR_HEADERS, timeout=30)
+        resp.raise_for_status()
+        facts_json = resp.json()
+
+        # Company metadata
+        entity_name = facts_json.get("entityName", sym)
+
+        # Extract each metric (revenue may use different concept per company)
+        extracted: dict[str, list] = {}
+        _revenue_filled = False
+        for label, taxonomy, concept in _EDGAR_FACTS:
+            if label == "revenue" and _revenue_filled:
+                continue  # use first revenue concept that returns data
+            series = _extract_edgar_series(facts_json, taxonomy, concept)
+            if series:
+                extracted[label] = series
+                if label == "revenue":
+                    _revenue_filled = True
+
+        return {
+            "symbol": sym,
+            "cik": cik,
+            "entityName": entity_name,
+            "facts": extracted,
+            "source": "sec.gov/edgar",
+        }
+
+    try:
+        return _cached(_cache_sec, sym, _fetch)
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"SEC EDGAR fetch failed for {sym}: {e}")
