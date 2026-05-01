@@ -15,7 +15,7 @@ from cachetools import TTLCache
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 
-app = FastAPI(title="SIGMA yfinance Gateway", version="3.0.0")
+app = FastAPI(title="SIGMA yfinance Gateway", version="3.1.0")
 
 app.add_middleware(
     CORSMiddleware,
@@ -138,7 +138,7 @@ def _clean(d):
 
 @app.get("/")
 async def health():
-    return {"status": "ok", "service": "yfinance-gateway", "version": "3.0.0",
+    return {"status": "ok", "service": "yfinance-gateway", "version": "3.1.0",
             "time": datetime.now(timezone.utc).isoformat()}
 
 
@@ -547,7 +547,7 @@ _OI_COLS = [
 
 
 def _parse_oi_html(html: str, sym: str) -> list[dict]:
-    """Parse the tinytable from OpenInsider HTML into a list of trade dicts."""
+    """Parse the tinytable from OpenInsider HTML into a list of typed trade dicts."""
     soup = _BS(html, "html.parser")
     table = soup.find("table", class_="tinytable")
     if not table:
@@ -560,14 +560,76 @@ def _parse_oi_html(html: str, sym: str) -> list[dict]:
         if len(values) < len(_OI_COLS):
             values += [""] * (len(_OI_COLS) - len(values))
         trade = dict(zip(_OI_COLS, values))
-        # ticker cell is clean via BeautifulSoup (no JS noise)
-        # Normalize price/qty/value: strip $ , +
-        for field in ("price", "qty", "owned", "value"):
-            trade[field] = _re.sub(r"[+$,]", "", trade[field]).strip()
+
+        # Cast numeric fields (strip $, commas, +)
+        def _to_num(s: str, as_int: bool = False):
+            cleaned = _re.sub(r"[$,+]", "", s).strip()
+            if not cleaned or cleaned in ("-", "N/A"):
+                return None
+            try:
+                return int(cleaned) if as_int else float(cleaned)
+            except ValueError:
+                return None
+
+        trade["price"] = _to_num(trade["price"])
+        trade["qty"] = _to_num(trade["qty"], as_int=True)
+        trade["owned"] = _to_num(trade["owned"], as_int=True)
+        trade["value"] = _to_num(trade["value"])
+        # delta_own_pct: strip % → float
+        trade["delta_own_pct"] = _to_num(trade.get("delta_own_pct", "").replace("%", ""))
+        # is_buy: positive qty or transaction starts with P / A
+        tt = trade.get("transaction_type", "")
+        trade["is_buy"] = (
+            (trade["qty"] is not None and trade["qty"] > 0)
+            or tt.startswith(("P -", "A -", "G -", "M -"))
+        )
         result.append(trade)
     return result
 
 
+def _insider_summary(trades: list[dict]) -> dict:
+    """Aggregate insider trades into a sentiment summary."""
+    buys = [t for t in trades if t.get("is_buy")]
+    sells = [t for t in trades if not t.get("is_buy")]
+
+    def _sum_val(lst):
+        return round(sum(abs(t["value"]) for t in lst if t.get("value") is not None), 0)
+
+    def _sum_shares(lst):
+        return sum(abs(t["qty"]) for t in lst if t.get("qty") is not None)
+
+    # Most active insiders by absolute value traded
+    by_insider: dict = {}
+    for t in trades:
+        name = t.get("insider_name", "Unknown")
+        v = abs(t.get("value") or 0)
+        if name not in by_insider:
+            by_insider[name] = {"insider_name": name, "title": t.get("title", ""), "total_value": 0, "trade_count": 0}
+        by_insider[name]["total_value"] += v
+        by_insider[name]["trade_count"] += 1
+
+    top_insiders = sorted(by_insider.values(), key=lambda x: x["total_value"], reverse=True)[:5]
+    for ins in top_insiders:
+        ins["total_value"] = round(ins["total_value"], 0)
+
+    net_val = _sum_val(buys) - _sum_val(sells)
+    sentiment = "neutral"
+    if net_val > 0:
+        sentiment = "bullish"
+    elif net_val < 0:
+        sentiment = "bearish"
+
+    return {
+        "buy_count": len(buys),
+        "sell_count": len(sells),
+        "buy_value_usd": _sum_val(buys),
+        "sell_value_usd": _sum_val(sells),
+        "net_value_usd": round(net_val, 0),
+        "buy_shares": _sum_shares(buys),
+        "sell_shares": _sum_shares(sells),
+        "sentiment": sentiment,
+        "top_insiders": top_insiders,
+    }
 @app.get("/insider/{symbol}")
 async def insider(symbol: str, days: int = Query(default=365, ge=1, le=1825)):
     """SEC Form 4 insider buys & sells from OpenInsider. Cached 4h.
@@ -583,7 +645,14 @@ async def insider(symbol: str, days: int = Query(default=365, ge=1, le=1825)):
         resp = _requests.get(url, headers=_OI_HEADERS, timeout=15)
         resp.raise_for_status()
         trades = _parse_oi_html(resp.text, sym)
-        return {"symbol": sym, "days": days, "count": len(trades), "trades": trades, "source": "openinsider.com"}
+        return {
+            "symbol": sym,
+            "days": days,
+            "count": len(trades),
+            "summary": _insider_summary(trades),
+            "trades": trades,
+            "source": "openinsider.com",
+        }
 
     try:
         return _cached(_cache_insider, cache_key, _fetch)
@@ -637,7 +706,7 @@ def _load_cik_map() -> dict:
 
 
 def _extract_edgar_series(facts_json: dict, taxonomy: str, concept: str, limit: int = 12) -> list[dict]:
-    """Pull the most recent annual (10-K) or quarterly (10-Q) entries for a concept."""
+    """Pull the most recent entries for a concept, separated by form type."""
     try:
         units = facts_json["facts"][taxonomy][concept]["units"]
     except KeyError:
@@ -669,6 +738,58 @@ def _extract_edgar_series(facts_json: dict, taxonomy: str, concept: str, limit: 
                     break
             return deduped
     return []
+
+
+def _yoy_growth(series: list[dict], form: str = "10-K") -> float | None:
+    """Compute YoY growth for the two most recent same-form entries."""
+    annual = [e for e in series if e.get("form") == form and e.get("value") is not None]
+    if len(annual) < 2:
+        return None
+    curr, prev = annual[0]["value"], annual[1]["value"]
+    if prev == 0:
+        return None
+    return round((curr - prev) / abs(prev) * 100, 2)
+
+
+def _compute_sec_derived(extracted: dict[str, list]) -> dict:
+    """Compute derived metrics: growth rates, margins, latest snapshot."""
+    latest: dict = {}
+
+    # Latest value for each metric (prefer 10-K, fall back to 10-Q)
+    for key, series in extracted.items():
+        for form in ("10-K", "10-Q"):
+            entry = next((e for e in series if e.get("form") == form and e.get("value") is not None), None)
+            if entry:
+                latest[key] = entry["value"]
+                break
+
+    derived: dict = {}
+
+    # YoY growth (annual 10-K)
+    for key in ("revenue", "net_income", "gross_profit", "operating_income"):
+        if key in extracted:
+            g = _yoy_growth(extracted[key], form="10-K")
+            if g is not None:
+                derived[f"{key}_yoy_growth_pct"] = g
+
+    # Margins (use latest annual values)
+    rev = latest.get("revenue")
+    if rev and rev != 0:
+        if "gross_profit" in latest:
+            derived["gross_margin_pct"] = round(latest["gross_profit"] / rev * 100, 2)
+        if "operating_income" in latest:
+            derived["operating_margin_pct"] = round(latest["operating_income"] / rev * 100, 2)
+        if "net_income" in latest:
+            derived["net_margin_pct"] = round(latest["net_income"] / rev * 100, 2)
+
+    # Debt-to-equity
+    equity = latest.get("stockholders_equity")
+    liabilities = latest.get("total_liabilities")
+    if equity and equity != 0 and liabilities:
+        derived["debt_to_equity"] = round(liabilities / equity, 3)
+
+    derived["latest_values"] = latest
+    return derived
 
 
 @app.get("/sec/{symbol}")
@@ -703,11 +824,22 @@ async def sec_facts(symbol: str):
                 if label == "revenue":
                     _revenue_filled = True
 
+        derived = _compute_sec_derived(extracted)
+
+        # Split each series into annual/quarterly for cleaner client consumption
+        facts_split: dict = {}
+        for key, series in extracted.items():
+            facts_split[key] = {
+                "annual": [e for e in series if e.get("form") == "10-K"][:8],
+                "quarterly": [e for e in series if e.get("form") == "10-Q"][:12],
+            }
+
         return {
             "symbol": sym,
             "cik": cik,
             "entityName": entity_name,
-            "facts": extracted,
+            "derived": derived,
+            "facts": facts_split,
             "source": "sec.gov/edgar",
         }
 
@@ -717,3 +849,51 @@ async def sec_facts(symbol: str):
         raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"SEC EDGAR fetch failed for {sym}: {e}")
+
+
+# ---------------------------------------------------------------------------
+# /snapshot/{symbol} — combined quote + insider summary + SEC key metrics
+# ---------------------------------------------------------------------------
+_cache_snapshot = TTLCache(maxsize=200, ttl=60)   # 1min — follows quote TTL
+
+
+@app.get("/snapshot/{symbol}")
+async def snapshot(symbol: str):
+    """Single-call snapshot: live quote + insider sentiment + SEC-derived fundamentals.
+    Ideal for a stock detail screen. Cached 1min (driven by price TTL)."""
+    sym = symbol.upper().strip()
+
+    async def _get_quote():
+        try:
+            return await quote(sym)
+        except Exception:
+            return {}
+
+    async def _get_insider_summary():
+        try:
+            data = await insider(sym, days=365)
+            return data.get("summary", {})
+        except Exception:
+            return {}
+
+    async def _get_sec_derived():
+        try:
+            data = await sec_facts(sym)
+            return data.get("derived", {})
+        except Exception:
+            return {}
+
+    import asyncio
+    quote_data, insider_summary, sec_derived = await asyncio.gather(
+        _get_quote(),
+        _get_insider_summary(),
+        _get_sec_derived(),
+    )
+
+    return {
+        "symbol": sym,
+        "quote": quote_data,
+        "insider_sentiment": insider_summary,
+        "sec_fundamentals": sec_derived,
+        "sources": ["yfinance", "openinsider.com", "sec.gov/edgar"],
+    }
