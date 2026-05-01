@@ -4,6 +4,7 @@ import time
 import threading
 from datetime import datetime, timezone
 from typing import Any
+from urllib.parse import urlparse
 
 import re as _re
 
@@ -138,6 +139,32 @@ def _clean(d):
     return _safe(d)
 
 
+def _domain_from_website(website: str | None) -> str | None:
+    if not website:
+        return None
+    value = website.strip()
+    if not value:
+        return None
+    parsed = urlparse(value if "://" in value else f"https://{value}")
+    host = (parsed.netloc or parsed.path).lower().strip()
+    if host.startswith("www."):
+        host = host[4:]
+    return host or None
+
+
+def _logo_urls(website: str | None) -> dict[str, str] | None:
+    domain = _domain_from_website(website)
+    if not domain:
+        return None
+    # clearbit generally provides full-color company logos; others are no-key fallbacks.
+    return {
+        "primary": f"https://logo.clearbit.com/{domain}",
+        "fallback": f"https://icons.duckduckgo.com/ip3/{domain}.ico",
+        "favicon": f"https://www.google.com/s2/favicons?domain={domain}&sz=128",
+        "domain": domain,
+    }
+
+
 @app.get("/")
 async def health():
     return {"status": "ok", "service": "yfinance-gateway", "version": "3.1.0",
@@ -155,6 +182,8 @@ async def search_tickers(q: str = Query(..., min_length=1)):
                 "exchange": i.get("exchange") or "",
                 "exchangeShortName": i.get("exchange") or "",
                 "type": i.get("quoteType") or "EQUITY",
+                # Search payload does not reliably include website; leave as nullable.
+                "logoUrl": None,
             }
             for i in results[:20]
             if i.get("symbol")
@@ -175,6 +204,8 @@ async def quote(symbol: str):
         t = yf.Ticker(sym)
         info = t.info or {}
         fi = t.fast_info
+        website = info.get("website")
+        logo = _logo_urls(website)
 
         price = _num(
             info.get("currentPrice")
@@ -260,7 +291,9 @@ async def quote(symbol: str):
             "sector": info.get("sector"),
             "industry": info.get("industry"),
             "country": info.get("country"),
-            "website": info.get("website"),
+            "website": website,
+            "logoUrl": (logo or {}).get("primary"),
+            "logoUrls": logo,
             "fullTimeEmployees": _safe(info.get("fullTimeEmployees")),
             "description": info.get("longBusinessSummary"),
             "quoteType": info.get("quoteType"),
@@ -271,6 +304,38 @@ async def quote(symbol: str):
         return _cached(_cache_price, sym, _fetch)
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"quote failed for {sym}: {e}")
+
+
+@app.get("/logo/{symbol}")
+async def logo(symbol: str):
+    """Return logo URLs for a symbol based on the company website."""
+    sym = symbol.upper().strip()
+
+    def _fetch():
+        t = yf.Ticker(sym)
+        info = t.info or {}
+        website = info.get("website")
+        urls = _logo_urls(website)
+        if not urls:
+            return {
+                "symbol": sym,
+                "website": website,
+                "logoUrl": None,
+                "logoUrls": None,
+                "source": "yfinance",
+            }
+        return {
+            "symbol": sym,
+            "website": website,
+            "logoUrl": urls.get("primary"),
+            "logoUrls": urls,
+            "source": "derived-from-website",
+        }
+
+    try:
+        return _cached(_cache_price, f"logo:{sym}", _fetch)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"logo failed for {sym}: {e}")
 
 
 # ---------------------------------------------------------------------------
