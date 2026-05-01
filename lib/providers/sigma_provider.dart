@@ -103,6 +103,10 @@ class SigmaProvider extends ChangeNotifier {
   static const String _cacheKeyPrefix = 'sigma_analysis_cache_';
   static const String _marketCacheKey = 'sigma_market_overview_cache';
   static const String _radarCacheKey = 'sigma_radar_insights_cache';
+  static const Duration _analysisCacheTtl = Duration(minutes: 20);
+  static const Duration _watchlistRefreshInterval = Duration(seconds: 20);
+
+  Timer? _watchlistRefreshTimer;
 
   DateTime? _lastMarketFetch;
   DateTime? _lastRadarFetch;
@@ -162,10 +166,32 @@ class SigmaProvider extends ChangeNotifier {
     final p8 = refreshMacroIndicators();
     final p9 = fetchSentiment();
     fetchDailyCreamReport();
+    _startWatchlistAutoRefresh();
 
     // We wait for a "minimum set" to be ready for the splash transition if needed,
     // but the provider itself remains reactive.
     Future.wait([p2, p3, p4, p5, p6, p7, p8, p9]);
+  }
+
+  void _startWatchlistAutoRefresh() {
+    _watchlistRefreshTimer?.cancel();
+    _watchlistRefreshTimer =
+        Timer.periodic(_watchlistRefreshInterval, (_) async {
+      if (favoriteTickers.isEmpty) return;
+      await loadFavorites(forceRefresh: true);
+    });
+  }
+
+  bool _isAnalysisFresh(AnalysisData data) {
+    final ts = DateTime.tryParse(data.lastUpdated);
+    if (ts == null) return false;
+    return DateTime.now().difference(ts) <= _analysisCacheTtl;
+  }
+
+  @override
+  void dispose() {
+    _watchlistRefreshTimer?.cancel();
+    super.dispose();
   }
 
   /// Getter public pour le RAG service (utilisé par le chatbot).
@@ -210,16 +236,25 @@ class SigmaProvider extends ChangeNotifier {
     try {
       final prefs = await SharedPreferences.getInstance();
       final keys = prefs.getKeys().where((k) => k.startsWith(_cacheKeyPrefix));
+      final staleKeys = <String>[];
       for (final key in keys) {
         final symbol = key.replaceFirst(_cacheKeyPrefix, '');
         final jsonStr = prefs.getString(key);
         if (jsonStr != null) {
           final data = jsonDecode(jsonStr);
-          _analysisCache[symbol] = AnalysisData.fromJson(data);
+          final parsed = AnalysisData.fromJson(data);
+          if (_isAnalysisFresh(parsed)) {
+            _analysisCache[symbol] = parsed;
+          } else {
+            staleKeys.add(key);
+          }
         }
       }
+      for (final key in staleKeys) {
+        await prefs.remove(key);
+      }
       dev.log(
-        '📦 Loaded ${_analysisCache.length} analyses from cache',
+        '📦 Loaded ${_analysisCache.length} fresh analyses from cache',
         name: 'SigmaProvider',
       );
     } catch (e) {
@@ -768,6 +803,9 @@ class SigmaProvider extends ChangeNotifier {
     // Check cache first if not forcing refresh
     if (!forceRefresh && _analysisCache.containsKey(cleanTicker)) {
       final cached = _analysisCache[cleanTicker]!;
+      if (!_isAnalysisFresh(cached)) {
+        _analysisCache.remove(cleanTicker);
+      } else {
       currentAnalysis = cached;
       currentTicker = cleanTicker;
       chartHistory = [];
@@ -782,6 +820,7 @@ class SigmaProvider extends ChangeNotifier {
       _updatePriceAndCharts(cleanTicker);
 
       return;
+      }
     }
 
     // Reset current state immediately to force loader to show
