@@ -102,6 +102,56 @@ class SigmaApiService {
   }
 
   // ═══════════════════════════════════════════════════════════════════════
+  // INTRADAY  /intraday/{symbol}?range=1d&interval=5m&prepost=true
+  // ═══════════════════════════════════════════════════════════════════════
+  static Future<List<Map<String, dynamic>>> getIntraday(
+      String ticker, String range, String interval,
+      {bool prepost = true}) async {
+    final key = 'intraday:${ticker.toUpperCase()}:$range:$interval:$prepost';
+    final cached = _getCache<List<Map<String, dynamic>>>(key);
+    if (cached != null) return cached;
+
+    final data = await _get('/intraday/${ticker.toUpperCase()}', params: {
+      'range': range,
+      'interval': interval,
+      'prepost': prepost.toString(),
+    });
+    if (data is List) {
+      final list = data.map((e) => Map<String, dynamic>.from(e)).toList();
+      _setCache(key, list, const Duration(minutes: 1));
+      return list;
+    }
+    return [];
+  }
+
+  // ═══════════════════════════════════════════════════════════════════════
+  // OPTIONS  /options/{symbol}?expiration=YYYY-MM-DD
+  // ═══════════════════════════════════════════════════════════════════════
+  static Future<Map<String, dynamic>> getOptions(
+      String ticker, {
+      String? expiration,
+  }) async {
+    final cacheSuffix = expiration?.trim().isNotEmpty == true
+        ? expiration!.trim()
+        : '_default';
+    final key = 'options:${ticker.toUpperCase()}:$cacheSuffix';
+    final cached = _getCache<Map<String, dynamic>>(key);
+    if (cached != null) return cached;
+
+    final params = <String, String>{};
+    if (expiration != null && expiration.trim().isNotEmpty) {
+      params['expiration'] = expiration.trim();
+    }
+    final data = await _get('/options/${ticker.toUpperCase()}', params: params);
+    if (data is Map) {
+      final m = Map<String, dynamic>.from(data);
+      _setCache(key, m, const Duration(minutes: 5));
+      return m;
+    }
+    return {};
+  }
+
+  // ═══════════════════════════════════════════════════════════════════════
   // FINANCIALS  /financials/{symbol}
   // ═══════════════════════════════════════════════════════════════════════
   static Future<Map<String, dynamic>> getFinancials(String ticker) async {

@@ -97,6 +97,30 @@ class FmpService {
         ticker, params['range']!, params['interval']!);
   }
 
+  Future<List<Map<String, dynamic>>> getIntradayOHLCV(
+      String ticker, {
+      String range = '1d',
+      String interval = '5m',
+      bool prepost = true,
+  }) {
+    return SigmaApiService.getIntraday(
+      ticker,
+      range,
+      interval,
+      prepost: prepost,
+    );
+  }
+
+  Future<Map<String, dynamic>> getOptionsChain(
+      String ticker, {
+      String? expiration,
+  }) {
+    return SigmaApiService.getOptions(
+      ticker,
+      expiration: expiration,
+    );
+  }
+
   // ── macro ──────────────────────────────────────────────────────────────────
 
   Future<Map<String, dynamic>> getMacroData() => SigmaApiService.getMacro();
@@ -436,7 +460,7 @@ class FmpService {
   Future<List<dynamic>> searchExchangeVariants(String query) =>
       SigmaApiService.search(query);
 
-    Future<Map<String, dynamic>> getLogo(String ticker) =>
+  Future<Map<String, dynamic>> getLogo(String ticker) =>
       SigmaApiService.getLogo(ticker);
 
   // ── AI context builder ────────────────────────────────────────────────────
