@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import time
 import threading
 from datetime import datetime, timezone
 from typing import Any
@@ -33,16 +34,40 @@ _cache_options    = TTLCache(maxsize=200, ttl=300)     # 5min — options chain
 _cache_events     = TTLCache(maxsize=200, ttl=3600)    # 1h   — calendar/divs
 _cache_news       = TTLCache(maxsize=200, ttl=300)     # 5min — news
 
+# Stale cache (no TTL) — keeps last known good value across restarts
+_stale: dict = {}
 
-def _cached(cache: TTLCache, key: str, fn):
-    """Thread-safe cache get-or-set."""
+_RATE_LIMIT_PHRASES = ("too many requests", "rate limit", "429")
+
+
+def _is_rate_limit(exc: Exception) -> bool:
+    return any(p in str(exc).lower() for p in _RATE_LIMIT_PHRASES)
+
+
+def _cached(cache: TTLCache, key: str, fn, retries: int = 2, backoff: float = 1.5):
+    """Thread-safe cache get-or-set with retry and stale fallback on rate limit."""
     with _LOCK:
         if key in cache:
             return cache[key]
-    result = fn()
-    with _LOCK:
-        cache[key] = result
-    return result
+    last_exc = None
+    for attempt in range(retries):
+        try:
+            result = fn()
+            with _LOCK:
+                cache[key] = result
+            _stale[key] = result  # persist last good value
+            return result
+        except Exception as exc:
+            last_exc = exc
+            if _is_rate_limit(exc):
+                if key in _stale:
+                    # Return stale data rather than crashing
+                    return {**_stale[key], "_stale": True, "_stale_reason": "rate_limited"}
+                if attempt < retries - 1:
+                    time.sleep(backoff * (attempt + 1))
+            else:
+                raise  # non-rate-limit errors bubble up immediately
+    raise last_exc
 
 
 def _safe(val, default=None):
@@ -388,14 +413,22 @@ async def news(symbol: str):
 
     def _fetch():
         t = yf.Ticker(sym)
+        raw = t.news or []
         items = []
-        for item in (t.news or [])[:20]:
+        for item in raw[:20]:
+            # yfinance >=0.2.50 wraps articles under item["content"]
+            content = item.get("content") or item
             items.append({
-                "title": item.get("title"),
-                "publisher": item.get("publisher"),
-                "link": item.get("link") or (item.get("canonicalUrl") or {}).get("url"),
-                "publishedAt": _safe(item.get("providerPublishTime")),
-                "type": item.get("type"),
+                "title": content.get("title"),
+                "publisher": (content.get("provider") or {}).get("displayName")
+                             or content.get("publisher"),
+                "link": (content.get("canonicalUrl") or {}).get("url")
+                        or content.get("link"),
+                "publishedAt": _safe(
+                    content.get("pubDate")
+                    or content.get("providerPublishTime")
+                ),
+                "type": content.get("contentType") or content.get("type"),
             })
         return {"symbol": sym, "articles": items, "source": "yfinance"}
 
