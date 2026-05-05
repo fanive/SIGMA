@@ -205,7 +205,7 @@ def _logo_urls(website: str | None, symbol: str | None = None) -> dict[str, str]
 
 @app.get("/")
 async def health():
-    return {"status": "ok", "service": "yfinance-gateway", "version": "3.1.0",
+    return {"status": "ok", "service": "yfinance-gateway", "version": "4.0.0",
             "time": datetime.now(timezone.utc).isoformat()}
 
 
