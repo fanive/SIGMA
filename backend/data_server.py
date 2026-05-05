@@ -287,99 +287,37 @@ async def get_equity_profile(symbol: str):
 
         return {
             "symbol": sym,
-            "name": info.get("shortName") or info.get("longName") or sym,
+            "companyName": info.get("shortName") or info.get("longName") or sym,
             "price": price,
             "previousClose": prev,
             "change": change,
-            "changesPercentage": change_pct,
             "changePercent": change_pct,
             "open": _num(info.get("open") or info.get("regularMarketOpen")),
             "dayHigh": _num(info.get("dayHigh") or info.get("regularMarketDayHigh")),
             "dayLow": _num(info.get("dayLow") or info.get("regularMarketDayLow")),
             "volume": _num(info.get("volume") or info.get("regularMarketVolume")),
-            "avgVolume": _num(info.get("averageVolume")),
             "marketCap": _num(info.get("marketCap")),
             "fiftyTwoWeekHigh": _num(info.get("fiftyTwoWeekHigh")),
             "fiftyTwoWeekLow": _num(info.get("fiftyTwoWeekLow")),
-            "fiftyDayAverage": _num(info.get("fiftyDayAverage")),
-            "twoHundredDayAverage": _num(info.get("twoHundredDayAverage")),
-            "preMarketPrice": _safe(info.get("preMarketPrice")),
-            "postMarketPrice": _safe(info.get("postMarketPrice")),
             "marketState": info.get("marketState") or "UNKNOWN",
-            "regularMarketTime": _safe(info.get("regularMarketTime")),
             "currency": info.get("currency") or "USD",
-            "exchange": info.get("exchange") or info.get("fullExchangeName") or "",
+            "exchange": info.get("fullExchangeName") or info.get("exchange") or "",
             "pe": _safe(info.get("trailingPE")),
-            "forwardPE": _safe(info.get("forwardPE")),
-            "priceToBook": _safe(info.get("priceToBook")),
-            "priceToSales": _safe(info.get("priceToSalesTrailing12Months")),
             "eps": _safe(info.get("trailingEps")),
-            "forwardEps": _safe(info.get("forwardEps")),
-            "dividendYield": _safe(info.get("dividendYield")),
-            "dividendRate": _safe(info.get("dividendRate")),
-            "exDividendDate": _safe(info.get("exDividendDate")),
             "beta": _safe(info.get("beta")),
-            "sharesOutstanding": _safe(info.get("sharesOutstanding")),
-            "floatShares": _safe(info.get("floatShares")),
-            "sharesShort": _safe(info.get("sharesShort")),
-            "shortRatio": _safe(info.get("shortRatio")),
-            "shortPercentOfFloat": _safe(info.get("shortPercentOfFloat")),
-            "heldPercentInsiders": _safe(info.get("heldPercentInsiders")),
-            "heldPercentInstitutions": _safe(info.get("heldPercentInstitutions")),
-            "enterpriseValue": _safe(info.get("enterpriseValue")),
-            "enterpriseToRevenue": _safe(info.get("enterpriseToRevenue")),
-            "enterpriseToEbitda": _safe(info.get("enterpriseToEbitda")),
-            "profitMargins": _safe(info.get("profitMargins")),
-            "grossMargins": _safe(info.get("grossMargins")),
-            "operatingMargins": _safe(info.get("operatingMargins")),
-            "returnOnEquity": _safe(info.get("returnOnEquity")),
-            "returnOnAssets": _safe(info.get("returnOnAssets")),
-            "revenueGrowth": _safe(info.get("revenueGrowth")),
-            "earningsGrowth": _safe(info.get("earningsGrowth")),
-            "totalRevenue": _safe(info.get("totalRevenue")),
-            "ebitda": _safe(info.get("ebitda")),
-            "totalDebt": _safe(info.get("totalDebt")),
-            "totalCash": _safe(info.get("totalCash")),
-            "freeCashflow": _safe(info.get("freeCashflow")),
-            "operatingCashflow": _safe(info.get("operatingCashflow")),
-            "debtToEquity": _safe(info.get("debtToEquity")),
-            "currentRatio": _safe(info.get("currentRatio")),
-            "quickRatio": _safe(info.get("quickRatio")),
-            "bookValue": _safe(info.get("bookValue")),
-            "targetHighPrice": _safe(info.get("targetHighPrice")),
-            "targetLowPrice": _safe(info.get("targetLowPrice")),
-            "targetMeanPrice": _safe(info.get("targetMeanPrice")),
-            "targetMedianPrice": _safe(info.get("targetMedianPrice")),
-            "recommendationMean": _safe(info.get("recommendationMean")),
-            "recommendationKey": info.get("recommendationKey"),
-            "numberOfAnalystOpinions": _safe(info.get("numberOfAnalystOpinions")),
+            "dividendYield": _safe(info.get("dividendYield")),
             "sector": info.get("sector"),
             "industry": info.get("industry"),
-            "country": info.get("country"),
-            # --- Profile / company identity (FMP-aligned) ---
-            "companyName": info.get("shortName") or info.get("longName") or sym,
             "ceo": ceo,
-            "phone": info.get("phone"),
-            "address": info.get("address1"),
-            "city": info.get("city"),
-            "state": info.get("state"),
-            "zip": info.get("zip"),
-            "exchangeFullName": info.get("fullExchangeName") or info.get("exchange") or "",
-            "ipoDate": info.get("ipoDate"),
-            "range": wk52_range,
-            "image": logo.get("primary"),
-            "isEtf": is_etf,
-            "isFund": is_fund,
-            "isAdr": is_adr,
-            "isActivelyTrading": info.get("tradeable", True),
             "website": website,
-            "logoUrl": logo.get("primary"),
-            "logoUrls": logo,
-            "fullTimeEmployees": _safe(info.get("fullTimeEmployees") or gf_data.get("stats", {}).get("Employees")),
+            "image": logo.get("primary"),
             "description": info.get("longBusinessSummary") or gf_data.get("description"),
-            "quoteType": quote_type,
-            "gf_enrichment": gf_data if gf_data else None,
-            "source": "yfinance",
+            "fullTimeEmployees": _safe(info.get("fullTimeEmployees") or gf_data.get("stats", {}).get("Employees")),
+            "source": "yfinance+google",
+            # Minimal compatibility aliases for frontend
+            "name": info.get("shortName") or info.get("longName") or sym,
+            "changesPercentage": change_pct,
+            "change_percent": change_pct,
         }
 
     try:
@@ -467,16 +405,15 @@ async def get_equity_intelligence(symbol: str):
 
     def _fetch():
         t = yf.Ticker(sym)
+        # Pruned: only research-specific data
         return {
             "symbol": sym,
             "analystPriceTargets": _clean(t.analyst_price_targets),
-            "recommendations": _df_to_list(t.recommendations, limit=20),
-            "upgradesDowngrades": _df_to_list(t.upgrades_downgrades, limit=30),
-            "earningsHistory": _df_to_list(t.earnings_history, limit=12),
+            "recommendations": _df_to_list(t.recommendations, limit=10),
+            "upgradesDowngrades": _df_to_list(t.upgrades_downgrades, limit=15),
+            "earningsHistory": _df_to_list(t.earnings_history, limit=8),
             "earningsEstimate": _df_to_list(t.earnings_estimate),
             "revenueEstimate": _df_to_list(t.revenue_estimate),
-            "epsTrend": _df_to_list(t.eps_trend),
-            "growthEstimates": _df_to_list(t.growth_estimates),
             "source": "yfinance",
         }
 
@@ -496,13 +433,12 @@ async def get_equity_ownership(symbol: str):
 
     def _fetch():
         t = yf.Ticker(sym)
+        # Pruned: only ownership-specific data
         return {
             "symbol": sym,
-            "majorHolders": _df_to_list(t.major_holders),
-            "institutionalHolders": _df_to_list(t.institutional_holders, limit=25),
-            "mutualFundHolders": _df_to_list(t.mutualfund_holders, limit=25),
-            "insiderTransactions": _df_to_list(t.insider_transactions, limit=30),
-            "insiderRoster": _df_to_list(t.insider_roster_holders, limit=20),
+            "institutionalHolders": _df_to_list(t.institutional_holders, limit=20),
+            "mutualFundHolders": _df_to_list(t.mutualfund_holders, limit=20),
+            "insiderTransactions": _df_to_list(t.insider_transactions, limit=25),
             "source": "yfinance",
         }
 
@@ -605,21 +541,31 @@ async def get_equity_news(symbol: str):
 
 @market_router.get("/quotes")
 async def multi_quote(symbols: str = Query(..., description="Comma separated symbols")):
-    """Lightweight price-only snapshot for a list of tickers. Cached 30s per ticker."""
+    """Fast, lightweight price-only snapshot for watchlists. No logos or enrichment."""
     sym_list = [s.strip().upper() for s in symbols.split(",") if s.strip()][:50]
     out = []
-    for sym in sym_list:
-        def _fetch(s=sym):
-            t = yf.Ticker(s)
+
+    for s in sym_list:
+        def _fetch_fast(sym=s):
+            t = yf.Ticker(sym)
             fi = t.fast_info
-            price = _num(fi.get("lastPrice") if fi else 0)
-            prev = _num(fi.get("previousClose") if fi else 0)
+            info = t.info or {}
+            price = _num(fi.get("lastPrice") or info.get("regularMarketPrice"))
+            prev = _num(fi.get("previousClose") or info.get("regularMarketPreviousClose"))
             change = price - prev if prev > 0 else 0
             change_pct = (change / prev * 100) if prev > 0 else 0
-            return {"symbol": s, "price": price, "change": change,
-                    "changesPercentage": change_pct, "source": "yfinance"}
+            return {
+                "symbol": sym,
+                "companyName": info.get("shortName") or info.get("longName") or sym,
+                "price": price,
+                "changePercent": change_pct,
+                "marketCap": _num(fi.get("marketCap")),
+            }
+
         try:
-            out.append(_cached(_cache_price, f"fast:{sym}", _fetch))
+            # Cache key prefixed with 'fast:' to avoid collision with heavy profile data
+            q = _cached(_cache_price, f"fast:{s}", _fetch_fast)
+            out.append(q)
         except Exception:
             continue
     return out
