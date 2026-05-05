@@ -32,9 +32,9 @@ class GenericEngineDetailScreen extends StatelessWidget {
             const SizedBox(height: 32),
             _buildInfoSection(context, isDark),
             const SizedBox(height: 32),
-            _buildDataPoint('MODEL CONFIDENCE', '92%', isDark, AppTheme.greenAccent),
-            _buildDataPoint('BACKTESTED ALPHA', '+14.2%', isDark, AppTheme.amberAccent),
-            _buildDataPoint('STATUS', 'STABLE / LIVE', isDark, AppTheme.blueAccent),
+            _buildDataPoint('MODEL CONFIDENCE', 'PREVIEW', isDark, AppTheme.greenAccent),
+            _buildDataPoint('HISTORICAL CONTEXT', 'N/A', isDark, AppTheme.amberAccent),
+            _buildDataPoint('STATUS', 'PREVIEW / NOT LIVE', isDark, AppTheme.blueAccent),
             const SizedBox(height: 48),
             Center(
               child: Opacity(
@@ -44,7 +44,7 @@ class GenericEngineDetailScreen extends StatelessWidget {
                     const Icon(Icons.data_object, size: 48),
                     const SizedBox(height: 16),
                     Text(
-                      'PROCESSING INSTITUTIONAL FEED...',
+                      'PROCESSING RESEARCH FEED...',
                       style: GoogleFonts.lora(fontSize: 10, fontWeight: FontWeight.w700),
                     ),
                   ],
@@ -90,12 +90,12 @@ class GenericEngineDetailScreen extends StatelessWidget {
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Text(
-          'ALGORITHM SPECIFICATIONS',
+          'ENGINE SPECIFICATIONS',
           style: GoogleFonts.lora(fontSize: 11, fontWeight: FontWeight.w900, color: AppTheme.primary),
         ),
         const SizedBox(height: 16),
         Text(
-          'This engine uses a proprietary multi-agent verification system to analyze ${engine.title.toLowerCase()} signals. It incorporates real-time data from 12 institutional providers and filters for asymmetric risk/reward setups.',
+          'This engine uses an internal multi-step workflow to analyze ${engine.title.toLowerCase()} research inputs. It combines third-party market data with Sigma scoring layers to surface items worth reviewing.',
           style: AppTheme.body(context, size: 14),
         ),
       ],

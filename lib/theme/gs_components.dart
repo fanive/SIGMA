@@ -55,8 +55,8 @@ class GSBackButton extends StatelessWidget {
               const SizedBox(width: 4),
               Text(
                 label!,
-                style: GoogleFonts.lora(
-                  fontSize: 15,
+                style: GoogleFonts.ibmPlexSans(
+                  fontSize: 14,
                   fontWeight: FontWeight.w500,
                   color: effectiveColor,
                 ),
@@ -178,11 +178,11 @@ class _GSPageHeader extends StatelessWidget {
             const SizedBox(height: 6),
             Text(
               subtitle!,
-              style: GoogleFonts.lora(
+              style: GoogleFonts.ibmPlexSans(
                 fontSize: 9,
-                fontWeight: FontWeight.w700,
+                fontWeight: FontWeight.w600,
                 color: AppTheme.getSecondaryText(context),
-                letterSpacing: 1.5,
+                letterSpacing: 1.6,
               ),
             ),
           ],
@@ -213,11 +213,11 @@ class GSSectionHeader extends StatelessWidget {
         children: [
           Text(
             label,
-            style: GoogleFonts.lora(
+            style: GoogleFonts.ibmPlexSans(
               fontSize: 9,
-              fontWeight: FontWeight.w900,
+              fontWeight: FontWeight.w600,
               color: AppTheme.accent,
-              letterSpacing: 2.0,
+              letterSpacing: 1.8,
             ),
           ),
           const SizedBox(width: 12),
@@ -259,7 +259,7 @@ class GSCard extends StatelessWidget {
     final container = Container(
       decoration: BoxDecoration(
         color: surface,
-        borderRadius: BorderRadius.circular(AppTheme.radiusMd),
+        borderRadius: BorderRadius.circular(2),
         border: Border.all(color: border, width: 0.5),
       ),
       padding: padding,
@@ -291,7 +291,7 @@ class GSSettingsGroup extends StatelessWidget {
     return Container(
       decoration: BoxDecoration(
         color: surface,
-        borderRadius: BorderRadius.circular(AppTheme.radiusMd),
+        borderRadius: BorderRadius.circular(2),
         border: Border.all(color: border, width: 0.5),
       ),
       child: Column(
@@ -363,10 +363,11 @@ class GSListTile extends StatelessWidget {
             if (value != null)
               Text(
                 value!,
-                style: GoogleFonts.lora(
-                  fontSize: 11,
+                style: GoogleFonts.ibmPlexSans(
+                  fontSize: 10,
                   fontWeight: FontWeight.w600,
                   color: AppTheme.getSecondaryText(context),
+                  letterSpacing: 0.5,
                 ),
               ),
             if (trailing != null) ...[
@@ -414,9 +415,9 @@ class GSBadge extends StatelessWidget {
       ),
       child: Text(
         label,
-        style: GoogleFonts.lora(
+        style: GoogleFonts.ibmPlexSans(
           fontSize: 8,
-          fontWeight: FontWeight.w900,
+          fontWeight: FontWeight.w700,
           color: fg,
           letterSpacing: 0.8,
         ),

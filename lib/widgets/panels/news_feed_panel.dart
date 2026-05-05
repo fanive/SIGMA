@@ -29,6 +29,22 @@ class NewsFeedPanel extends StatelessWidget {
           final intel = sp.marketIntelligence;
           final rawNews = overview?.news ?? [];
 
+          if (!sp.isMarketLoading && overview == null) {
+            WidgetsBinding.instance.addPostFrameCallback((_) {
+              if (context.mounted) {
+                sp.fetchMarketOverview(forceRefresh: true);
+              }
+            });
+          }
+
+          if (!sp.isMarketLoading && rawNews.isEmpty && !sp.isNewsEnriching) {
+            WidgetsBinding.instance.addPostFrameCallback((_) {
+              if (context.mounted) {
+                sp.fetchMarketOverview(forceRefresh: true);
+              }
+            });
+          }
+
           if (sp.isMarketLoading) {
             return const Center(
               child: CircularProgressIndicator(strokeWidth: 1.5),
@@ -48,19 +64,6 @@ class NewsFeedPanel extends StatelessWidget {
             backgroundColor: AppTheme.backgroundShim(context),
             child: CustomScrollView(
               slivers: [
-                SliverToBoxAdapter(
-                  child: Padding(
-                    padding: const EdgeInsets.fromLTRB(20, 20, 20, 8),
-                    child: InstitutionalHeader(
-                      eyebrow: 'Market briefing',
-                      title: 'News & Catalyst Flow',
-                      thesis:
-                          'Un flux éditorial orienté impact : comprendre quelles nouvelles changent les hypothèses, les multiples ou le calendrier.',
-                      icon: Icons.article_rounded,
-                    ),
-                  ),
-                ),
-
                 if (sp.isNewsEnriching)
                   SliverToBoxAdapter(
                     child: Padding(
@@ -125,11 +128,11 @@ class NewsFeedPanel extends StatelessWidget {
                 Text('QUANTUM INTELLIGENCE', style: AppTheme.label(context)),
                 const Spacer(),
                 Text(intel.regime.toUpperCase(),
-                    style: GoogleFonts.lora(
+                    style: GoogleFonts.ibmPlexSans(
                         fontSize: 10,
                         color: regimeColor.withValues(alpha: 0.8),
-                        fontWeight: FontWeight.w900,
-                        letterSpacing: 1.0)),
+                        fontWeight: FontWeight.w700,
+                        letterSpacing: 1.6)),
               ],
             ),
             const SizedBox(height: 16),
@@ -174,11 +177,11 @@ class NewsFeedPanel extends StatelessWidget {
             width: 0.5),
       ),
       child: Text(text.toUpperCase(),
-          style: GoogleFonts.lora(
+          style: GoogleFonts.ibmPlexSans(
               fontSize: 9,
               color: dark ? AppTheme.white38 : AppTheme.black38,
-              fontWeight: FontWeight.w900,
-              letterSpacing: 1.0)),
+              fontWeight: FontWeight.w600,
+              letterSpacing: 1.4)),
     );
   }
 
@@ -194,10 +197,10 @@ class NewsFeedPanel extends StatelessWidget {
         const SizedBox(width: 12),
         Text(
           'SYNCHRONIZING...',
-          style: GoogleFonts.lora(
+          style: GoogleFonts.ibmPlexSans(
             fontSize: 9,
             color: AppTheme.gold.withValues(alpha: 0.6),
-            fontWeight: FontWeight.w900,
+            fontWeight: FontWeight.w600,
             letterSpacing: 2.0,
           ),
         ),
@@ -231,11 +234,11 @@ class NewsFeedPanel extends StatelessWidget {
             Row(
               children: [
                 Text(item.source.toUpperCase(),
-                    style: GoogleFonts.lora(
+                    style: GoogleFonts.ibmPlexSans(
                         color: dim,
                         fontSize: 9,
-                        fontWeight: FontWeight.w900,
-                        letterSpacing: 1.2)),
+                        fontWeight: FontWeight.w600,
+                        letterSpacing: 1.4)),
                 const SizedBox(width: 8),
                 Container(
                   padding:
@@ -245,23 +248,23 @@ class NewsFeedPanel extends StatelessWidget {
                     borderRadius: BorderRadius.circular(2),
                   ),
                   child: Text(item.sentiment,
-                      style: GoogleFonts.lora(
+                      style: GoogleFonts.ibmPlexSans(
                           fontSize: 8,
-                          fontWeight: FontWeight.w800,
+                          fontWeight: FontWeight.w700,
                           color: sentColor)),
                 ),
                 const Spacer(),
                 Text(_formatDate(item.publishedAt),
-                    style: GoogleFonts.lora(
+                    style: GoogleFonts.ibmPlexSans(
                         color: dim.withValues(alpha: 0.5),
                         fontSize: 8,
-                        fontWeight: FontWeight.w700)),
+                        fontWeight: FontWeight.w600)),
                 const SizedBox(width: 8),
                 if (item.tickers.isNotEmpty)
                   ...item.tickers.take(3).map((t) => Padding(
                         padding: const EdgeInsets.only(left: 6),
                         child: Text(t,
-                            style: GoogleFonts.lora(
+                            style: GoogleFonts.ibmPlexSans(
                                 fontSize: 9,
                                 fontWeight: FontWeight.w700,
                                 color:
@@ -328,17 +331,17 @@ class NewsFeedPanel extends StatelessWidget {
               Row(
                 children: [
                   Text(source.toUpperCase(),
-                      style: GoogleFonts.lora(
+                      style: GoogleFonts.ibmPlexSans(
                           color: dim,
                           fontSize: 9,
-                          fontWeight: FontWeight.w900,
-                          letterSpacing: 1.0)),
+                          fontWeight: FontWeight.w600,
+                          letterSpacing: 1.4)),
                   const Spacer(),
                   Text(_formatDate(n['publishedAt']),
-                      style: GoogleFonts.lora(
+                      style: GoogleFonts.ibmPlexSans(
                           color: dim.withValues(alpha: 0.5),
                           fontSize: 8,
-                          fontWeight: FontWeight.w700)),
+                          fontWeight: FontWeight.w600)),
                 ],
               ),
               const SizedBox(height: 6),

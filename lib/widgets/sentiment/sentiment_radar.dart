@@ -336,7 +336,7 @@ class SentimentRadar extends StatelessWidget {
   Widget _buildBacktestInsight(
       BuildContext context, Map<String, dynamic> backtest, bool isDark) {
     return Text(
-      'BACKTEST STRATÉGIQUE : L\'achat sous ce régime génère historiquement un alpha de ${(backtest['avg_return_1m'] ?? 0) * 100}% à T+30.',
+      'CONTEXTE HISTORIQUE : sous ce regime, le rendement moyen observe a T+30 a ete de ${(backtest['avg_return_1m'] ?? 0) * 100}%. Cette statistique est descriptive et non predictive.',
       style: AppTheme.body(context, size: 10)
           .copyWith(fontWeight: FontWeight.w800, color: AppTheme.gold),
     );

@@ -12,13 +12,14 @@ import 'package:stock_market_data/stock_market_data.dart'
 import '../models/sigma_models.dart';
 import '../services/sigma_service.dart';
 import '../services/favorites_service.dart';
-import '../services/ollama_news_service.dart';
 import '../services/cache_service.dart';
 import '../services/embedding_service.dart';
 import '../services/vector_store.dart';
 import '../services/rag_service.dart';
 import '../services/sentiment_service.dart';
 import '../services/sigma_engine_service.dart';
+import '../services/sigma_api_service.dart';
+import '../utils/logo_resolver.dart';
 import '../models/sigma_engines.dart';
 
 class SigmaProvider extends ChangeNotifier {
@@ -37,14 +38,15 @@ class SigmaProvider extends ChangeNotifier {
     initialize();
     // Listen to FavoritesService for cross-module synchronization
     FavoritesService().updateStream.listen((_) {
-      dev.log('🔔 Watchlist update detected via FavoritesService',
+      dev.log('ðŸ”” Watchlist update detected via FavoritesService',
           name: 'SigmaProvider');
       loadFavorites(forceRefresh: true);
       fetchCatalystRadar(forceRefresh: true);
     });
   }
 
-  List<dynamic> searchResults = [];
+  List<Map<String, dynamic>> searchResults = [];
+  final Map<String, List<Map<String, dynamic>>> _searchCache = {};
   bool isSearching = false;
   int _searchRequestId = 0;
   bool isMarketLoading = false;
@@ -60,13 +62,14 @@ class SigmaProvider extends ChangeNotifier {
   ThemeMode themeMode = ThemeMode.system;
   String? currentTicker;
   AnalysisData? currentAnalysis;
+  bool isDebateLoading = false;
   TickerIntelligence? currentIntelligence;
   MarketOverview? marketOverview;
   double loadingProgress = 0.0;
   String loadingMessage = '';
   List<String> recentSearches = [];
   List<String> favoriteTickers = [];
-  Map<String, dynamic> favoriteQuotes = {};
+  Map<String, Map<String, dynamic>> favoriteQuotes = {};
   bool isWatchlistLoading = false;
   bool isIntelligenceLoading = false;
   DailyCreamReport? dailyCreamReport;
@@ -194,8 +197,34 @@ class SigmaProvider extends ChangeNotifier {
     super.dispose();
   }
 
-  /// Getter public pour le RAG service (utilisé par le chatbot).
+  /// Getter public pour le RAG service (utilisÃ© par le chatbot).
   RAGService? get ragService => _ragService;
+
+  // 🐂 BULL VS 🐻 BEAR DEBATE
+  Future<void> runBullBearDebate() async {
+    if (currentAnalysis == null) return;
+    
+    isDebateLoading = true;
+    notifyListeners();
+    
+    try {
+      final debate = await _sigmaService.generateBullBearDebate(currentAnalysis!);
+      currentAnalysis = currentAnalysis!.copyWith(
+        bullCase: debate['bull'],
+        bearCase: debate['bear'],
+      );
+      
+      // Update cache
+      _analysisCache[currentAnalysis!.ticker.toUpperCase()] = currentAnalysis!;
+      await _saveAnalysisCache();
+      
+    } catch (e) {
+      dev.log('❌ Error in SigmaProvider.runBullBearDebate: $e');
+    } finally {
+      isDebateLoading = false;
+      notifyListeners();
+    }
+  }
 
   Future<void> _initRAG() async {
     try {
@@ -254,7 +283,7 @@ class SigmaProvider extends ChangeNotifier {
         await prefs.remove(key);
       }
       dev.log(
-        '📦 Loaded ${_analysisCache.length} fresh analyses from cache',
+        'ðŸ“¦ Loaded ${_analysisCache.length} fresh analyses from cache',
         name: 'SigmaProvider',
       );
     } catch (e) {
@@ -345,7 +374,7 @@ class SigmaProvider extends ChangeNotifier {
   }
 
   Future<void> clearCache() async {
-    dev.log('☢️ DESTRUCTIVE RESET INITIATED', name: 'SigmaProvider');
+    dev.log('â˜¢ï¸ DESTRUCTIVE RESET INITIATED', name: 'SigmaProvider');
 
     // 1. Clear Memory
     _analysisCache.clear();
@@ -396,15 +425,15 @@ class SigmaProvider extends ChangeNotifier {
       await prefs.setBool('sigma_legal_accepted', legalAccepted);
     stickers.forEach((k, v) async => await prefs.setString(k, v));
 
-    dev.log('🗑️ SharedPreferences NUKED & RESTORED (Protected only)',
+    dev.log('ðŸ—‘ï¸ SharedPreferences NUKED & RESTORED (Protected only)',
         name: 'SigmaProvider');
 
     // 3. Clear Hive Cache
     try {
       await CacheService.clearAll();
-      dev.log('🗑️ Hive Cache Box Purged.', name: 'SigmaProvider');
+      dev.log('ðŸ—‘ï¸ Hive Cache Box Purged.', name: 'SigmaProvider');
     } catch (e) {
-      dev.log('⚠️ Hive Purge Warning: $e', name: 'SigmaProvider');
+      dev.log('âš ï¸ Hive Purge Warning: $e', name: 'SigmaProvider');
     }
 
     // 4. Reset Engine
@@ -412,7 +441,7 @@ class SigmaProvider extends ChangeNotifier {
     NewsIntelligenceService.reset();
 
     notifyListeners();
-    dev.log('✅ SYSTEM FULLY RESET - READY FOR FRESH ANALYSIS',
+    dev.log('âœ… SYSTEM FULLY RESET - READY FOR FRESH ANALYSIS',
         name: 'SigmaProvider');
   }
 
@@ -421,7 +450,7 @@ class SigmaProvider extends ChangeNotifier {
     if (isWatchlistLoading && !forceRefresh) return;
 
     final favorites = await FavoritesService().getFavorites();
-    dev.log('📋 Watchlist synced: ${favorites.length} tickers',
+    dev.log('ðŸ“‹ Watchlist synced: ${favorites.length} tickers',
         name: 'SigmaProvider');
 
     // Update tickers list immediately so UI shows rows/loaders instantly
@@ -438,29 +467,500 @@ class SigmaProvider extends ChangeNotifier {
     isWatchlistLoading = true;
     notifyListeners();
 
-    final Map<String, dynamic> newQuotes = {};
+    final Map<String, Map<String, dynamic>> newQuotes = {};
 
     try {
-      final quotes = await _sigmaService.fmpService.getQuotes(favorites);
+      final quotes = await _sigmaService.marketDataService.getQuotes(favorites);
       for (var quote in quotes) {
-        final symbol = quote['symbol']?.toString().toUpperCase();
+        final normalizedQuote = _normalizeStringMap(quote);
+        final symbol = normalizedQuote['symbol']?.toString().toUpperCase();
         if (symbol == null) continue;
 
         newQuotes[symbol] = {
-          ...quote,
-          'price': quote['price'] ?? 0.0,
-          'changePercent':
-              quote['changesPercentage'] ?? quote['changePercent'] ?? 0.0,
-          'longName': quote['name'] ?? symbol,
+          ...normalizedQuote,
+          'price': normalizedQuote['price'] ?? 0.0,
+          'changePercent': normalizedQuote['changesPercentage'] ??
+              normalizedQuote['changePercent'] ??
+              0.0,
+          'longName': normalizedQuote['name'] ?? symbol,
         };
       }
     } catch (e) {
-      dev.log('⚠️ FMP Batch Quote Error: $e', name: 'SigmaProvider');
+      dev.log('âš ï¸ Sigma batch quote error: $e', name: 'SigmaProvider');
     }
 
     favoriteQuotes = newQuotes;
     isWatchlistLoading = false;
     notifyListeners();
+  }
+
+  Map<String, dynamic> _normalizeStringMap(dynamic raw) {
+    if (raw is Map<String, dynamic>) return raw;
+    if (raw is Map) {
+      return raw.map(
+        (key, value) => MapEntry(key.toString(), value),
+      );
+    }
+    return <String, dynamic>{};
+  }
+
+  String _fallbackMetric(dynamic value,
+      {String prefix = '', String suffix = ''}) {
+    if (value == null) return 'N/A';
+    if (value is num) {
+      final asDouble = value.toDouble();
+      final formatted = asDouble.abs() >= 100
+          ? asDouble.toStringAsFixed(0)
+          : asDouble.toStringAsFixed(2);
+      return '$prefix$formatted$suffix';
+    }
+    final text = value.toString().trim();
+    if (text.isEmpty) return 'N/A';
+    return '$prefix$text$suffix';
+  }
+
+  List<FinancialMatrixItem> _buildFallbackFinancialMatrix(
+    Map<String, dynamic> quote,
+  ) {
+    final metrics = <FinancialMatrixItem>[
+      FinancialMatrixItem(
+        label: 'CAPITALISATION BOURS.',
+        value: _fallbackMetric(quote['marketCap']),
+        assessment: 'NEUTRAL',
+      ),
+      FinancialMatrixItem(
+        label: 'P/E RATIO',
+        value: _fallbackMetric(quote['trailingPE'] ?? quote['pe']),
+        assessment: 'NEUTRAL',
+      ),
+      FinancialMatrixItem(
+        label: 'ROE',
+        value: _fallbackMetric(quote['returnOnEquity'], suffix: '%'),
+        assessment: 'NEUTRAL',
+      ),
+      FinancialMatrixItem(
+        label: 'BETA',
+        value: _fallbackMetric(quote['beta']),
+        assessment: 'NEUTRAL',
+      ),
+      FinancialMatrixItem(
+        label: 'OPERATING MARGIN',
+        value: _fallbackMetric(quote['operatingMargins'], suffix: '%'),
+        assessment: 'NEUTRAL',
+      ),
+      FinancialMatrixItem(
+        label: 'NET MARGIN',
+        value: _fallbackMetric(quote['profitMargins'], suffix: '%'),
+        assessment: 'NEUTRAL',
+      ),
+    ];
+
+    return metrics.where((item) => item.value != 'N/A').toList(growable: false);
+  }
+
+  Future<AnalysisData> _buildRawFallbackAnalysis(
+    String ticker,
+    String currentLanguage,
+  ) async {
+    final quote = _normalizeStringMap(
+      await _sigmaService.marketDataService.getQuoteMap(ticker),
+    );
+    final rawNews = await _sigmaService.marketDataService.getStockNews(
+      ticker,
+      limit: 8,
+    );
+    final companyNews = rawNews
+        .map((item) => NewsArticle.fromJson(_normalizeStringMap(item)))
+        .where((item) => item.title.trim().isNotEmpty)
+        .toList(growable: false);
+
+    final companyName =
+        (quote['longName'] ?? quote['shortName'] ?? ticker).toString();
+    final price = quote['price'] ?? quote['regularMarketPrice'];
+    final changePercent = (quote['changePercent'] ??
+        quote['regularMarketChangePercent'] ??
+        quote['changesPercentage']) as num?;
+    final isFr = currentLanguage == 'FR';
+
+    return AnalysisData(
+      ticker: ticker,
+      companyName: companyName,
+      companyProfile: isFr
+          ? 'Mode secours actif. Le moteur narratif est indisponible, mais les donnees marche et societes ont ete rechargees pour eviter un ecran vide.'
+          : 'Fallback mode active. The narrative engine is unavailable, but market and company data were reloaded to avoid a blank screen.',
+      lastUpdated: DateTime.now().toIso8601String(),
+      price: _fallbackMetric(price, prefix: price == null ? '' : '\$'),
+      verdict: isFr ? 'A VERIFIER' : 'REVIEW',
+      verdictReasons: [
+        isFr
+            ? 'La synthese IA a echoue. Les donnees brutes restent affichees pour poursuivre la recherche.'
+            : 'AI synthesis failed. Raw market data remains available so research can continue.',
+      ],
+      riskLevel: isFr ? 'MOYEN' : 'MEDIUM',
+      pros: const [],
+      cons: const [],
+      sigmaScore: 50.0,
+      confidence: 0.0,
+      summary: isFr
+          ? '$companyName est affiche en mode secours avec prix, identite entreprise, quelques ratios et dernieres news reelles. Relancez l\'analyse pour recuperer la synthese complete.'
+          : '$companyName is shown in fallback mode with live price, company identity, key ratios, and latest real news. Retry analysis to recover the full synthesis.',
+      hiddenSignals: const [],
+      catalysts: const [],
+      volatility: VolatilityData(
+        ivRank: 'N/A',
+        beta: _fallbackMetric(quote['beta']),
+        interpretation: isFr
+            ? 'Lecture brute sans synthese IA.'
+            : 'Raw reading without AI synthesis.',
+      ),
+      fearAndGreed: StockSentiment(
+        score: 50,
+        label: isFr ? 'NEUTRE' : 'NEUTRAL',
+        interpretation: 'N/A',
+      ),
+      marketSentiment: MarketSentiment(
+        score: 50,
+        label: isFr ? 'NEUTRE' : 'NEUTRAL',
+      ),
+      tradeSetup: TradeSetup(
+        entryZone: 'N/A',
+        targetPrice: 'N/A',
+        stopLoss: 'N/A',
+        riskRewardRatio: 'N/A',
+      ),
+      institutionalActivity: InstitutionalActivity(
+        smartMoneySentiment: 50.0,
+        retailSentiment: 50.0,
+        darkPoolInterpretation: isFr
+            ? 'Aucune lecture consolidee disponible en mode secours.'
+            : 'No consolidated flow reading available in fallback mode.',
+      ),
+      technicalAnalysis: const [],
+      projectedTrend: const [],
+      financialMatrix: _buildFallbackFinancialMatrix(quote),
+      sectorPeers: const [],
+      topSources: const [],
+      analystRecommendations: AnalystRecommendation(
+        strongBuy: 0,
+        buy: 0,
+        hold: 0,
+        sell: 0,
+        strongSell: 0,
+        period: '',
+      ),
+      actionPlan: [
+        isFr
+            ? 'Verifier les news recentes et la reaction de marche avant toute conclusion.'
+            : 'Review recent news and market reaction before drawing a conclusion.',
+        isFr
+            ? 'Relancer l\'analyse complete quand les fournisseurs repondent de nouveau.'
+            : 'Retry the full analysis once providers respond again.',
+      ],
+      companyNews: companyNews,
+      scoreMethodology: isFr
+          ? 'Mode secours: rapport compose a partir des donnees marche disponibles sans synthese IA complete.'
+          : 'Fallback mode: report assembled from available market data without full AI synthesis.',
+      employees: quote['fullTimeEmployees'] is num
+          ? (quote['fullTimeEmployees'] as num).toInt()
+          : null,
+      website: quote['website']?.toString(),
+      sector: quote['sector']?.toString(),
+      industry: quote['industry']?.toString(),
+      country: quote['country']?.toString(),
+      exchange: quote['exchange']?.toString(),
+      ceo: quote['companyOfficers'] is List &&
+              (quote['companyOfficers'] as List).isNotEmpty
+          ? _normalizeStringMap(
+                  (quote['companyOfficers'] as List).first)['name']
+              ?.toString()
+          : null,
+      image: quote['logoUrl']?.toString() ?? quote['image']?.toString(),
+      changePercent: changePercent?.toDouble(),
+    );
+  }
+
+  Map<String, dynamic> _normalizeComparisonQuoteToKeyStats(
+    Map<String, dynamic> quote,
+  ) {
+    return {
+      'marketCap': quote['marketCap'],
+      'enterpriseValue': quote['enterpriseValue'],
+      'trailingPE': quote['pe'] ?? quote['trailingPE'],
+      'forwardPE': quote['forwardPE'],
+      'pegRatio': quote['pegRatio'],
+      'priceToSales': quote['priceToSales'],
+      'priceToBook': quote['priceToBook'],
+      'enterpriseToRevenue': quote['enterpriseToRevenue'],
+      'enterpriseToEbitda': quote['enterpriseToEbitda'],
+      'profitMargins': quote['profitMargins'],
+      'operatingMargins': quote['operatingMargins'],
+      'returnOnAssets': quote['returnOnAssets'],
+      'returnOnEquity': quote['returnOnEquity'],
+      'revenue': quote['totalRevenue'] ?? quote['revenue'],
+      'revenueGrowth': quote['revenueGrowth'],
+      'grossProfits': quote['grossProfits'],
+      'freeCashflow': quote['freeCashflow'],
+      'operatingCashflow': quote['operatingCashflow'],
+      'totalCash': quote['totalCash'],
+      'totalDebt': quote['totalDebt'],
+      'debtToEquity': quote['debtToEquity'],
+      'currentRatio': quote['currentRatio'],
+      'quickRatio': quote['quickRatio'],
+      'totalCashPerShare': quote['totalCashPerShare'],
+      'revenuePerShare': quote['revenuePerShare'],
+      'beta': quote['beta'],
+      'shortRatio': quote['shortRatio'],
+      'shortPercentOfFloat': quote['shortPercentOfFloat'],
+      'sharesOutstanding': quote['sharesOutstanding'],
+      'floatShares': quote['floatShares'],
+      'dividendYield': quote['dividendYield'],
+      'dividendRate': quote['dividendRate'],
+      'fiveYearAvgDividendYield': quote['fiveYearAvgDividendYield'],
+      'payoutRatio': quote['payoutRatio'],
+      'fiftyTwoWeekHigh': quote['fiftyTwoWeekHigh'],
+      'fiftyTwoWeekLow': quote['fiftyTwoWeekLow'],
+      'fiftyDayAverage': quote['fiftyDayAverage'],
+      'twoHundredDayAverage': quote['twoHundredDayAverage'],
+      'trailingAnnualDividendYield': quote['trailingAnnualDividendYield'],
+      'earningsGrowth': quote['earningsGrowth'],
+      'averageVolume': quote['avgVolume'] ?? quote['averageVolume'],
+      'trailingEps': quote['eps'] ?? quote['trailingEps'],
+      'forwardEps': quote['forwardEps'],
+    };
+  }
+
+  List<Map<String, dynamic>> _extractComparisonHistoricals(
+    Map<String, dynamic> financials,
+  ) {
+    final annualIncome = (financials['annualIncomeStatement'] as List?) ?? [];
+    return annualIncome.take(4).whereType<Map>().map((row) {
+      final item = Map<String, dynamic>.from(row);
+      return {
+        'date': item['index'] ?? item['date'] ?? 'N/A',
+        'revenue': item['TotalRevenue'] ?? item['revenue'] ?? 0,
+        'netIncome': item['NetIncome'] ??
+            item['NetIncomeLoss'] ??
+            item['netIncome'] ??
+            0,
+        'eps': item['eps'] ?? 0.0,
+      };
+    }).toList(growable: false);
+  }
+
+  List<FinancialMatrixItem> _enrichComparisonFinancialMatrix(
+    AnalysisData analysis,
+    KeyStatistics keyStats,
+  ) {
+    final matrix = List<FinancialMatrixItem>.from(analysis.financialMatrix);
+
+    void upsert(String label, String value) {
+      if (value == 'N/A' || value.isEmpty) {
+        return;
+      }
+      final index = matrix.indexWhere(
+        (item) => item.label.toUpperCase().contains(label.toUpperCase()),
+      );
+      if (index >= 0) {
+        matrix[index] = matrix[index].copyWith(value: value);
+      } else {
+        matrix.add(
+          FinancialMatrixItem(
+            label: label,
+            value: value,
+            assessment: 'NEUTRAL',
+          ),
+        );
+      }
+    }
+
+    String pct(double value) => '${(value * 100).toStringAsFixed(1)}%';
+    String numFmt(double value) => value.toStringAsFixed(2);
+
+    if (keyStats.trailingPE > 0)
+      upsert('P/E RATIO', numFmt(keyStats.trailingPE));
+    if (keyStats.enterpriseToEbitda > 0) {
+      upsert('EV/EBITDA', numFmt(keyStats.enterpriseToEbitda));
+    }
+    if (keyStats.revenueGrowth != 0) {
+      upsert('REVENUE GROWTH', pct(keyStats.revenueGrowth));
+    }
+    if (keyStats.earningsGrowth != 0) {
+      upsert('EARNINGS GROWTH', pct(keyStats.earningsGrowth));
+    }
+    if (keyStats.operatingMargins != 0) {
+      upsert('OPERATING MARGIN', pct(keyStats.operatingMargins));
+    }
+    if (keyStats.profitMargins != 0) {
+      upsert('NET MARGIN', pct(keyStats.profitMargins));
+    }
+    if (keyStats.returnOnEquity != 0)
+      upsert('ROE', pct(keyStats.returnOnEquity));
+    if (keyStats.debtToEquity != 0)
+      upsert('DEBT/EQUITY', numFmt(keyStats.debtToEquity));
+
+    return matrix;
+  }
+
+  Future<AnalysisData> _enrichComparisonAnalysis(AnalysisData analysis) async {
+    final ticker = analysis.ticker.toUpperCase();
+    try {
+      final results = await Future.wait([
+        SigmaApiService.getQuote(ticker),
+        SigmaApiService.getAnalysis(ticker),
+        SigmaApiService.getFinancials(ticker),
+      ]);
+
+      final quote = results[0] as Map<String, dynamic>;
+      final endpointAnalysis = results[1] as Map<String, dynamic>;
+      final financials = results[2] as Map<String, dynamic>;
+
+      final keyStats = KeyStatistics.fromJson(
+        _normalizeComparisonQuoteToKeyStats(quote),
+      );
+      final historicals = _extractComparisonHistoricals(financials);
+      final analystTargets = (endpointAnalysis['analystPriceTargets'] as Map?)
+              ?.cast<String, dynamic>() ??
+          <String, dynamic>{};
+      final recommendations =
+          (endpointAnalysis['recommendations'] as List?) ?? [];
+      final latestRec =
+          recommendations.isNotEmpty && recommendations.first is Map
+              ? Map<String, dynamic>.from(recommendations.first as Map)
+              : <String, dynamic>{};
+
+      return analysis.copyWith(
+        companyName:
+            (quote['companyName'] ?? quote['name'] ?? analysis.companyName)
+                ?.toString(),
+        sector: (quote['sector'] ?? analysis.sector)?.toString(),
+        industry: (quote['industry'] ?? analysis.industry)?.toString(),
+        image:
+            (quote['logoUrl'] ?? quote['image'] ?? analysis.image)?.toString(),
+        price: _fallbackMetric(
+          quote['price'] ?? quote['regularMarketPrice'],
+          prefix: (quote['price'] ?? quote['regularMarketPrice']) == null
+              ? ''
+              : '\$',
+        ),
+        changePercent: (quote['changePercent'] ?? quote['changesPercentage'])
+                is num
+            ? ((quote['changePercent'] ?? quote['changesPercentage']) as num)
+                .toDouble()
+            : analysis.changePercent,
+        keyStatistics: keyStats,
+        financialMatrix: _enrichComparisonFinancialMatrix(analysis, keyStats),
+        targetPriceValue:
+            (analystTargets['mean'] ?? analystTargets['current']) is num
+                ? ((analystTargets['mean'] ?? analystTargets['current']) as num)
+                    .toDouble()
+                : analysis.targetPriceValue,
+        historicalEarnings:
+            historicals.isNotEmpty ? historicals : analysis.historicalEarnings,
+        analystRecommendations: latestRec.isNotEmpty
+            ? AnalystRecommendation.fromJson(latestRec)
+            : analysis.analystRecommendations,
+      );
+    } catch (e) {
+      dev.log(
+        'Comparison backend enrichment failed for $ticker: $e',
+        name: 'SigmaProvider',
+      );
+      return analysis;
+    }
+  }
+
+  Future<String> resolveTickerInput(
+    String rawQuery, {
+    bool strict = false,
+  }) async {
+    final query = rawQuery.trim().toUpperCase();
+    if (query.isEmpty) return '';
+
+    if (searchResults.isNotEmpty) {
+      final exactLocal = searchResults.where(
+        (item) => (item['symbol'] ?? '').toString().toUpperCase() == query,
+      );
+      if (exactLocal.isNotEmpty) {
+        return (exactLocal.first['symbol'] ?? query).toString().toUpperCase();
+      }
+    }
+
+    try {
+      final remote = await _sigmaService.searchTickerSymbolsUnified(query);
+      if (remote.isEmpty) return strict ? '' : query;
+
+      final upperQuery = query.toUpperCase();
+      remote.sort((a, b) {
+        int score(Map<String, dynamic> item) {
+          final symbol = (item['symbol'] ?? '').toString().toUpperCase();
+          final name = (item['name'] ?? item['description'] ?? '')
+              .toString()
+              .toUpperCase();
+          if (symbol == upperQuery) return 0;
+          if (symbol.startsWith(upperQuery)) return 1;
+          if (name.startsWith(upperQuery)) return 2;
+          if (symbol.contains(upperQuery)) return 3;
+          if (name.contains(upperQuery)) return 4;
+          return 5;
+        }
+
+        return score(a).compareTo(score(b));
+      });
+
+      final selected =
+          (remote.first['symbol'] ?? query).toString().toUpperCase();
+
+      if (remote.isNotEmpty) {
+        searchResults = remote
+            .map((item) => _normalizeStringMap(item))
+            .toList(growable: false);
+        notifyListeners();
+      }
+
+      return selected;
+    } catch (_) {
+      return strict ? '' : query;
+    }
+  }
+
+  Future<List<AnalysisData>> analyzeComparisonResolved(
+    String left,
+    String right,
+  ) async {
+    final leftTicker = left.trim().toUpperCase();
+    final rightTicker = right.trim().toUpperCase();
+
+    if (leftTicker.isEmpty || rightTicker.isEmpty) {
+      throw StateError('Deux tickers sont requis pour comparer.');
+    }
+    if (leftTicker == rightTicker) {
+      throw StateError('Choisissez deux tickers differents pour comparer.');
+    }
+
+    final currentLanguage = language ?? 'EN';
+
+    Future<AnalysisData> load(String ticker) async {
+      try {
+        final analysis = await _sigmaService.analyzeStock(
+          ticker,
+          language: currentLanguage,
+        );
+        return _enrichComparisonAnalysis(analysis);
+      } catch (e) {
+        dev.log(
+          'Comparison analysis fallback for $ticker: $e',
+          name: 'SigmaProvider',
+        );
+        final fallback =
+            await _buildRawFallbackAnalysis(ticker, currentLanguage);
+        return _enrichComparisonAnalysis(fallback);
+      }
+    }
+
+    return Future.wait([
+      load(leftTicker),
+      load(rightTicker),
+    ]);
   }
 
   Future<void> fetchCatalystRadar({bool forceRefresh = false}) async {
@@ -600,15 +1100,34 @@ class SigmaProvider extends ChangeNotifier {
       return;
     }
 
+    // 0. Check local cache for instant results
+    if (_searchCache.containsKey(normalized)) {
+      searchResults = _searchCache[normalized]!;
+      isSearching = false;
+      notifyListeners();
+      // Even if cached, we still run the background fetch to update prices/logos
+      // but we don't block the UI.
+    }
+
     final requestId = ++_searchRequestId;
     isSearching = true;
     notifyListeners();
 
     try {
-      // Single backend search call + local ranking (faster than dual duplicate calls).
-      final fmpSearchResults = await _sigmaService.fmpService
-          .searchTickerSymbols(normalized)
-          .catchError((_) => <Map<String, dynamic>>[]);
+      // Unified backend + Finnhub fallback search.
+      List<Map<String, dynamic>> searchResultsUnified;
+      if (_searchCache.containsKey(normalized)) {
+        searchResultsUnified = _searchCache[normalized]!;
+      } else {
+        searchResultsUnified = await _sigmaService
+            .searchTickerSymbolsUnified(normalized)
+            .catchError((_) => <Map<String, dynamic>>[]);
+        
+        // Save to cache
+        if (searchResultsUnified.isNotEmpty) {
+          _searchCache[normalized] = searchResultsUnified;
+        }
+      }
 
       if (requestId != _searchRequestId) return;
 
@@ -659,27 +1178,41 @@ class SigmaProvider extends ChangeNotifier {
         return 30 + venuePenalty(item);
       }
 
-      final institutionals = fmpSearchResults.where((item) {
+      final institutionals = searchResultsUnified.where((item) {
         final symbol = (item['symbol'] ?? '').toString().toUpperCase();
         if (symbol.isEmpty) return false;
         return isEligibleTicker(symbol) && isEligibleType(item);
       }).toList();
 
-      final baseList = institutionals.isNotEmpty ? institutionals : fmpSearchResults;
+      final baseList =
+          institutionals.isNotEmpty ? institutionals : searchResultsUnified;
 
       final sorted = [...baseList]
         ..sort((a, b) => rankItem(a).compareTo(rankItem(b)));
 
       final Map<String, Map<String, dynamic>> mergedResults = {};
+      final Set<String> seenIdentity = <String>{};
       final List<String> symbolsToQuote = [];
       final List<String> symbolsToLogo = [];
+
+      String canonicalSymbol(String symbol) {
+        return symbol
+            .toUpperCase()
+            .trim()
+            .replaceAll(RegExp(r'\.(TO|V|PA|DE|MI|MC|LS|AS|BR|L|SW)$'), '');
+      }
 
       // 1) Build results immediately (autocomplete UX first).
       for (final item in sorted.take(16)) {
         final symbol = (item['symbol'] ?? '').toString().toUpperCase();
         if (symbol.isEmpty) continue;
-        if (!mergedResults.containsKey(symbol)) {
-          mergedResults[symbol] = _mapToSearchItem(item, symbol);
+        final mapped = _mapToSearchItem(item, symbol);
+        final identity =
+            '${canonicalSymbol(symbol)}|${(mapped['description'] ?? '').toString().toLowerCase()}';
+        if (!seenIdentity.contains(identity) &&
+            !mergedResults.containsKey(symbol)) {
+          seenIdentity.add(identity);
+          mergedResults[symbol] = mapped;
           symbolsToQuote.add(symbol);
           symbolsToLogo.add(symbol);
         }
@@ -688,12 +1221,13 @@ class SigmaProvider extends ChangeNotifier {
       if (requestId != _searchRequestId) return;
 
       searchResults = mergedResults.values.toList();
+      _searchCache[normalized] = searchResults; // Update cache with mapped items
       isSearching = false;
       notifyListeners();
 
       // 2) Hydrate prices + logos asynchronously (keep UI responsive).
       if (symbolsToQuote.isNotEmpty) {
-        final quotes = await _sigmaService.fmpService
+        final quotes = await _sigmaService.marketDataService
             .getQuotes(symbolsToQuote.take(20).toList())
             .catchError((_) => <dynamic>[]);
 
@@ -710,8 +1244,14 @@ class SigmaProvider extends ChangeNotifier {
       }
 
       if (symbolsToLogo.isNotEmpty) {
-        final logoResults = await Future.wait(symbolsToLogo.take(10).map((s) async {
-          final logoData = await _sigmaService.fmpService.getLogo(s);
+        final logoResults =
+            await Future.wait(symbolsToLogo.take(12).map((s) async {
+          // Optimization: Check if we already have a high-quality logo URL
+          final currentLogo = mergedResults[s]?['logo']?.toString() ?? '';
+          if (currentLogo.isNotEmpty && !currentLogo.contains('financialmodelingprep.com')) {
+            return {'symbol': s, 'logo': null}; // Skip fetch
+          }
+          final logoData = await _sigmaService.marketDataService.getLogo(s);
           return {'symbol': s, 'logo': logoData};
         }));
 
@@ -724,7 +1264,6 @@ class SigmaProvider extends ChangeNotifier {
             mergedResults[s]!['logo'] = logo['logoUrl'] ??
                 urls?['primary'] ??
                 urls?['parqet'] ??
-                urls?['fmp'] ??
                 mergedResults[s]!['logo'];
           }
         }
@@ -734,7 +1273,8 @@ class SigmaProvider extends ChangeNotifier {
       searchResults = mergedResults.values.toList();
       notifyListeners();
     } catch (e) {
-      dev.log('❌ Global Search Convergence Failure: $e', name: 'SigmaProvider');
+      dev.log('âŒ Global Search Convergence Failure: $e',
+          name: 'SigmaProvider');
       if (requestId == _searchRequestId) {
         searchResults = [];
       }
@@ -748,7 +1288,7 @@ class SigmaProvider extends ChangeNotifier {
 
   Map<String, dynamic> _mapToSearchItem(
       Map<String, dynamic> item, String symbol) {
-    // FMP Search API field names
+    // Search API field names
     String name =
         item['name'] ?? item['longName'] ?? item['shortName'] ?? symbol;
     String exch = item['stockExchange'] ??
@@ -756,39 +1296,17 @@ class SigmaProvider extends ChangeNotifier {
         item['exchange'] ??
         '';
 
-    String logoCountry = 'US';
-    String logoSym = symbol;
-    if (symbol.contains('.')) {
-      final parts = symbol.split('.');
-      logoSym = parts[0];
-      final suffix = parts[1];
-      if (suffix == 'PA') {
-        logoCountry = 'FR';
-      } else if (suffix == 'DE')
-        logoCountry = 'DE';
-      else if (suffix == 'MI')
-        logoCountry = 'IT';
-      else if (suffix == 'MC')
-        logoCountry = 'ES';
-      else if (suffix == 'LS')
-        logoCountry = 'PT';
-      else if (suffix == 'AS')
-        logoCountry = 'NL';
-      else if (suffix == 'BR')
-        logoCountry = 'BE';
-      else if (suffix == 'L')
-        logoCountry = 'UK';
-      else if (suffix == 'SW') logoCountry = 'CH';
-    }
-
+    final directLogo =
+        (item['logo'] ?? item['logoUrl'] ?? item['image'])?.toString().trim();
+    
     return {
       'symbol': symbol,
       'description': name,
       'displaySymbol': symbol,
       'stockExchange': exch,
       'type': item['typeDisp'] ?? item['quoteType'] ?? 'EQUITY',
-      'logo': 'https://financialmodelingprep.com/image-stock/$symbol.png',
-      'source': 'FMP',
+      'logo': LogoResolver.resolve(symbol, providedUrl: directLogo),
+      'source': 'SIGMA',
     };
   }
 
@@ -806,20 +1324,20 @@ class SigmaProvider extends ChangeNotifier {
       if (!_isAnalysisFresh(cached)) {
         _analysisCache.remove(cleanTicker);
       } else {
-      currentAnalysis = cached;
-      currentTicker = cleanTicker;
-      chartHistory = [];
-      chartCandles = [];
-      isAnalysisLoading = false;
-      notifyListeners();
+        currentAnalysis = cached;
+        currentTicker = cleanTicker;
+        chartHistory = [];
+        chartCandles = [];
+        isAnalysisLoading = false;
+        notifyListeners();
 
-      // Prefetch charts in background
-      _prefetchCharts(cleanTicker);
+        // Prefetch charts in background
+        _prefetchCharts(cleanTicker);
 
-      // Update price in background without blocking UI
-      _updatePriceAndCharts(cleanTicker);
+        // Update price in background without blocking UI
+        _updatePriceAndCharts(cleanTicker);
 
-      return;
+        return;
       }
     }
 
@@ -880,7 +1398,7 @@ class SigmaProvider extends ChangeNotifier {
         onTimeout: () {
           throw TimeoutException(
             language == 'FR'
-                ? 'L\'analyse a pris trop de temps. Veuillez réessayer.'
+                ? 'L\'analyse a pris trop de temps. Veuillez rÃ©essayer.'
                 : 'Analysis timed out. Please try again.',
           );
         },
@@ -888,11 +1406,11 @@ class SigmaProvider extends ChangeNotifier {
 
       progressTimer.cancel();
 
-      // Vérifier si l'analyse est valide (pas un fallback d'erreur)
+      // VÃ©rifier si l'analyse est valide (pas un fallback d'erreur)
       if (analysis.confidence == 0.0 && analysis.sigmaScore == 50.0) {
         // Fallback analysis: keep it visible instead of hard-failing the screen.
         dev.log(
-          '⚠️ Fallback analysis detected for $cleanTicker, displaying degraded result.',
+          'âš ï¸ Fallback analysis detected for $cleanTicker, displaying degraded result.',
           name: 'SigmaProvider',
         );
       }
@@ -947,71 +1465,81 @@ class SigmaProvider extends ChangeNotifier {
       // Warm up range analyses silenty
       _prewarmPeriodAnalyses(analysis);
     } catch (e) {
-      dev.log('❌ Analysis Error for $cleanTicker: $e', name: 'SigmaProvider');
+      dev.log('âŒ Analysis Error for $cleanTicker: $e', name: 'SigmaProvider');
       if (currentTicker == cleanTicker) {
-        // Hard guarantee: always provide an on-screen analysis object,
-        // even when remote providers fail, so the flow never ends blank.
-        currentAnalysis = AnalysisData.fromJson({
-          'ticker': cleanTicker,
-          'companyName': cleanTicker,
-          'companyProfile': language == 'FR'
-              ? 'Analyse en mode secours: certaines sources sont indisponibles.'
-              : 'Fallback analysis mode: some sources are currently unavailable.',
-          'lastUpdated': DateTime.now().toIso8601String(),
-          'price': 'N/A',
-          'verdict': language == 'FR' ? 'ATTENDRE' : 'HOLD',
-          'verdictReasons': [
-            language == 'FR'
-                ? 'Connexion instable aux fournisseurs de données.'
-                : 'Unstable connection to data providers.'
-          ],
-          'riskLevel': language == 'FR' ? 'MOYEN' : 'MEDIUM',
-          'sigmaScore': 50,
-          'confidence': 0.0,
-          'summary': language == 'FR'
-              ? 'Le moteur principal a échoué avant consolidation complète. Ce résultat de secours est affiché pour éviter un écran vide; relancez pour récupérer le rapport complet.'
-              : 'The primary engine failed before full consolidation. This fallback result is shown to avoid a blank screen; retry to get a complete report.',
-          'pros': [],
-          'cons': [],
-          'hiddenSignals': [],
-          'catalysts': [],
-          'volatility': {
-            'ivRank': 'N/A',
-            'beta': 'N/A',
-            'interpretation': 'N/A',
-          },
-          'fearAndGreed': {
-            'score': 50,
-            'label': language == 'FR' ? 'NEUTRE' : 'NEUTRAL',
-            'interpretation': 'N/A',
-          },
-          'marketSentiment': {
-            'score': 50,
-            'label': language == 'FR' ? 'NEUTRE' : 'NEUTRAL',
-          },
-          'tradeSetup': {
-            'entryZone': 'N/A',
-            'targetPrice': 'N/A',
-            'stopLoss': 'N/A',
-            'riskRewardRatio': 'N/A',
-          },
-          'institutionalActivity': {
-            'smartMoneySentiment': 0.5,
-            'retailSentiment': 0.5,
-            'darkPoolInterpretation': 'N/A',
-          },
-          'technicalAnalysis': [],
-          'projectedTrend': [],
-          'financialMatrix': [],
-          'sectorPeers': [],
-          'topSources': [],
-          'analystRecommendations': {},
-          'actionPlan': [
-            language == 'FR'
-                ? 'Relancer l’analyse quand les APIs sont stables.'
-                : 'Retry analysis when APIs are stable.'
-          ],
-        });
+        final currentLanguage = language ?? 'EN';
+        try {
+          currentAnalysis = await _buildRawFallbackAnalysis(
+            cleanTicker,
+            currentLanguage,
+          );
+        } catch (fallbackError) {
+          dev.log(
+            'âš ï¸ Raw fallback analysis also failed for $cleanTicker: $fallbackError',
+            name: 'SigmaProvider',
+          );
+          currentAnalysis = AnalysisData.fromJson({
+            'ticker': cleanTicker,
+            'companyName': cleanTicker,
+            'companyProfile': currentLanguage == 'FR'
+                ? 'Analyse en mode secours: certaines sources sont indisponibles.'
+                : 'Fallback analysis mode: some sources are currently unavailable.',
+            'lastUpdated': DateTime.now().toIso8601String(),
+            'price': 'N/A',
+            'verdict': currentLanguage == 'FR' ? 'ATTENDRE' : 'HOLD',
+            'verdictReasons': [
+              currentLanguage == 'FR'
+                  ? 'Connexion instable aux fournisseurs de donnees.'
+                  : 'Unstable connection to data providers.'
+            ],
+            'riskLevel': currentLanguage == 'FR' ? 'MOYEN' : 'MEDIUM',
+            'sigmaScore': 50,
+            'confidence': 0.0,
+            'summary': currentLanguage == 'FR'
+                ? 'Le moteur principal a echoue avant consolidation complete. Ce resultat de secours est affiche pour eviter un ecran vide; relancez pour recuperer le rapport complet.'
+                : 'The primary engine failed before full consolidation. This fallback result is shown to avoid a blank screen; retry to get a complete report.',
+            'pros': [],
+            'cons': [],
+            'hiddenSignals': [],
+            'catalysts': [],
+            'volatility': {
+              'ivRank': 'N/A',
+              'beta': 'N/A',
+              'interpretation': 'N/A',
+            },
+            'fearAndGreed': {
+              'score': 50,
+              'label': currentLanguage == 'FR' ? 'NEUTRE' : 'NEUTRAL',
+              'interpretation': 'N/A',
+            },
+            'marketSentiment': {
+              'score': 50,
+              'label': currentLanguage == 'FR' ? 'NEUTRE' : 'NEUTRAL',
+            },
+            'tradeSetup': {
+              'entryZone': 'N/A',
+              'targetPrice': 'N/A',
+              'stopLoss': 'N/A',
+              'riskRewardRatio': 'N/A',
+            },
+            'institutionalActivity': {
+              'smartMoneySentiment': 0.5,
+              'retailSentiment': 0.5,
+              'darkPoolInterpretation': 'N/A',
+            },
+            'technicalAnalysis': [],
+            'projectedTrend': [],
+            'financialMatrix': [],
+            'sectorPeers': [],
+            'topSources': [],
+            'analystRecommendations': {},
+            'actionPlan': [
+              currentLanguage == 'FR'
+                  ? 'Relancer l\'analyse quand les APIs sont stables.'
+                  : 'Retry analysis when APIs are stable.'
+            ],
+          });
+        }
         error = null;
       }
     } finally {
@@ -1032,6 +1560,13 @@ class SigmaProvider extends ChangeNotifier {
         analysis: analysis,
         language: lang,
       );
+      final guardedStream = stream.timeout(
+        // 119B model TTFT ≈ 50-90s + generation time. Guard raised to 180s.
+        const Duration(seconds: 180),
+        onTimeout: (sink) {
+          sink.close();
+        },
+      );
 
       // Throttle UI rebuilds: only notify every 8 chunks to avoid
       // marking InheritedWidget dependents dirty while a layout pass
@@ -1040,7 +1575,7 @@ class SigmaProvider extends ChangeNotifier {
       // layout-builder subtrees.
       String fullText = '';
       int chunkCount = 0;
-      await for (final chunk in stream) {
+      await for (final chunk in guardedStream) {
         if (currentTicker != analysis.ticker) break;
         fullText += chunk;
         chunkCount++;
@@ -1088,10 +1623,44 @@ class SigmaProvider extends ChangeNotifier {
           overview.sectors.isEmpty && (overview.insiderTrades?.isEmpty ?? true);
 
       if (marketOverview != null && isNewDataEmpty) {
-        dev.log('⚠️ Network overview is empty, preserving existing data.',
+        dev.log('âš ï¸ Network overview is empty, preserving existing data.',
             name: 'SigmaProvider');
       } else {
-        marketOverview = overview;
+        if (marketOverview != null &&
+            overview.news.isEmpty &&
+            marketOverview!.news.isNotEmpty) {
+          // Preserve latest valid news feed when refresh returns partial payload.
+          marketOverview = MarketOverview(
+            marketRegime: overview.marketRegime,
+            regimeDescription: overview.regimeDescription,
+            vixLevel: overview.vixLevel,
+            sectors: overview.sectors,
+            lastUpdated: overview.lastUpdated,
+            sentiment: overview.sentiment,
+            sentimentValue: overview.sentimentValue,
+            globalNews: overview.globalNews,
+            vixValue: overview.vixValue,
+            vixChange: overview.vixChange,
+            vixChangePercent: overview.vixChangePercent,
+            news: marketOverview!.news,
+            macroIndicators: overview.macroIndicators,
+            economicCalendar: overview.economicCalendar,
+            topGainers: overview.topGainers,
+            topLosers: overview.topLosers,
+            yahooSummary: overview.yahooSummary,
+            upcomingIpos: overview.upcomingIpos,
+            notableEvents: overview.notableEvents,
+            indicators: overview.indicators,
+            sentimentNews: overview.sentimentNews,
+            sentimentHistory: overview.sentimentHistory,
+            insiderTrades: overview.insiderTrades,
+            backtest: overview.backtest,
+            sentimentComponents: overview.sentimentComponents,
+            sectorSentiment: overview.sectorSentiment,
+          );
+        } else {
+          marketOverview = overview;
+        }
         await _saveMarketToCache(overview);
       }
       _lastMarketFetch = DateTime.now();
@@ -1102,7 +1671,7 @@ class SigmaProvider extends ChangeNotifier {
 
       refreshMacroIndicators();
 
-      // Déclencher l'enrichissement Neural UNIQUEMENT si non présent
+      // DÃ©clencher l'enrichissement Neural UNIQUEMENT si non prÃ©sent
       if (marketIntelligence == null || forceRefresh) {
         _enrichNewsWithNeural(overview);
       }
@@ -1142,16 +1711,18 @@ class SigmaProvider extends ChangeNotifier {
               .changePercent ??
           0.0;
 
-      final intel = await intelService.analyzeMarketNews(
-        news: overview.news,
-        date: overview.lastUpdated,
-        vix: double.tryParse(overview.vixLevel) ?? 0,
-        sp500Change: sp500Change,
-        language: language ?? 'EN',
-      );
+      final intel = await intelService
+          .analyzeMarketNews(
+            news: overview.news,
+            date: overview.lastUpdated,
+            vix: double.tryParse(overview.vixLevel) ?? 0,
+            sp500Change: sp500Change,
+            language: language ?? 'EN',
+          )
+          .timeout(const Duration(seconds: 45));
 
       marketIntelligence = intel;
-      dev.log('◆ News Intelligence done (${intel.enrichedNews.length} items)',
+      dev.log('â—† News Intelligence done (${intel.enrichedNews.length} items)',
           name: 'SigmaProvider');
     } catch (e) {
       dev.log('Ollama enrichment error: $e', name: 'SigmaProvider');
@@ -1202,7 +1773,7 @@ class SigmaProvider extends ChangeNotifier {
 
   Future<void> refreshMacroIndicators() async {
     try {
-      final macroData = await _sigmaService.fmpService.getMacroData();
+      final macroData = await _sigmaService.marketDataService.getMacroData();
       if (macroData.isNotEmpty && marketOverview != null) {
         final newMacro = MacroIndicators(
           treasury10Y: (macroData['tnx']?['price'] as num?)?.toDouble() ??
@@ -1327,7 +1898,7 @@ class SigmaProvider extends ChangeNotifier {
       final interval = _getIntervalForRange(range);
       final apiRange = _getApiRange(range);
 
-      final data = await _sigmaService.fmpService.getHistoricalOHLCV(
+      final data = await _sigmaService.marketDataService.getHistoricalOHLCV(
         currentTicker!,
         apiRange,
       );
@@ -1388,8 +1959,8 @@ class SigmaProvider extends ChangeNotifier {
   /// Update only price and charts for a ticker (expensive AI analysis skipped)
   Future<void> _updatePriceAndCharts(String ticker) async {
     try {
-      // 1. Update Price from FMP
-      final quote = await _sigmaService.fmpService.getQuoteMap(ticker);
+      // 1. Update price from Sigma API
+      final quote = await _sigmaService.marketDataService.getQuoteMap(ticker);
       if (quote.isNotEmpty &&
           currentAnalysis != null &&
           currentAnalysis!.ticker == ticker) {
@@ -1428,12 +1999,12 @@ class SigmaProvider extends ChangeNotifier {
       final interval = _getIntervalForRange(range);
       final apiRange = _getApiRange(range);
 
-      final data = await _sigmaService.fmpService
+      final data = await _sigmaService.marketDataService
           .getHistoricalOHLCV(contextData.ticker, apiRange);
       if (data.isNotEmpty) {
         final analysis = await _sigmaService.analyzeHistoricalRange(
             contextData, data, range,
-            language: (language ?? 'FR') == 'FR' ? 'FRANÇAIS' : 'ENGLISH');
+            language: (language ?? 'FR') == 'FR' ? 'FRANÃ‡AIS' : 'ENGLISH');
         _periodAnalysesCache['${contextData.ticker}_$range'] = analysis;
         notifyListeners();
       }

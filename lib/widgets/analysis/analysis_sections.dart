@@ -21,7 +21,7 @@ class VerdictSection extends StatelessWidget {
       // Verdict + Score row
       Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
         Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          Text('VERDICT', style: AppTheme.label(context)),
+          Text('LECTURE SIGMA', style: AppTheme.label(context)),
           Text(a.verdict.toUpperCase(),
               style: AppTheme.serif(context,
                   size: 24, weight: FontWeight.w900, color: color)),
@@ -34,7 +34,7 @@ class VerdictSection extends StatelessWidget {
         ]),
       ]),
       const SizedBox(height: 16),
-      // Trade Setup Box
+      // Scenario levels box
       Container(
         padding: const EdgeInsets.all(16),
         decoration: BoxDecoration(
@@ -48,7 +48,7 @@ class VerdictSection extends StatelessWidget {
                 child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                  Text('OBJECTIF DE PRIX',
+                    Text('REPERE DE VALORISATION',
                       style: AppTheme.label(context).copyWith(fontSize: 7)),
                   Text('\$${a.tradeSetup.cleanTargetPrice}',
                       style: AppTheme.numeric(context,
@@ -58,9 +58,9 @@ class VerdictSection extends StatelessWidget {
           ]),
           const SizedBox(height: 12),
           Row(children: [
-            _chip('ENTRÉE', a.tradeSetup.cleanEntryZone),
+            _chip('ZONE', a.tradeSetup.cleanEntryZone),
             const SizedBox(width: 8),
-            _chip('STOP', a.tradeSetup.cleanStopLoss, isRed: true),
+            _chip('INVALID.', a.tradeSetup.cleanStopLoss, isRed: true),
             const SizedBox(width: 8),
             _chip('R/R', a.tradeSetup.riskRewardRatio),
           ]),
@@ -70,11 +70,12 @@ class VerdictSection extends StatelessWidget {
       if (a.confidence > 0) ...[
         const SizedBox(height: 12),
         Row(children: [
-          Text('CONFIANCE',
-              style: GoogleFonts.lora(
+            Text('NIVEAU DE CONFIANCE',
+              style: GoogleFonts.ibmPlexSans(
                   fontSize: 8,
-                  fontWeight: FontWeight.bold,
-                  color: AppTheme.textTertiary)),
+                  fontWeight: FontWeight.w600,
+                  color: AppTheme.textTertiary,
+                  letterSpacing: 1.6)),
           const SizedBox(width: 8),
           Expanded(
               child: LinearProgressIndicator(
@@ -85,7 +86,7 @@ class VerdictSection extends StatelessWidget {
           )),
           const SizedBox(width: 8),
           Text('${(a.confidence * 100).toInt()}%',
-              style: GoogleFonts.lora(
+              style: GoogleFonts.ibmPlexSans(
                   fontSize: 10, fontWeight: FontWeight.w700, color: color)),
         ]),
       ],
@@ -103,11 +104,11 @@ class VerdictSection extends StatelessWidget {
       ),
       child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
         Text(label,
-            style: GoogleFonts.lora(
-                fontSize: 7, fontWeight: FontWeight.bold, color: AppTheme.textTertiary)),
+            style: GoogleFonts.ibmPlexSans(
+                fontSize: 7, fontWeight: FontWeight.w600, color: AppTheme.textTertiary, letterSpacing: 1.2)),
         const SizedBox(height: 2),
         Text(value,
-            style: GoogleFonts.lora(
+            style: GoogleFonts.ibmPlexSans(
                 fontSize: 10,
                 fontWeight: FontWeight.w700,
                 color: isRed ? AppTheme.negative : null),
@@ -321,9 +322,9 @@ class TechnicalSection extends StatelessWidget {
               Expanded(
                   flex: 2,
                   child: Text(t.indicator,
-                      style: GoogleFonts.lora(
+                      style: GoogleFonts.ibmPlexSans(
                           fontSize: 10,
-                          fontWeight: FontWeight.w600,
+                          fontWeight: FontWeight.w500,
                           color: AppTheme.textTertiary),
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis)),
@@ -334,8 +335,8 @@ class TechnicalSection extends StatelessWidget {
                       alignment: Alignment.centerLeft,
                       fit: BoxFit.scaleDown,
                       child: Text(t.value,
-                          style: GoogleFonts.lora(
-                              fontSize: 11, fontWeight: FontWeight.w800)))),
+                          style: GoogleFonts.ibmPlexSans(
+                              fontSize: 11, fontWeight: FontWeight.w700)))),
               const Spacer(flex: 1),
               Container(
                 padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
@@ -344,9 +345,9 @@ class TechnicalSection extends StatelessWidget {
                   borderRadius: BorderRadius.circular(2),
                 ),
                 child: Text(t.interpretation,
-                    style: GoogleFonts.lora(
+                    style: GoogleFonts.ibmPlexSans(
                         fontSize: 7,
-                        fontWeight: FontWeight.w800,
+                        fontWeight: FontWeight.w700,
                         color: _interpColor(t.interpretation)),
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis),
@@ -372,11 +373,11 @@ class TechnicalSection extends StatelessWidget {
   Widget _levelRow(String title, List<String> levels, Color color) {
     return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
       Text(title,
-          style: GoogleFonts.lora(
+          style: GoogleFonts.ibmPlexSans(
               fontSize: 8,
-              fontWeight: FontWeight.w900,
+              fontWeight: FontWeight.w600,
               color: color,
-              letterSpacing: 1)),
+              letterSpacing: 1.5)),
       const SizedBox(height: 4),
       Wrap(
           spacing: 6,
@@ -442,9 +443,9 @@ class CatalystsSection extends StatelessWidget {
                 padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
                 color: color.withValues(alpha: 0.1),
                 child: Text(c.type.toUpperCase(),
-                    style: GoogleFonts.lora(
+                    style: GoogleFonts.ibmPlexSans(
                         fontSize: 7,
-                        fontWeight: FontWeight.w900,
+                        fontWeight: FontWeight.w700,
                         color: color)),
               ),
             ]),
@@ -523,11 +524,11 @@ class AnalystConsensusSection extends StatelessWidget {
       if (a.analystRatings.isNotEmpty) ...[
         const SizedBox(height: 12),
         Text('DERNIÈRES NOTATIONS',
-            style: GoogleFonts.lora(
+            style: GoogleFonts.ibmPlexSans(
                 fontSize: 8,
-                fontWeight: FontWeight.w900,
+                fontWeight: FontWeight.w600,
                 color: AppTheme.textTertiary,
-                letterSpacing: 1)),
+                letterSpacing: 1.6)),
         const SizedBox(height: 8),
         ...a.analystRatings.take(5).map((r) => Padding(
               padding: const EdgeInsets.only(bottom: 6),
@@ -547,14 +548,14 @@ class AnalystConsensusSection extends StatelessWidget {
                       color: verdictColor(r.rating).withValues(alpha: 0.1),
                       borderRadius: BorderRadius.circular(2)),
                   child: Text(r.rating,
-                      style: GoogleFonts.lora(
+                      style: GoogleFonts.ibmPlexSans(
                           fontSize: 8,
-                          fontWeight: FontWeight.w800,
+                          fontWeight: FontWeight.w700,
                           color: verdictColor(r.rating))),
                 ),
                 const Spacer(),
                 Text(r.action,
-                    style: GoogleFonts.lora(fontSize: 9, color: AppTheme.textTertiary)),
+                    style: GoogleFonts.ibmPlexSans(fontSize: 9, color: AppTheme.textTertiary)),
               ]),
             )),
       ],
@@ -568,7 +569,7 @@ class AnalystConsensusSection extends StatelessWidget {
 
   Widget _label(String text, Color color) {
     return Text(text,
-        style: GoogleFonts.lora(
+        style: GoogleFonts.ibmPlexSans(
             fontSize: 8, fontWeight: FontWeight.w700, color: color));
   }
 }
@@ -582,7 +583,7 @@ class NewsSection extends StatelessWidget {
   Widget build(BuildContext context) {
     if (a.companyNews.isEmpty) return const SizedBox.shrink();
     return Column(
-        children: a.companyNews.take(5).map((n) {
+      children: a.companyNews.take(8).map((n) {
       return GestureDetector(
         onTap: () {
           if (n.url.isNotEmpty) launchUrl(Uri.parse(n.url));
@@ -605,10 +606,11 @@ class NewsSection extends StatelessWidget {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                   Text(n.source.toUpperCase(),
-                      style: GoogleFonts.lora(
+                      style: GoogleFonts.ibmPlexSans(
                           fontSize: 7,
-                          fontWeight: FontWeight.bold,
-                          color: AppTheme.primary)),
+                          fontWeight: FontWeight.w600,
+                          color: AppTheme.primary,
+                          letterSpacing: 1.4)),
                   const SizedBox(height: 3),
                   Text(n.title,
                       maxLines: 2,
@@ -620,7 +622,7 @@ class NewsSection extends StatelessWidget {
                   if (n.summary.isNotEmpty && n.summary != 'N/A') ...[
                     const SizedBox(height: 4),
                     Text(n.summary,
-                        maxLines: 2,
+                      maxLines: 3,
                         overflow: TextOverflow.ellipsis,
                         style: GoogleFonts.lora(
                             fontSize: 10, color: AppTheme.textTertiary, height: 1.4)),

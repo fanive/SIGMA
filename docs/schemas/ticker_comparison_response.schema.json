@@ -1,0 +1,130 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://sigma.local/schemas/ticker-comparison-response.schema.json",
+  "title": "TickerComparisonResponse",
+  "type": "object",
+  "required": [
+    "meta",
+    "pair",
+    "sameSectorCheck",
+    "comparison",
+    "relativeScores",
+    "winnerByDimension",
+    "pedagogicalTakeaways",
+    "disclaimer"
+  ],
+  "properties": {
+    "meta": {
+      "type": "object",
+      "required": ["asOf", "confidence", "sources", "limitations"],
+      "properties": {
+        "asOf": { "type": "string", "format": "date-time" },
+        "confidence": { "type": "string", "enum": ["high", "medium", "low"] },
+        "sources": { "type": "array", "items": { "type": "string" }, "minItems": 1 },
+        "limitations": { "type": "array", "items": { "type": "string" } }
+      }
+    },
+    "pair": {
+      "type": "object",
+      "required": ["left", "right"],
+      "properties": {
+        "left": { "type": "string" },
+        "right": { "type": "string" }
+      }
+    },
+    "sameSectorCheck": {
+      "type": "object",
+      "required": ["isSameSector", "leftSector", "rightSector"],
+      "properties": {
+        "isSameSector": { "type": "boolean" },
+        "leftSector": { "type": ["string", "null"] },
+        "rightSector": { "type": ["string", "null"] },
+        "note": { "type": ["string", "null"] }
+      }
+    },
+    "comparison": {
+      "type": "object",
+      "required": ["growth", "margins", "profitability", "valuation", "momentum", "risk", "businessQuality"],
+      "properties": {
+        "growth": { "$ref": "#/$defs/dimension" },
+        "margins": { "$ref": "#/$defs/dimension" },
+        "profitability": { "$ref": "#/$defs/dimension" },
+        "valuation": { "$ref": "#/$defs/dimension" },
+        "momentum": { "$ref": "#/$defs/dimension" },
+        "risk": { "$ref": "#/$defs/dimension" },
+        "businessQuality": { "$ref": "#/$defs/dimension" }
+      }
+    },
+    "relativeScores": {
+      "type": "object",
+      "required": ["left", "right"],
+      "properties": {
+        "left": { "$ref": "#/$defs/scorePack" },
+        "right": { "$ref": "#/$defs/scorePack" }
+      }
+    },
+    "winnerByDimension": {
+      "type": "object",
+      "required": ["growth", "margins", "profitability", "valuation", "momentum", "risk", "businessQuality"],
+      "properties": {
+        "growth": { "$ref": "#/$defs/winner" },
+        "margins": { "$ref": "#/$defs/winner" },
+        "profitability": { "$ref": "#/$defs/winner" },
+        "valuation": { "$ref": "#/$defs/winner" },
+        "momentum": { "$ref": "#/$defs/winner" },
+        "risk": { "$ref": "#/$defs/winner" },
+        "businessQuality": { "$ref": "#/$defs/winner" }
+      }
+    },
+    "pedagogicalTakeaways": {
+      "type": "object",
+      "required": ["whenLeftLooksStronger", "whenRightLooksStronger", "whatCanChangeTheConclusion"],
+      "properties": {
+        "whenLeftLooksStronger": { "type": "array", "items": { "type": "string" }, "minItems": 2 },
+        "whenRightLooksStronger": { "type": "array", "items": { "type": "string" }, "minItems": 2 },
+        "whatCanChangeTheConclusion": { "type": "array", "items": { "type": "string" }, "minItems": 2 }
+      }
+    },
+    "disclaimer": {
+      "type": "string",
+      "const": "outil d'aide a la recherche, pas un conseil financier"
+    }
+  },
+  "$defs": {
+    "winner": {
+      "type": "string",
+      "enum": ["left", "right", "tie", "insufficient_data"]
+    },
+    "scorePack": {
+      "type": "object",
+      "required": ["overall", "subscores"],
+      "properties": {
+        "overall": { "type": "number", "minimum": 0, "maximum": 100 },
+        "subscores": {
+          "type": "object",
+          "required": ["growth", "margins", "profitability", "valuation", "momentum", "risk", "businessQuality"],
+          "properties": {
+            "growth": { "type": "number", "minimum": 0, "maximum": 100 },
+            "margins": { "type": "number", "minimum": 0, "maximum": 100 },
+            "profitability": { "type": "number", "minimum": 0, "maximum": 100 },
+            "valuation": { "type": "number", "minimum": 0, "maximum": 100 },
+            "momentum": { "type": "number", "minimum": 0, "maximum": 100 },
+            "risk": { "type": "number", "minimum": 0, "maximum": 100 },
+            "businessQuality": { "type": "number", "minimum": 0, "maximum": 100 }
+          }
+        }
+      }
+    },
+    "dimension": {
+      "type": "object",
+      "required": ["left", "right", "metricSet", "interpretation"],
+      "properties": {
+        "left": { "type": "object", "additionalProperties": { "type": ["number", "string", "null"] } },
+        "right": { "type": "object", "additionalProperties": { "type": ["number", "string", "null"] } },
+        "metricSet": { "type": "array", "items": { "type": "string" }, "minItems": 1 },
+        "interpretation": { "type": "string" },
+        "confidence": { "type": "string", "enum": ["high", "medium", "low"] }
+      }
+    }
+  }
+}

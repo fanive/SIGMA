@@ -21,7 +21,7 @@ class LegalScreen extends StatelessWidget {
           onPressed: () => Navigator.pop(context),
         ),
         title: Text(
-          'MENTIONS LÃ‰GALES & CGU',
+          'MENTIONS LEGALES & CGU',
           style: AppTheme.label(context).copyWith(letterSpacing: 2, color: AppTheme.primary),
         ),
       ),
@@ -33,30 +33,30 @@ class LegalScreen extends StatelessWidget {
             _buildSection(
               context,
               'IMPORTANT : AVERTISSEMENT SUR LES RISQUES',
-              'L\'investissement boursier comporte des risques de perte en capital. SIGMA est un outil d\'intelligence artificielle et ne constitue en aucun cas un conseil financier personnalisÃ©. Vous Ãªtes seul responsable de vos dÃ©cisions d\'investissement.',
+              'L\'investissement sur les marches financiers comporte un risque de perte partielle ou totale du capital. SIGMA est un outil d\'aide a la recherche et a l\'organisation de l\'information. Le contenu affiche ne constitue ni une recommandation personnalisee, ni un conseil en investissement, ni une sollicitation a acheter ou vendre un instrument financier. Toute decision reste sous votre seule responsabilite.',
             ),
             const SizedBox(height: 24),
             _buildSection(
               context,
-              'CONDITIONS GÃ‰NÃ‰RALES D\'UTILISATION (CGU)',
-              'En utilisant SIGMA, vous acceptez que les donnÃ©es fournies soient Ã  titre informatif. Nous ne garantissons pas l\'exactitude absolue des donnÃ©es provenant de tiers (Yahoo Finance, FMP, Finnhub). L\'application utilise des modÃ¨les d\'IA pour gÃ©nÃ©rer des analyses qui sont des interprÃ©tations mathÃ©matiques et non des garanties de profit.',
+              'CONDITIONS GENERALES D\'UTILISATION (CGU)',
+              'En utilisant SIGMA, vous acceptez que les donnees soient fournies a titre informatif et puissent comporter des retards, approximations ou erreurs de sources tierces. Les analyses generees par IA sont des syntheses probabilistes et des aides a la lecture. Elles ne constituent pas une promesse de performance, une garantie de resultat ou une recommandation adaptee a votre situation.',
             ),
             const SizedBox(height: 24),
             _buildSection(
               context,
-              'POLITIQUE DE CONFIDENTIALITÃ‰',
-              'Vos donnÃ©es de recherche et vos listes de favoris sont stockÃ©es localement sur votre appareil. Nous ne revendons pas vos donnÃ©es personnelles Ã  des tiers. Les clÃ©s d\'API utilisÃ©es pour les services externes sont protÃ©gÃ©es par chiffrement.',
+              'POLITIQUE DE CONFIDENTIALITE',
+              'Vos donnees de recherche et vos listes de suivi sont stockees localement sur votre appareil, sauf mention contraire liee a un service tiers. Nous ne revendons pas vos donnees personnelles. Les cles d\'API utilisees pour les services externes doivent etre gerees avec prudence et selon les contraintes de securite de la plateforme.',
             ),
             const SizedBox(height: 24),
             _buildSection(
               context,
-              'LIMITATION DE RESPONSABILITÃ‰',
-              'SIGMA dÃ©cline toute responsabilitÃ© en cas de perte financiÃ¨re rÃ©sultant de l\'utilisation de ses services. Nous recommandons de toujours consulter un conseiller financier agrÃ©Ã© avant de placer votre capital sur les marchÃ©s.',
+              'LIMITATION DE RESPONSABILITE',
+              'SIGMA ne peut etre tenu responsable des pertes, dommages ou decisions prises sur la base des informations affichees. Avant toute operation, vous devez verifier les donnees, evaluer l\'adequation du risque a votre profil et, si necessaire, solliciter un professionnel habilite.',
             ),
             const SizedBox(height: 32),
             _buildLinkButton(
               context,
-              'Politique de ConfidentialitÃ©',
+              'Politique de Confidentialite',
               Icons.lock,
               () => AppleCompliance.openPrivacyPolicy(),
             ),
@@ -70,7 +70,7 @@ class LegalScreen extends StatelessWidget {
             const SizedBox(height: 40),
             Center(
               child: Text(
-                'Â© 2026 SIGMA INTELLIGENCE TERMINAL\nTous droits rÃ©servÃ©s.',
+                '© 2026 SIGMA INTELLIGENCE TERMINAL\nTous droits reserves.',
                 textAlign: TextAlign.center,
                 style: AppTheme.body(context, size: 10, muted: true),
               ),
@@ -129,4 +129,5 @@ class LegalScreen extends StatelessWidget {
     );
   }
 }
+
 

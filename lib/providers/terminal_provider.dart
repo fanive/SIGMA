@@ -11,7 +11,7 @@ enum TerminalPanel {
   marketOverview,
   watchlist,
   newsFeed,
-  analysis,
+  noteLab,
   settings,
   // ── Extended panels (desktop sidebar, Phase 2) ────────────────────────────
   intelligence,
@@ -36,8 +36,6 @@ extension TerminalPanelInfo on TerminalPanel {
         return isFr ? 'CONVICTIONS' : 'CONVICTIONS';
       case TerminalPanel.newsFeed:
         return isFr ? 'BRIEFING' : 'BRIEFING';
-      case TerminalPanel.analysis:
-        return isFr ? 'RECHERCHE' : 'RESEARCH';
       case TerminalPanel.settings:
         return isFr ? 'PROFIL' : 'PROFILE';
       case TerminalPanel.intelligence:
@@ -46,6 +44,8 @@ extension TerminalPanelInfo on TerminalPanel {
         return isFr ? 'ALLOCATION' : 'ALLOCATION';
       case TerminalPanel.charts:
         return isFr ? 'MARCHÉS' : 'MARKETS';
+      case TerminalPanel.noteLab:
+        return isFr ? 'NOTE LAB' : 'NOTE LAB';
       default:
         return '';
     }
@@ -59,8 +59,6 @@ extension TerminalPanelInfo on TerminalPanel {
         return Icons.bookmark_added_rounded;
       case TerminalPanel.newsFeed:
         return Icons.article_rounded;
-      case TerminalPanel.analysis:
-        return Icons.manage_search_rounded;
       case TerminalPanel.settings:
         return Icons.person_outline_rounded;
       case TerminalPanel.intelligence:
@@ -69,6 +67,8 @@ extension TerminalPanelInfo on TerminalPanel {
         return Icons.pie_chart_rounded;
       case TerminalPanel.charts:
         return Icons.query_stats_rounded;
+      case TerminalPanel.noteLab:
+        return Icons.menu_book_rounded;
       default:
         return Icons.help_outline;
     }
@@ -80,7 +80,7 @@ extension TerminalPanelInfo on TerminalPanel {
       case TerminalPanel.marketOverview:
       case TerminalPanel.watchlist:
       case TerminalPanel.newsFeed:
-      case TerminalPanel.analysis:
+      case TerminalPanel.noteLab:
       case TerminalPanel.settings:
         return true;
       default:
@@ -97,7 +97,7 @@ extension TerminalPanelInfo on TerminalPanel {
         return '⌘2';
       case TerminalPanel.newsFeed:
         return '⌘3';
-      case TerminalPanel.analysis:
+      case TerminalPanel.noteLab:
         return '⌘4';
       case TerminalPanel.settings:
         return '⌘5';
@@ -123,6 +123,8 @@ class TerminalProvider extends ChangeNotifier {
 
   // ─── Ticker for analysis context ───────────────────────────────────────────
   String? _focusedTicker;
+  String? _noteLabTickerSeed;
+  bool _openNoteLabComparison = false;
 
   // ─── Getters ───────────────────────────────────────────────────────────────
   TerminalPanel get activePanel => _activePanel;
@@ -140,11 +142,33 @@ class TerminalProvider extends ChangeNotifier {
     }
   }
 
-  /// Navigate to analysis panel with a specific ticker
+  /// Navigate to Note Lab (formerly analysis) panel with a specific ticker
   void openAnalysis(String ticker) {
-    _focusedTicker = ticker;
-    _activePanel = TerminalPanel.analysis;
+    openNoteLab(ticker: ticker);
+  }
+
+  /// Navigate to NOTE LAB and optionally open comparison mode.
+  void openNoteLab({String? ticker, bool openComparison = false}) {
+    final cleanTicker = ticker?.trim().toUpperCase();
+    if (cleanTicker != null && cleanTicker.isNotEmpty) {
+      _focusedTicker = cleanTicker;
+      _noteLabTickerSeed = cleanTicker;
+    }
+    _openNoteLabComparison = openComparison;
+    _activePanel = TerminalPanel.noteLab;
     notifyListeners();
+  }
+
+  String? consumeNoteLabTickerSeed() {
+    final seed = _noteLabTickerSeed;
+    _noteLabTickerSeed = null;
+    return seed;
+  }
+
+  bool consumeOpenNoteLabComparison() {
+    final shouldOpen = _openNoteLabComparison;
+    _openNoteLabComparison = false;
+    return shouldOpen;
   }
 
   // ─── Layout ────────────────────────────────────────────────────────────────

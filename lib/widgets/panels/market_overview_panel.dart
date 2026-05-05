@@ -136,11 +136,11 @@ class _MarketOverviewPanelState extends State<MarketOverviewPanel> {
           ),
           const SizedBox(height: 16),
           Text('SYNCHRONISATION GLOBALE...',
-              style: GoogleFonts.lora(
-                  fontSize: 10,
-                  fontWeight: FontWeight.bold,
+              style: GoogleFonts.ibmPlexSans(
+                  fontSize: 9,
+                  fontWeight: FontWeight.w600,
                   color: AppTheme.textTertiary,
-                  letterSpacing: 2)),
+                  letterSpacing: 1.8)),
         ],
       ),
     );
@@ -159,25 +159,34 @@ class _MarketOverviewPanelState extends State<MarketOverviewPanel> {
     final catalystCount = sp.catalystInsights.length;
 
     return Padding(
-      padding: const EdgeInsets.fromLTRB(20, 20, 20, 8),
+      padding: const EdgeInsets.fromLTRB(20, 16, 20, 8),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          InstitutionalHeader(
-            eyebrow: 'Comité d’investissement',
-            title: 'Vue Macro & Marchés',
-            thesis:
-                'Prioriser le régime de marché, la rotation sectorielle et les catalyseurs avant de descendre au niveau société.',
-            icon: Icons.account_balance_rounded,
-            actions: [
-              TextButton.icon(
-                onPressed: () => sp.fetchMarketOverview(forceRefresh: true),
-                icon: const Icon(Icons.refresh_rounded, size: 16),
-                label: const Text('Refresh'),
+          Row(
+            children: [
+              Expanded(
+                child: Text(
+                  'VUE MACRO & MARCHÉS',
+                  style: GoogleFonts.ibmPlexSans(
+                    fontSize: 9,
+                    fontWeight: FontWeight.w600,
+                    letterSpacing: 1.8,
+                    color: AppTheme.getSecondaryText(context),
+                  ),
+                ),
+              ),
+              GestureDetector(
+                onTap: () => sp.fetchMarketOverview(forceRefresh: true),
+                child: Icon(
+                  Icons.refresh_rounded,
+                  size: 16,
+                  color: AppTheme.getSecondaryText(context),
+                ),
               ),
             ],
           ),
-          const SizedBox(height: 14),
+          const SizedBox(height: 12),
           LayoutBuilder(
             builder: (context, constraints) {
               final isWide = constraints.maxWidth >= 720;
@@ -237,13 +246,13 @@ class _MarketOverviewPanelState extends State<MarketOverviewPanel> {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Text(label.toUpperCase(),
-              style: GoogleFonts.lora(
+              style: GoogleFonts.ibmPlexSans(
                   fontSize: 8,
-                  fontWeight: FontWeight.w800,
+                  fontWeight: FontWeight.w600,
                   color: AppTheme.isDark(context)
                       ? AppTheme.white38
                       : AppTheme.black38,
-                  letterSpacing: 2.0)),
+                  letterSpacing: 1.8)),
           const SizedBox(height: 8),
           Container(height: 0.5, color: AppTheme.getBorder(context)),
         ],
@@ -290,11 +299,11 @@ class _MarketOverviewPanelState extends State<MarketOverviewPanel> {
             ),
             const SizedBox(width: 12),
             Text('STATUT DU RÉGIME DE MARCHÉ',
-                style: GoogleFonts.lora(
+                style: GoogleFonts.ibmPlexSans(
                     fontSize: 8,
-                    fontWeight: FontWeight.w900,
+                    fontWeight: FontWeight.w600,
                     color: isDark ? AppTheme.white38 : AppTheme.black38,
-                    letterSpacing: 1.0)),
+                    letterSpacing: 1.6)),
           ],
         ),
         const SizedBox(height: 16),
@@ -442,11 +451,11 @@ class _MarketOverviewPanelState extends State<MarketOverviewPanel> {
               const Icon(Icons.gpp_bad, size: 14, color: AppTheme.warning),
               const SizedBox(width: 8),
               Text('ANALYSES STRATÉGIQUES',
-                  style: GoogleFonts.lora(
+                  style: GoogleFonts.ibmPlexSans(
                       fontSize: 8,
-                      fontWeight: FontWeight.w900,
+                      fontWeight: FontWeight.w600,
                       color: AppTheme.warning,
-                      letterSpacing: 1.0)),
+                      letterSpacing: 1.6)),
             ],
           ),
           const SizedBox(height: 12),
@@ -521,16 +530,16 @@ class _MarketOverviewPanelState extends State<MarketOverviewPanel> {
                 const SizedBox(width: 10),
                 Expanded(
                   child: Text(item['label'] as String,
-                      style: GoogleFonts.lora(
+                      style: GoogleFonts.ibmPlexSans(
                           fontSize: 8,
-                          fontWeight: FontWeight.w800,
+                          fontWeight: FontWeight.w600,
                           color: AppTheme.textTertiary,
-                          letterSpacing: 0.5)),
+                          letterSpacing: 1.2)),
                 ),
                 Text(item['value'] as String,
-                    style: GoogleFonts.lora(
+                    style: GoogleFonts.ibmPlexSans(
                         fontSize: 12,
-                        fontWeight: FontWeight.w900,
+                        fontWeight: FontWeight.w700,
                         color: isDark ? AppTheme.white : AppTheme.black)),
               ],
             ),
@@ -571,8 +580,8 @@ class _MarketOverviewPanelState extends State<MarketOverviewPanel> {
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         Text(m.ticker,
-                            style: GoogleFonts.lora(
-                                fontSize: 11, fontWeight: FontWeight.w900)),
+                            style: GoogleFonts.ibmPlexSans(
+                                fontSize: 11, fontWeight: FontWeight.w700)),
                       ],
                     ),
                   ),
@@ -581,9 +590,9 @@ class _MarketOverviewPanelState extends State<MarketOverviewPanel> {
                     children: [
                       Text(
                           '${m.change >= 0 ? '+' : ''}${m.change.toStringAsFixed(1)}%',
-                          style: GoogleFonts.lora(
+                          style: GoogleFonts.ibmPlexSans(
                               fontSize: 10,
-                              fontWeight: FontWeight.w900,
+                              fontWeight: FontWeight.w700,
                               color: color)),
                     ],
                   ),
@@ -662,14 +671,14 @@ class _MarketOverviewPanelState extends State<MarketOverviewPanel> {
                 ),
                 child: Center(
                     child: Text('${(c.impactScore * 100).toInt()}',
-                        style: GoogleFonts.lora(
+                        style: GoogleFonts.ibmPlexSans(
                             fontSize: 12,
-                            fontWeight: FontWeight.w900,
+                            fontWeight: FontWeight.w700,
                             color: color))),
               ),
               title: Text(c.ticker,
-                  style: GoogleFonts.lora(
-                      fontSize: 14, fontWeight: FontWeight.w900, color: color)),
+                  style: GoogleFonts.ibmPlexSans(
+                      fontSize: 13, fontWeight: FontWeight.w700, color: color)),
               subtitle: Text(c.title,
                   style: AppTheme.body(context, size: 12)
                       .copyWith(height: 1.4, fontWeight: FontWeight.w600),
@@ -725,9 +734,9 @@ class _MarketOverviewPanelState extends State<MarketOverviewPanel> {
                     ),
                     child: Center(
                       child: Text(t.symbol.substring(0, 1),
-                          style: GoogleFonts.lora(
+                          style: GoogleFonts.ibmPlexSans(
                               fontSize: 12,
-                              fontWeight: FontWeight.w900,
+                              fontWeight: FontWeight.w700,
                               color: color)),
                     ),
                   ),
@@ -739,8 +748,8 @@ class _MarketOverviewPanelState extends State<MarketOverviewPanel> {
                         Row(
                           children: [
                             Text(t.symbol,
-                                style: GoogleFonts.lora(
-                                    fontSize: 12, fontWeight: FontWeight.w900)),
+                                style: GoogleFonts.ibmPlexSans(
+                                    fontSize: 12, fontWeight: FontWeight.w700)),
                             const SizedBox(width: 8),
                             if (t.labels.isNotEmpty)
                               ...t.labels.take(1).map((l) => Container(
@@ -754,9 +763,9 @@ class _MarketOverviewPanelState extends State<MarketOverviewPanel> {
                                               .withValues(alpha: 0.05),
                                     ),
                                     child: Text(l,
-                                        style: GoogleFonts.lora(
+                                        style: GoogleFonts.ibmPlexSans(
                                             fontSize: 7,
-                                            fontWeight: FontWeight.w900,
+                                            fontWeight: FontWeight.w700,
                                             color: l == 'CLUSTER'
                                                 ? AppTheme.amberAccent
                                                 : AppTheme.primary)),
@@ -764,12 +773,12 @@ class _MarketOverviewPanelState extends State<MarketOverviewPanel> {
                           ],
                         ),
                         Text(t.name,
-                            style: GoogleFonts.lora(
+                            style: GoogleFonts.ibmPlexSans(
                                 fontSize: 9,
                                 color: isDark
                                     ? AppTheme.white38
                                     : AppTheme.black38,
-                                fontWeight: FontWeight.w600),
+                                fontWeight: FontWeight.w500),
                             maxLines: 1,
                             overflow: TextOverflow.ellipsis),
                       ],
@@ -780,14 +789,14 @@ class _MarketOverviewPanelState extends State<MarketOverviewPanel> {
                     children: [
                       Text(
                         '\$${(t.value / 1000000).toStringAsFixed(1)}M',
-                        style: GoogleFonts.lora(
-                            fontSize: 12, fontWeight: FontWeight.w900),
+                        style: GoogleFonts.ibmPlexSans(
+                            fontSize: 12, fontWeight: FontWeight.w700),
                       ),
                       Text(_formatDate(t.date),
-                          style: GoogleFonts.lora(
+                          style: GoogleFonts.ibmPlexSans(
                               fontSize: 8,
                               color: AppTheme.textTertiary,
-                              fontWeight: FontWeight.bold,
+                              fontWeight: FontWeight.w600,
                               letterSpacing: 0.5)),
                     ],
                   ),
@@ -846,18 +855,18 @@ class _MarketOverviewPanelState extends State<MarketOverviewPanel> {
           const SizedBox(width: 10),
           Expanded(
             child: Text(title,
-                style: GoogleFonts.lora(
+                style: GoogleFonts.ibmPlexSans(
                     fontSize: 7,
-                    fontWeight: FontWeight.w800,
+                    fontWeight: FontWeight.w600,
                     color: AppTheme.textTertiary,
-                    letterSpacing: 0.5),
+                    letterSpacing: 0.8),
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis),
           ),
           const SizedBox(width: 8),
           Text(value,
-              style: GoogleFonts.lora(
-                  fontSize: 11, fontWeight: FontWeight.w900, color: color)),
+              style: GoogleFonts.ibmPlexSans(
+                  fontSize: 11, fontWeight: FontWeight.w700, color: color)),
         ],
       ),
     );
@@ -902,19 +911,19 @@ class _MarketOverviewPanelState extends State<MarketOverviewPanel> {
                     mainAxisAlignment: MainAxisAlignment.center,
                     children: [
                       Text(s.name.toUpperCase(),
-                          style: GoogleFonts.lora(
+                          style: GoogleFonts.ibmPlexSans(
                               fontSize: 8,
-                              fontWeight: FontWeight.w800,
+                              fontWeight: FontWeight.w600,
                               color:
                                   isDark ? AppTheme.white38 : AppTheme.black38,
-                              letterSpacing: 0.5),
+                              letterSpacing: 1.2),
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis),
                       const SizedBox(height: 4),
                       Text(s.sentiment.toUpperCase(),
-                          style: GoogleFonts.lora(
+                          style: GoogleFonts.ibmPlexSans(
                               fontSize: 7,
-                              fontWeight: FontWeight.w900,
+                              fontWeight: FontWeight.w600,
                               color: s.sentiment.contains('HAUSS') ||
                                       s.sentiment.contains('BULL')
                                   ? AppTheme.positive
@@ -927,9 +936,9 @@ class _MarketOverviewPanelState extends State<MarketOverviewPanel> {
                 ),
                 Text(
                     '${s.performance >= 0 ? '+' : ''}${s.performance.toStringAsFixed(1)}%',
-                    style: GoogleFonts.lora(
+                    style: GoogleFonts.ibmPlexSans(
                         fontSize: 11,
-                        fontWeight: FontWeight.w900,
+                        fontWeight: FontWeight.w700,
                         color: color)),
               ],
             ),
@@ -949,9 +958,9 @@ class _MarketOverviewPanelState extends State<MarketOverviewPanel> {
         child: Column(
           children: [
             Text('PASSER À SIGMA PRO',
-                style: GoogleFonts.lora(
-                    fontSize: 11,
-                    fontWeight: FontWeight.w900,
+                style: GoogleFonts.ibmPlexSans(
+                    fontSize: 10,
+                    fontWeight: FontWeight.w700,
                     color: AppTheme.primary,
                     letterSpacing: 2)),
             const SizedBox(height: 12),
@@ -973,10 +982,11 @@ class _MarketOverviewPanelState extends State<MarketOverviewPanel> {
           const Icon(Icons.storage, size: 24, color: AppTheme.primary),
           const SizedBox(height: 16),
           Text('ERREUR DE SYNCHRONISATION',
-              style: GoogleFonts.lora(
+              style: GoogleFonts.ibmPlexSans(
                   fontSize: 10,
-                  fontWeight: FontWeight.w900,
-                  color: AppTheme.textTertiary)),
+                  fontWeight: FontWeight.w600,
+                  color: AppTheme.textTertiary,
+                  letterSpacing: 1.6)),
           const SizedBox(height: 32),
           TextButton(
               onPressed: () => sp.fetchMarketOverview(forceRefresh: true),
@@ -1034,9 +1044,9 @@ class _MarketOverviewPanelState extends State<MarketOverviewPanel> {
                 ),
                 const SizedBox(width: 12),
                 Text('DAILY CREAM REPORT™',
-                    style: GoogleFonts.lora(
+                    style: GoogleFonts.ibmPlexSans(
                         fontSize: 8,
-                        fontWeight: FontWeight.w900,
+                        fontWeight: FontWeight.w700,
                         color: AppTheme.gold,
                         letterSpacing: 1.5)),
                 const Spacer(),
@@ -1044,10 +1054,10 @@ class _MarketOverviewPanelState extends State<MarketOverviewPanel> {
                     DateFormat('dd MMM HH:mm')
                         .format(report.date)
                         .toUpperCase(),
-                    style: GoogleFonts.lora(
+                    style: GoogleFonts.ibmPlexSans(
                         fontSize: 8,
                         color: AppTheme.textTertiary,
-                        fontWeight: FontWeight.w800,
+                        fontWeight: FontWeight.w600,
                         letterSpacing: 0.5)),
               ],
             ),
@@ -1073,12 +1083,12 @@ class _MarketOverviewPanelState extends State<MarketOverviewPanel> {
                         bottom: BorderSide(
                             color: AppTheme.getBorder(context), width: 0.5)),
                   ),
-                  child: Text('ALPHA SELECTIONS',
-                      style: GoogleFonts.lora(
+                    child: Text('TICKERS A SURVEILLER',
+                      style: GoogleFonts.ibmPlexSans(
                           fontSize: 8,
-                          fontWeight: FontWeight.w900,
+                          fontWeight: FontWeight.w600,
                           color: AppTheme.textTertiary,
-                          letterSpacing: 1)),
+                          letterSpacing: 1.6)),
                 ),
                 const SizedBox(height: 16),
                 GridView.builder(
@@ -1121,19 +1131,19 @@ class _MarketOverviewPanelState extends State<MarketOverviewPanel> {
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
                 Text(pick.ticker,
-                    style: GoogleFonts.lora(
-                        fontSize: 11, fontWeight: FontWeight.w900)),
+                    style: GoogleFonts.ibmPlexSans(
+                        fontSize: 11, fontWeight: FontWeight.w700)),
                 Text(pick.signal,
-                    style: GoogleFonts.lora(
+                    style: GoogleFonts.ibmPlexSans(
                         fontSize: 7,
-                        fontWeight: FontWeight.w800,
-                        color: AppTheme.positive)),
+                        fontWeight: FontWeight.w600,
+                    color: AppTheme.primary)),
               ],
             ),
             Text('${pick.score.toInt()}',
-                style: GoogleFonts.lora(
+                style: GoogleFonts.ibmPlexSans(
                     fontSize: 12,
-                    fontWeight: FontWeight.w900,
+                    fontWeight: FontWeight.w700,
                     color: AppTheme.gold)),
           ],
         ),
@@ -1203,14 +1213,14 @@ class _MarketOverviewPanelState extends State<MarketOverviewPanel> {
             mainAxisSize: MainAxisSize.min,
             children: [
               Text(label,
-                  style: GoogleFonts.lora(
+                  style: GoogleFonts.ibmPlexSans(
                       fontSize: 7,
-                      fontWeight: FontWeight.w800,
+                      fontWeight: FontWeight.w600,
                       color: AppTheme.textTertiary,
-                      letterSpacing: 0.5)),
+                      letterSpacing: 0.8)),
               Text(value,
-                  style: GoogleFonts.lora(
-                      fontSize: 12, fontWeight: FontWeight.w900, color: color)),
+                  style: GoogleFonts.ibmPlexSans(
+                      fontSize: 12, fontWeight: FontWeight.w700, color: color)),
             ],
           ),
         ],
@@ -1250,11 +1260,11 @@ class _MarketOverviewPanelState extends State<MarketOverviewPanel> {
               Icon(Icons.data_object, size: 12, color: AppTheme.gold),
               const SizedBox(width: 8),
               Text('PROBABILISTIC HISTORICAL RETURNS (STATISTICAL EDGE)',
-                  style: GoogleFonts.lora(
+                  style: GoogleFonts.ibmPlexSans(
                       fontSize: 8,
-                      fontWeight: FontWeight.w800,
+                      fontWeight: FontWeight.w600,
                       color: AppTheme.gold,
-                      letterSpacing: 1.0)),
+                      letterSpacing: 1.2)),
             ],
           ),
           const SizedBox(height: 12),
@@ -1320,9 +1330,9 @@ class _MarketOverviewPanelState extends State<MarketOverviewPanel> {
                 padding:
                     const EdgeInsets.symmetric(vertical: 8, horizontal: 12),
                 child: Text(l,
-                    style: GoogleFonts.lora(
+                    style: GoogleFonts.ibmPlexSans(
                         fontSize: 7,
-                        fontWeight: FontWeight.w800,
+                        fontWeight: FontWeight.w600,
                         color: AppTheme.textTertiary)),
               ))
           .toList(),
@@ -1337,9 +1347,9 @@ class _MarketOverviewPanelState extends State<MarketOverviewPanel> {
         return Padding(
           padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 12),
           child: Text(v,
-              style: GoogleFonts.lora(
+              style: GoogleFonts.ibmPlexSans(
                 fontSize: 10,
-                fontWeight: i == 0 ? FontWeight.w700 : FontWeight.w500,
+                fontWeight: i == 0 ? FontWeight.w600 : FontWeight.w400,
                 color: i == 0
                     ? null
                     : (v.contains('%')
@@ -1369,11 +1379,11 @@ class _MarketOverviewPanelState extends State<MarketOverviewPanel> {
         children: [
           const SizedBox(height: 16),
           Text('ÉVÉNEMENTS ÉCONOMIQUES',
-              style: GoogleFonts.lora(
+              style: GoogleFonts.ibmPlexSans(
                   fontSize: 8,
-                  fontWeight: FontWeight.w800,
+                  fontWeight: FontWeight.w600,
                   color: dimText,
-                  letterSpacing: 1.5)),
+                  letterSpacing: 1.6)),
           const SizedBox(height: 12),
           ...events.take(6).map((e) {
             final isHigh = e.impact.toUpperCase() == 'HIGH';
@@ -1396,31 +1406,31 @@ class _MarketOverviewPanelState extends State<MarketOverviewPanel> {
                               e.date.split(' ').length > 1
                                   ? e.date.split(' ')[1]
                                   : e.date,
-                              style: GoogleFonts.lora(
+                              style: GoogleFonts.ibmPlexSans(
                                   fontSize: 9,
-                                  fontWeight: FontWeight.w900,
+                                  fontWeight: FontWeight.w700,
                                   color: AppTheme.primary)),
                           Text(e.country,
-                              style: GoogleFonts.lora(
+                              style: GoogleFonts.ibmPlexSans(
                                   fontSize: 7,
-                                  fontWeight: FontWeight.w700,
+                                  fontWeight: FontWeight.w600,
                                   color: dimText)),
                         ])),
                 const SizedBox(width: 12),
                 Expanded(
                     child: Text(e.event.toUpperCase(),
-                        style: GoogleFonts.lora(
+                        style: GoogleFonts.ibmPlexSans(
                             fontSize: 9,
-                            fontWeight: FontWeight.w800,
+                            fontWeight: FontWeight.w600,
                             color: isHigh ? color : mainText,
-                            letterSpacing: -0.2),
+                            letterSpacing: 0.2),
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis)),
                 const SizedBox(width: 8),
                 Text(e.actual != null && e.actual!.isNotEmpty ? e.actual! : '—',
-                    style: GoogleFonts.lora(
+                    style: GoogleFonts.ibmPlexSans(
                         fontSize: 10,
-                        fontWeight: FontWeight.w900,
+                        fontWeight: FontWeight.w700,
                         color: isHigh ? AppTheme.gold : mainText)),
               ]),
             );

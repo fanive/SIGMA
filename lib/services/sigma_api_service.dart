@@ -351,12 +351,29 @@ class SigmaApiService {
     _cache.clear();
     dev.log('🗑️ SigmaApiService cache cleared', name: 'SigmaApiService');
   }
+
+  // ═══════════════════════════════════════════════════════════════════════
+  // GOOGLE FINANCE  /google_finance/{symbol}
+  // ═══════════════════════════════════════════════════════════════════════
+  static Future<Map<String, dynamic>> getGoogleFinance(String ticker) async {
+    final key = 'gf:${ticker.toUpperCase()}';
+    final cached = _getCache<Map<String, dynamic>>(key);
+    if (cached != null) return cached;
+
+    final data = await _get('/google_finance/${ticker.toUpperCase()}');
+    if (data is Map) {
+      final m = Map<String, dynamic>.from(data);
+      _setCache(key, m, const Duration(minutes: 5));
+      return m;
+    }
+    return {};
+  }
 }
 
 // ── Internal cache entry ────────────────────────────────────────────────────
 class _Cache {
   final dynamic data;
-  final DateTime expiresAt;
-  _Cache(this.data, this.expiresAt);
-  bool get isExpired => DateTime.now().isAfter(expiresAt);
+  final DateTime expiry;
+  _Cache(this.data, this.expiry);
+  bool get isExpired => DateTime.now().isAfter(expiry);
 }

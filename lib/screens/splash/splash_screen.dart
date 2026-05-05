@@ -80,7 +80,7 @@ class _SplashScreenState extends State<SplashScreen>
                 const SigmaLogo(size: 74),
                 const SizedBox(height: 28),
                 Text(
-                  'Private Markets Intelligence',
+                  'Analyse lisible, comparable et honnete',
                   style: AppTheme.compactTitle(
                     context,
                     size: 22,
@@ -89,12 +89,18 @@ class _SplashScreenState extends State<SplashScreen>
                 ),
                 const SizedBox(height: 8),
                 Text(
-                  'Research, convictions, catalysts and allocation in one disciplined workspace.',
+                  'Une IA qui clarifie les donnees sans remplacer votre jugement.',
                   style: AppTheme.compactBody(
                     context,
                     color: AppTheme.textSecondary,
                   ),
                 ),
+                const SizedBox(height: 20),
+                _PromiseLine('Comprendre un ticker en 3 minutes.'),
+                const SizedBox(height: 8),
+                _PromiseLine('Comparer deux entreprises proprement.'),
+                const SizedBox(height: 8),
+                _PromiseLine('Decider avec methode, pas avec hype.'),
                 const SizedBox(height: 28),
                 AnimatedBuilder(
                   animation: _progress,
@@ -118,6 +124,38 @@ class _SplashScreenState extends State<SplashScreen>
           ),
         ),
       ),
+    );
+  }
+}
+
+class _PromiseLine extends StatelessWidget {
+  final String text;
+
+  const _PromiseLine(this.text);
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      children: [
+        Container(
+          width: 6,
+          height: 6,
+          decoration: const BoxDecoration(
+            color: AppTheme.gold,
+            shape: BoxShape.circle,
+          ),
+        ),
+        const SizedBox(width: 10),
+        Expanded(
+          child: Text(
+            text,
+            style: AppTheme.compactBody(
+              context,
+              color: AppTheme.textPrimary,
+            ),
+          ),
+        ),
+      ],
     );
   }
 }

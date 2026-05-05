@@ -17,7 +17,7 @@ class AIConfig {
   };
 
   static const Map<String, String> nvidiaModels = {
-    'deepseek-v4-flash': 'deepseek-ai/deepseek-v4-flash',
+    'mistral': 'mistralai/mistral-small-4-119b-2603',
   };
 
   /// Fallback désactivé: NVIDIA NIM est prioritaire et unique.
@@ -53,9 +53,9 @@ class AIConfig {
   // ========================================
 
   static const String defaultProvider = providerNvidia;
-  static const String defaultStockModel = 'deepseek-v4-flash';
-  static const String defaultMarketModel = 'deepseek-v4-flash';
-  static const String defaultNvidiaModel = 'deepseek-v4-flash';
+  static const String defaultStockModel = 'mistral';
+  static const String defaultMarketModel = 'mistral';
+  static const String defaultNvidiaModel = 'mistral';
 
   // ========================================
   // ENDPOINTS

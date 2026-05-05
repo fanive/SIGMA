@@ -1,4 +1,4 @@
-// ignore_for_file: prefer_interpolation_to_compose_strings, unused_local_variable
+﻿// ignore_for_file: prefer_interpolation_to_compose_strings, unused_local_variable
 import 'dart:async';
 import 'dart:convert';
 import 'dart:developer' as dev;
@@ -13,17 +13,17 @@ import 'sigma_api_service.dart';
 /// ========================================================================
 /// SIGMA Financial Report Service
 /// ========================================================================
-/// Génère des rapports de recherche financière professionnels (style sell-side)
-/// inspirés des standards Goldman Sachs, Morgan Stanley, JPMorgan.
+/// GÃ©nÃ¨re des rapports de recherche financiÃ¨re professionnels (style sell-side)
+/// inspirÃ©s des standards Goldman Sachs, Morgan Stanley, JPMorgan.
 ///
 /// Framework de rapport :
 /// 1. EXECUTIVE SUMMARY (Investment thesis + verdict)
-/// 2. COMPANY OVERVIEW (Business model, segments, compétiteurs)
+/// 2. COMPANY OVERVIEW (Business model, segments, compÃ©titeurs)
 /// 3. INVESTMENT THESIS (Bull / Bear case)
 /// 4. FINANCIAL ANALYSIS (P/E, Revenue, Marges, FCF, bilan)
-/// 5. VALUATION (DCF simplifié, Price Target)
+/// 5. VALUATION (DCF simplifiÃ©, Price Target)
 /// 6. RISK FACTORS (risques haussiers et baissiers)
-/// 7. CATALYSTS (événements à surveiller)
+/// 7. CATALYSTS (Ã©vÃ©nements Ã  surveiller)
 /// 8. RECOMMENDATION (notation + objectif de cours)
 /// ========================================================================
 class FinancialReportService {
@@ -35,54 +35,29 @@ class FinancialReportService {
   String get modelName => _provider.modelName;
 
   factory FinancialReportService.fromEnv() {
-    final primaryChoice = (dotenv.env['PRIMARY_AI_PROVIDER'] ?? 'nvidia').toLowerCase();
-
     final nvidiaKey = dotenv.env['NVIDIA_API_KEY'] ?? '';
-    final ollamaKey = dotenv.env['OLLAMA_API_KEY'] ?? '';
     final stockModel = dotenv.env['STOCK_MODEL'] ?? AIConfig.defaultStockModel;
     final reportModelOverride = dotenv.env['NVIDIA_REPORT_MODEL'];
 
-    final List<AIProvider> chain = [];
-
-    final List<String> priorityChain =
-        primaryChoice == 'ollama' ? ['ollama', 'nvidia'] : ['nvidia', 'ollama'];
-
-    for (var p in priorityChain) {
-      if (p == 'nvidia' && nvidiaKey.isNotEmpty) {
-        chain.add(AIProviderFactory.createStockProvider(
-          provider: AIConfig.providerNvidia,
-          apiKey: nvidiaKey,
-          modelKey: reportModelOverride ?? stockModel,
-        ));
-      } else if (p == 'ollama' && ollamaKey.isNotEmpty) {
-        final reportModel = dotenv.env['OLLAMA_REPORT_MODEL'] ?? dotenv.env['OLLAMA_MODEL'] ?? '';
-        if (reportModel.isNotEmpty) {
-          chain.add(AIProviderFactory.createStockProvider(
-            provider: AIConfig.providerOllama,
-            apiKey: ollamaKey,
-            modelKey: reportModel,
-            baseUrlOverride: dotenv.env['OLLAMA_BASE_URL'] ?? AIConfig.ollamaBaseUrl,
-          ));
-        }
-      }
+    if (nvidiaKey.isEmpty || nvidiaKey.contains('example')) {
+      throw StateError(
+        'NVIDIA_API_KEY is required. Financial reports now use NVIDIA only.',
+      );
     }
 
-    if (chain.isEmpty) {
-      // Fallback ultime sur Ollama MiniMax
-      return FinancialReportService._(AIProviderFactory.createStockProvider(
-        provider: AIConfig.providerOllama,
-        apiKey: ollamaKey,
-        modelKey: 'minimax-m2.7:cloud',
-      ));
-    }
-
-    return FinancialReportService._(FallbackProvider(chain));
+    return FinancialReportService._(
+      AIProviderFactory.createStockProvider(
+        provider: AIConfig.providerNvidia,
+        apiKey: nvidiaKey,
+        modelKey: reportModelOverride ?? stockModel,
+      ),
+    );
   }
 
   static String _buildSystemPrompt(String language) {
     final langDirective = language == 'fr'
-        ? 'LANGUE : Rédige l\'INTÉGRALITÉ du rapport EN FRANÇAIS. '
-          'Chaque section, chaque phrase, chaque titre doit être en français.'
+        ? 'LANGUE : RÃ©dige l\'INTÃ‰GRALITÃ‰ du rapport EN FRANÃ‡AIS. '
+          'Chaque section, chaque phrase, chaque titre doit Ãªtre en franÃ§ais.'
         : 'LANGUAGE: Write the ENTIRE report in English.';
 
     return '''
@@ -99,7 +74,7 @@ $langDirective
   }
 
   // =========================================================================
-  // MÉTHODE PRINCIPALE : Génère un rapport complet
+  // MÃ‰THODE PRINCIPALE : GÃ©nÃ¨re un rapport complet
   // =========================================================================
   Future<FinancialReport> generateReport({
     required AnalysisData analysis,
@@ -121,7 +96,9 @@ $langDirective
             useThinking: false, // For SPEED, the report doesn't need thinking trace
           )
           .timeout(
-            const Duration(seconds: 120),
+            // 119B model takes ~50s just to start responding.
+            // A full report (2000+ tokens) can take 2–3 min total.
+            const Duration(seconds: 240),
             onTimeout: () => throw TimeoutException('Primary provider timed out.'),
           );
 
@@ -158,7 +135,7 @@ $langDirective
     }
   }
 
-  /// Version streaming du rapport pour une réactivité instantanée
+  /// Version streaming du rapport pour une rÃ©activitÃ© instantanÃ©e
   Stream<String> streamReport({
     required AnalysisData analysis,
     String language = 'fr',
@@ -175,7 +152,7 @@ $langDirective
     });
     
     final langDirective = language == 'fr'
-        ? 'LANGUE : Rédige l\'INTÉGRALITÉ du rapport EN FRANÇAIS. '
+        ? 'LANGUE : RÃ©dige l\'INTÃ‰GRALITÃ‰ du rapport EN FRANÃ‡AIS. '
         : 'LANGUAGE: Write the ENTIRE report in English.';
 
     final systemPrompt = '''
@@ -196,7 +173,7 @@ $langDirective
   }
 
   // =========================================================================
-  // Construction du prompt contextualisé avec les données financières réelles
+  // Construction du prompt contextualisÃ© avec les donnÃ©es financiÃ¨res rÃ©elles
   // =========================================================================
   String _buildContextPrompt(
     AnalysisData analysis,
@@ -214,7 +191,7 @@ $langDirective
     final riskLevel = analysis.riskLevel;
     final targetPrice = analysis.targetPriceValue;
 
-    // Données financières clés
+    // DonnÃ©es financiÃ¨res clÃ©s
     final financials = analysis.financialMatrix
         .map((f) => '  - ${f.label}: ${f.value}')
         .join('\n');
@@ -227,29 +204,114 @@ $langDirective
 
     // Catalyseurs
     final catalysts = analysis.catalysts
-        .map((c) => '  • [${c.date}] ${c.event} (impact: ${c.impact})')
+        .map((c) => '  â€¢ [${c.date}] ${c.event} (impact: ${c.impact})')
         .join('\n');
 
     // Risques
-    final cons = analysis.cons.map((c) => '  • ${c.text}').join('\n');
-    final pros = analysis.pros.map((p) => '  • ${p.text}').join('\n');
+    final cons = analysis.cons.map((c) => '  â€¢ ${c.text}').join('\n');
+    final pros = analysis.pros.map((p) => '  â€¢ ${p.text}').join('\n');
 
     // Signaux techniques
     final techSignals = analysis.technicalAnalysis
         .take(5)
-        .map((t) => '  - ${t.indicator}: ${t.value} → ${t.interpretation}')
+        .map((t) => '  - ${t.indicator}: ${t.value} â†’ ${t.interpretation}')
         .join('\n');
 
-    // Données historiques réelles (Revenus & Earnings)
-    final historicalData = (analysis.historicalEarnings ?? [])
-        .take(4)
-        .map((e) {
-          final date = e['date']?.toString().split('-')[0] ?? 'N/A';
-          final rev = (e['revenue'] ?? 0) / 1e9; // En Billions
-          final earn = (e['netIncome'] ?? 0) / 1e9; // En Billions
-          return '  - Year $date: Revenue \$${rev.toStringAsFixed(2)}B, Net Income \$${earn.toStringAsFixed(2)}B';
-        })
-        .join('\n');
+    // â”€â”€ EXTENDED QUANTITATIVE DATA â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    final ks = analysis.keyStatistics;
+    String fmtN(double? v) => (v == null || v == 0) ? 'N/A' : v.toStringAsFixed(2);
+    String fmtPct(double? v) => (v == null || v == 0) ? 'N/A' : '${(v * 100).toStringAsFixed(1)}%';
+    String fmtBn(double? v) => (v == null || v == 0) ? 'N/A' : '\$${(v / 1e9).toStringAsFixed(2)}B';
+
+    final keyStatsBlock = ks != null ? [
+      '  Market Cap: ${fmtBn(ks.marketCap)} | EV: ${fmtBn(ks.enterpriseValue)}',
+      '  P/E (TTM): ${fmtN(ks.trailingPE)} | Fwd P/E: ${fmtN(ks.forwardPE)} | PEG: ${fmtN(ks.pegRatio)}',
+      '  P/S: ${fmtN(ks.priceToSales)} | P/B: ${fmtN(ks.priceToBook)} | EV/EBITDA: ${fmtN(ks.enterpriseToEbitda)}',
+      '  ROE: ${fmtPct(ks.returnOnEquity)} | ROA: ${fmtPct(ks.returnOnAssets)} | Net Margin: ${fmtPct(ks.profitMargins)}',
+      '  Op. Margin: ${fmtPct(ks.operatingMargins)} | Earnings Growth (YoY): ${fmtPct(ks.earningsGrowth)} | Rev Growth: ${fmtPct(ks.revenueGrowth)}',
+      '  Revenue: ${fmtBn(ks.revenue)} | FCF: ${fmtBn(ks.freeCashflow)} | Op CF: ${fmtBn(ks.operatingCashflow)}',
+      '  Cash: ${fmtBn(ks.totalCash)} | Total Debt: ${fmtBn(ks.totalDebt)} | D/E: ${fmtN(ks.debtToEquity)}',
+      '  Current Ratio: ${fmtN(ks.currentRatio)} | Quick Ratio: ${fmtN(ks.quickRatio)}',
+      '  Beta: ${fmtN(ks.beta)} | Short %: ${fmtPct(ks.shortPercentOfFloat)} | Avg Vol: ${fmtN(ks.averageVolume)}',
+      '  52W High: ${fmtN(ks.fiftyTwoWeekHigh)} | 52W Low: ${fmtN(ks.fiftyTwoWeekLow)}',
+      '  50D MA: ${fmtN(ks.fiftyDayAverage)} | 200D MA: ${fmtN(ks.twoHundredDayAverage)}',
+      '  EPS TTM: ${fmtN(ks.trailingEps)} | Fwd EPS: ${fmtN(ks.forwardEps)}',
+      if (ks.dividendYield > 0) '  Dividend Yield: ${fmtPct(ks.dividendYield)} | Payout Ratio: ${fmtPct(ks.payoutRatio)}',
+    ].join('\n') : '  N/A';
+
+    // Insider transactions
+    final insiderBuyPct = analysis.insiderBuyRatio != null
+        ? '${(analysis.insiderBuyRatio! * 100).toStringAsFixed(1)}%'
+        : 'N/A';
+    final insiderLines = analysis.insiderTransactions.take(5).map((t) {
+      final ch = double.tryParse(t.change.replaceAll(RegExp(r'[^\-\d.]'), '')) ?? 0;
+      return '  - [${t.transactionDate}] ${t.name}: ${ch >= 0 ? "BUY" : "SELL"} ${t.change.replaceAll("-", "")} shares @ \$${t.transactionPrice}';
+    }).join('\n');
+
+    // Trade setup
+    final tsSetup = analysis.tradeSetup;
+    final tradeBlock =
+        'Entry: ${tsSetup.cleanEntryZone} | Target: ${tsSetup.cleanTargetPrice} | Stop: ${tsSetup.cleanStopLoss} | R/R: ${tsSetup.riskRewardRatio}';
+
+    // ESG
+    final esgBlock = analysis.esgScore != null
+        ? 'Score: ${analysis.esgScore!.toStringAsFixed(0)} | Controversy: ${analysis.controversyScore ?? "N/A"}'
+        : 'N/A';
+
+    // Earnings forward estimates
+    final earnTrend = analysis.earningsTrend;
+    String earnFwdBlock = 'N/A';
+    if (earnTrend != null && earnTrend.isNotEmpty) {
+      final trend0 = earnTrend['trend0'] as Map?;
+      final period0 = earnTrend['period0']?.toString() ?? '';
+      final epsEst0 = trend0?['earningsEstimate']?['avg']?.toString() ?? 'N/A';
+      final revEst0 = trend0?['revenueEstimate']?['avg']?.toString() ?? 'N/A';
+      earnFwdBlock = '  Next ($period0): EPS est. $epsEst0, Rev est. $revEst0';
+      final trend1 = earnTrend['trend1'] as Map?;
+      if (trend1 != null) {
+        final period1 = earnTrend['period1']?.toString() ?? '';
+        final epsEst1 = trend1['earningsEstimate']?['avg']?.toString() ?? 'N/A';
+        final revEst1 = trend1['revenueEstimate']?['avg']?.toString() ?? 'N/A';
+        earnFwdBlock += '\n  Following ($period1): EPS est. $epsEst1, Rev est. $revEst1';
+      }
+    }
+
+    // Institutional holders top 5
+    final topHoldersLines = ((analysis.institutionalHolders ?? []).take(5)).map((h) {
+      final name = h['Holder'] ?? h['holder'] ?? h['name'] ?? 'Unknown';
+      final pct = h['% Out'] ?? h['pHeld'] ?? h['pctHeld'] ?? '';
+      final shares = h['Shares'] ?? h['shares'] ?? '';
+      return '  - $name: $pct ($shares shares)';
+    }).join('\n');
+
+    // Volatility
+    final vol = analysis.volatility;
+    final volBlock = 'Beta: ${vol.beta} | IV Rank: ${vol.ivRank} | Regime: ${vol.interpretation}';
+
+    final endpointFinancials =
+      endpointData['financials'] as Map<String, dynamic>? ?? {};
+    final endpointAnnualIncome =
+      (endpointFinancials['annualIncomeStatement'] as List?) ?? [];
+
+    // DonnÃ©es historiques rÃ©elles (Revenus & Earnings)
+    final historicalData = (endpointAnnualIncome.isNotEmpty
+        ? endpointAnnualIncome
+        : (analysis.historicalEarnings ?? []))
+      .take(4)
+      .whereType<Map>()
+      .map((e) {
+        final row = Map<String, dynamic>.from(e);
+        final rawDate = row['index'] ?? row['date'] ?? 'N/A';
+        final date = rawDate.toString().split('-').first;
+        final revenue = (row['TotalRevenue'] ?? row['revenue'] ?? 0) as num;
+        final earnings =
+          (row['NetIncome'] ?? row['NetIncomeLoss'] ?? row['netIncome'] ?? 0)
+            as num;
+        final rev = revenue / 1e9;
+        final earn = earnings / 1e9;
+        return '  - Year $date: Revenue \$${rev.toStringAsFixed(2)}B, Net Income \$${earn.toStringAsFixed(2)}B';
+      })
+      .join('\n');
 
       final endpointAddon = _buildEndpointPromptAddon(endpointData);
 
@@ -290,10 +352,29 @@ $analystConsensus
 ===== TECHNICALS =====
 $techSignals
 
+===== KEY STATISTICS (FUNDAMENTALS â€” USE FOR KPIs & VALUATION) =====
+$keyStatsBlock
+
+===== INSIDER TRANSACTIONS (BUY RATIO: $insiderBuyPct) =====
+$insiderLines
+
+===== TRADE SETUP =====
+$tradeBlock
+
+===== EARNINGS FORWARD ESTIMATES =====
+$earnFwdBlock
+
+===== INSTITUTIONAL TOP HOLDERS =====
+$topHoldersLines
+
+===== VOLATILITY & ESG =====
+$volBlock
+ESG: $esgBlock
+
 ===== RAW INSTITUTIONAL DATA (SEEKING ALPHA, MBOUM, ALPHA VANTAGE) =====
 ${analysis.rawInstitutionalData != null ? (analysis.rawInstitutionalData!.length > 4000 ? analysis.rawInstitutionalData!.substring(0, 4000) : analysis.rawInstitutionalData!) : "N/A"}
 
-===== OUTPUT: STRICT VALID JSON ONLY — NO TEXT OUTSIDE JSON — NO MARKDOWN INSIDE VALUES =====
+===== OUTPUT: STRICT VALID JSON ONLY â€” NO TEXT OUTSIDE JSON â€” NO MARKDOWN INSIDE VALUES =====
 IMPORTANT: "historical_financials" MUST contain the EXACT values from "HISTORICAL PERFORMANCE (ACTUALS)" provided above. Use Billions (\$) as unit.
 IMPORTANT: "valuation_table" MUST be BASE on actual historical growth and current price of $price.
 IMPORTANT: "price_target" MUST be your OWN calculated fair-value estimate based on the data above. Do NOT copy the example value. Analyze financials, growth, comps, and risk to derive a realistic target.
@@ -339,9 +420,44 @@ IMPORTANT: "price_target" MUST be your OWN calculated fair-value estimate based 
     {"ticker": "MSFT", "name": "Microsoft Corp", "price": "420.50", "verdict": "BUY"},
     {"ticker": "GOOG", "name": "Alphabet Inc", "price": "175.30", "verdict": "HOLD"}
   ],
+  "technical_indicators": [
+    {"name": "RSI (14)", "value": "62.4", "signal": "NEUTRAL"},
+    {"name": "MACD", "value": "+0.45", "signal": "BUY"},
+    {"name": "50D MA vs 200D MA", "value": "ABOVE", "signal": "BULLISH"}
+  ],
+  "insider_activity": {
+    "buy_ratio": 0.65,
+    "net_direction": "ACCUMULATION",
+    "summary": "Recent insider activity with net buying signal."
+  },
+  "trade_setup": {
+    "entry": "entry zone from data",
+    "target": "price target from analysis",
+    "stop": "support level",
+    "rr_ratio": "2.0:1"
+  },
+  "earnings_forward": {
+    "next_eps_estimate": "2.45",
+    "next_revenue_estimate": "95.2B",
+    "next_date": "2025-Q2",
+    "analyst_count": 15
+  },
+  "ownership_breakdown": {
+    "institutional_pct": "72.4%",
+    "insider_pct": "5.2%",
+    "top_holders": [
+      {"name": "Vanguard Group", "pct": "8.1%"},
+      {"name": "BlackRock Inc", "pct": "7.3%"}
+    ]
+  },
+  "esg_rating": {
+    "score": 72,
+    "controversy": 2,
+    "label": "LOW RISK"
+  },
   "ticker_image_url": "https://financialmodelingprep.com/image-stock/$ticker.png"
 }
-${language == 'fr' ? '\nLe JSON doit être intégralement en FRANÇAIS.' : ''}''';
+${language == 'fr' ? '\nLe JSON doit Ãªtre intÃ©gralement en FRANÃ‡AIS.' : ''}''';
   }
 
   Future<Map<String, dynamic>> _fetchEndpointData(String ticker) async {
@@ -506,8 +622,11 @@ $histLines
       j['kpis'] = generatedKpis;
     }
 
-    // Analyst consensus from /analysis endpoint.
-    if (j['analyst_consensus'] == null ||
+    // Always override analyst consensus with real endpoint data
+    final hasRealConsensus = (latestRec['strongBuy'] ?? 0) != 0 ||
+        (latestRec['buy'] ?? 0) != 0 ||
+        (latestRec['hold'] ?? 0) != 0;
+    if (hasRealConsensus || j['analyst_consensus'] == null ||
         (j['analyst_consensus'] is Map &&
             (j['analyst_consensus'] as Map).isEmpty)) {
       j['analyst_consensus'] = {
@@ -519,29 +638,26 @@ $histLines
       };
     }
 
-    // Historical financials from /financials endpoint.
-    if (j['historical_financials'] == null ||
-        (j['historical_financials'] is Map &&
-            (j['historical_financials'] as Map).isEmpty)) {
-      final annualIncome = (financials['annualIncomeStatement'] as List?) ?? [];
-      final revenue = <Map<String, dynamic>>[];
-      final earnings = <Map<String, dynamic>>[];
-      for (final row in annualIncome.take(4)) {
-        if (row is! Map) continue;
-        final m = Map<String, dynamic>.from(row);
-        final period = (m['index'] ?? '').toString();
-        final year = period.isNotEmpty ? period.split('-').first : 'N/A';
-        final rev = (m['TotalRevenue'] ?? m['revenue'] ?? 0) as num;
-        final ni = (m['NetIncome'] ?? m['NetIncomeLoss'] ?? m['netIncome'] ?? 0) as num;
-        revenue.add({'period': year, 'value': rev / 1e9});
-        earnings.add({'period': year, 'value': ni / 1e9});
-      }
-      if (revenue.isNotEmpty || earnings.isNotEmpty) {
-        j['historical_financials'] = {
-          'revenue': revenue,
-          'earnings': earnings,
-        };
-      }
+    // Historical financials from /financials endpoint always win when available.
+    final annualIncome = (financials['annualIncomeStatement'] as List?) ?? [];
+    final revenue = <Map<String, dynamic>>[];
+    final earnings = <Map<String, dynamic>>[];
+    for (final row in annualIncome.take(4)) {
+      if (row is! Map) continue;
+      final m = Map<String, dynamic>.from(row);
+      final period = (m['index'] ?? m['date'] ?? '').toString();
+      final year = period.isNotEmpty ? period.split('-').first : 'N/A';
+      final rev = (m['TotalRevenue'] ?? m['revenue'] ?? 0) as num;
+      final ni =
+          (m['NetIncome'] ?? m['NetIncomeLoss'] ?? m['netIncome'] ?? 0) as num;
+      revenue.add({'period': year, 'value': rev / 1e9});
+      earnings.add({'period': year, 'value': ni / 1e9});
+    }
+    if (revenue.isNotEmpty || earnings.isNotEmpty) {
+      j['historical_financials'] = {
+        'revenue': revenue,
+        'earnings': earnings,
+      };
     }
 
     // Catalysts / risks grounded in endpoint events + news.
@@ -581,9 +697,11 @@ $histLines
       j['price_target'] = target['mean'];
     }
 
-    if ((j['current_price'] == null || j['current_price'].toString().isEmpty) &&
-        quote['price'] != null) {
+    // Always use real current price from endpoint
+    if (quote['price'] != null) {
       j['current_price'] = quote['price'];
+    } else if (j['current_price'] == null || j['current_price'].toString().isEmpty) {
+      j['current_price'] = analysis.price;
     }
 
     // Ensure peers exist if analysis screen had them.
@@ -598,15 +716,169 @@ $histLines
     }
 
     // Logo from /logo endpoint if model response omitted it.
-    if ((j['ticker_image_url'] == null || j['ticker_image_url'].toString().isEmpty)) {
-      final logoUrls = (logo['logoUrls'] as Map?)?.cast<String, dynamic>();
-      j['ticker_image_url'] = logo['logoUrl'] ?? logoUrls?['primary'] ?? logoUrls?['fmp'];
+    final logoUrls = (logo['logoUrls'] as Map?)?.cast<String, dynamic>();
+    final realLogoUrl =
+        logo['logoUrl'] ?? logoUrls?['primary'] ?? logoUrls?['parqet'];
+    if (realLogoUrl != null && realLogoUrl.toString().isNotEmpty) {
+      j['ticker_image_url'] = realLogoUrl;
+    }
+
+    // â”€â”€ NEW SECTIONS: deterministic fill from AnalysisData â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+
+    // Technical indicators from analysis.technicalAnalysis
+    if ((j['technical_indicators'] as List?) == null ||
+        (j['technical_indicators'] as List).isEmpty) {
+      final techList = analysis.technicalAnalysis.take(8).map((t) => {
+            'name': t.indicator,
+            'value': t.value,
+            'signal': t.interpretation,
+          }).toList();
+      if (techList.isNotEmpty) j['technical_indicators'] = techList;
+    }
+
+    // Insider activity
+    if (j['insider_activity'] == null ||
+        (j['insider_activity'] is Map &&
+            (j['insider_activity'] as Map).isEmpty)) {
+      final txns = analysis.insiderTransactions;
+      if (txns.isNotEmpty || analysis.insiderBuyRatio != null) {
+        final last = txns.isNotEmpty ? txns.first : null;
+        String lastTxStr = '';
+        if (last != null) {
+          final ch = double.tryParse(
+                  last.change.replaceAll(RegExp(r'[^\-\d.]'), '')) ??
+              0;
+          lastTxStr =
+              '${last.name} ${ch >= 0 ? "bought" : "sold"} ${last.change.replaceAll("-", "")} shares @ \$${last.transactionPrice}';
+        }
+        final ratio = analysis.insiderBuyRatio ?? 0.5;
+        j['insider_activity'] = {
+          'buy_ratio': ratio,
+          'net_direction': ratio >= 0.6
+              ? 'ACCUMULATION'
+              : (ratio <= 0.4 ? 'DISTRIBUTION' : 'NEUTRAL'),
+          'summary': lastTxStr.isNotEmpty
+              ? lastTxStr
+              : 'No significant insider transactions.',
+        };
+      }
+    }
+
+    // Trade setup from analysis.tradeSetup
+    if (j['trade_setup'] == null) {
+      final ts = analysis.tradeSetup;
+      if (ts.entryZone != 'N/A' || ts.targetPrice != 'N/A') {
+        j['trade_setup'] = {
+          'entry': ts.cleanEntryZone,
+          'target': ts.cleanTargetPrice,
+          'stop': ts.cleanStopLoss,
+          'rr_ratio': ts.riskRewardRatio,
+        };
+      }
+    }
+
+    // Earnings forward estimates from analysis.earningsTrend
+    if (j['earnings_forward'] == null) {
+      final et = analysis.earningsTrend;
+      if (et != null && et.isNotEmpty) {
+        final trend0 = et['trend0'] as Map?;
+        final period0 = et['period0']?.toString() ?? '';
+        if (trend0 != null) {
+          j['earnings_forward'] = {
+            'next_eps_estimate':
+                trend0['earningsEstimate']?['avg']?.toString() ?? 'N/A',
+            'next_revenue_estimate':
+                trend0['revenueEstimate']?['avg']?.toString() ?? 'N/A',
+            'next_date': period0,
+            'analyst_count':
+                trend0['earningsEstimate']?['numberOfAnalysts'] ?? 0,
+          };
+        }
+      }
+    }
+
+    // Ownership breakdown from analysis.holders + institutionalHolders
+    if (j['ownership_breakdown'] == null) {
+      final holdersData = analysis.holders;
+      final instList = analysis.institutionalHolders ?? [];
+      if (holdersData != null || instList.isNotEmpty) {
+        final topList = instList.take(5).map((h) {
+          final name =
+              (h['Holder'] ?? h['holder'] ?? h['name'] ?? 'Unknown').toString();
+          final pct =
+              (h['% Out'] ?? h['pHeld'] ?? h['pctHeld'] ?? '').toString();
+          return {'name': name, 'pct': pct};
+        }).toList();
+        // Also add from HoldersData.topInstitutions if available
+        if (topList.isEmpty && holdersData != null) {
+          for (final inst in holdersData.topInstitutions.take(5)) {
+            topList.add({'name': inst.organization, 'pct': '${(inst.pctHeld * 100).toStringAsFixed(2)}%'});
+          }
+        }
+        j['ownership_breakdown'] = {
+          'institutional_pct': holdersData != null
+              ? '${(holdersData.institutionsPercent * 100).toStringAsFixed(1)}%'
+              : 'N/A',
+          'insider_pct': holdersData != null
+              ? '${(holdersData.insidersPercent * 100).toStringAsFixed(1)}%'
+              : 'N/A',
+          'institutions_count': holdersData?.institutionsCount ?? instList.length,
+          'top_holders': topList,
+        };
+      }
+    }
+
+    // ESG rating
+    if (j['esg_rating'] == null && analysis.esgScore != null) {
+      final score = analysis.esgScore!;
+      final controversy = analysis.controversyScore ?? 0;
+      final label = score >= 70
+          ? 'LOW RISK'
+          : (score >= 50 ? 'MEDIUM RISK' : 'HIGH RISK');
+      j['esg_rating'] = {
+        'score': score.toInt(),
+        'controversy': controversy,
+        'label': label,
+      };
+    }
+
+    // Always override KPIs with real KeyStatistics data when available
+    // (AI-generated KPIs may use example values from the prompt template)
+    if (analysis.keyStatistics != null) {
+      final ks = analysis.keyStatistics!;
+      String nv(double v) => v == 0 ? '-' : v.toStringAsFixed(2);
+      String pv(double v) => v == 0 ? '-' : '${(v * 100).toStringAsFixed(1)}%';
+      String bv(double v) => v == 0 ? '-' : '\$${(v / 1e9).toStringAsFixed(2)}B';
+      final enrichedKpis = <Map<String, dynamic>>[
+        if (ks.trailingPE > 0) {'label': 'P/E (TTM)', 'value': nv(ks.trailingPE), 'trend': 'stable'},
+        if (ks.forwardPE > 0) {'label': 'P/E (Fwd)', 'value': nv(ks.forwardPE), 'trend': 'stable'},
+        if (ks.pegRatio > 0) {'label': 'PEG Ratio', 'value': nv(ks.pegRatio), 'trend': 'stable'},
+        if (ks.priceToBook > 0) {'label': 'P/B', 'value': nv(ks.priceToBook), 'trend': 'stable'},
+        if (ks.enterpriseToEbitda > 0) {'label': 'EV/EBITDA', 'value': nv(ks.enterpriseToEbitda), 'trend': 'stable'},
+        if (ks.profitMargins > 0) {'label': 'Net Margin', 'value': pv(ks.profitMargins), 'trend': 'up'},
+        if (ks.operatingMargins > 0) {'label': 'Op. Margin', 'value': pv(ks.operatingMargins), 'trend': 'up'},
+        if (ks.returnOnEquity > 0) {'label': 'ROE', 'value': pv(ks.returnOnEquity), 'trend': 'up'},
+        if (ks.returnOnAssets > 0) {'label': 'ROA', 'value': pv(ks.returnOnAssets), 'trend': 'up'},
+        if (ks.debtToEquity > 0) {'label': 'D/E Ratio', 'value': nv(ks.debtToEquity), 'trend': 'down'},
+        if (ks.currentRatio > 0) {'label': 'Current Ratio', 'value': nv(ks.currentRatio), 'trend': 'up'},
+        if (ks.revenueGrowth != 0) {'label': 'Rev Growth YoY', 'value': pv(ks.revenueGrowth), 'trend': ks.revenueGrowth > 0 ? 'up' : 'down'},
+        if (ks.earningsGrowth != 0) {'label': 'EPS Growth YoY', 'value': pv(ks.earningsGrowth), 'trend': ks.earningsGrowth > 0 ? 'up' : 'down'},
+        if (ks.freeCashflow != 0) {'label': 'Free Cash Flow', 'value': bv(ks.freeCashflow), 'trend': ks.freeCashflow > 0 ? 'up' : 'down'},
+        if (ks.beta > 0) {'label': 'Beta', 'value': nv(ks.beta), 'trend': 'stable'},
+        if (ks.dividendYield > 0) {'label': 'Div. Yield', 'value': pv(ks.dividendYield), 'trend': 'stable'},
+        if (ks.shortPercentOfFloat > 0) {'label': 'Short Float %', 'value': pv(ks.shortPercentOfFloat), 'trend': 'stable'},
+        if (ks.fiftyTwoWeekHigh > 0) {'label': '52W High', 'value': '\$${nv(ks.fiftyTwoWeekHigh)}', 'trend': 'stable'},
+        if (ks.fiftyTwoWeekLow > 0) {'label': '52W Low', 'value': '\$${nv(ks.fiftyTwoWeekLow)}', 'trend': 'stable'},
+      ];
+      if (enrichedKpis.isNotEmpty) {
+        j['kpis'] = enrichedKpis;
+      }
     }
   }
 
 
   // =========================================================================
-  // Parse la réponse en FinancialReport structuré
+  // Parse la rÃ©ponse en FinancialReport structurÃ©
   // =========================================================================
   FinancialReport _parseReport(String rawContent, AnalysisData analysis) {
     
@@ -642,7 +914,7 @@ $histLines
     );
   }
 
-  /// Synchronise les prix des concurrents avec des données réelles
+  /// Synchronise les prix des concurrents avec des donnÃ©es rÃ©elles
   Future<void> _syncPeerPrices(FinancialReport report) async {
     try {
       final peers = report.jsonContent['sector_peers'] as List?;
@@ -685,7 +957,7 @@ $histLines
 }
 
 // ============================================================================
-// MODEL : Rapport financier structuré
+// MODEL : Rapport financier structurÃ©
 // ============================================================================
 class FinancialReport {
   final String ticker;
@@ -714,16 +986,17 @@ class FinancialReport {
     required this.confidenceScore,
   });
 
-  /// Extrait le texte brut (executive summary) pour l'affichage simplifié
-  String get plainText => jsonContent['executive_summary']?.toString() ?? 'Rapport généré avec succès.';
+  /// Extrait le texte brut (executive summary) pour l'affichage simplifiÃ©
+  String get plainText => jsonContent['executive_summary']?.toString() ?? 'Rapport gÃ©nÃ©rÃ© avec succÃ¨s.';
 
-  /// Titre du rapport formaté
+  /// Titre du rapport formatÃ©
   String get title =>
-      'Research Report — $companyName ($ticker)';
+      'Research Report â€” $companyName ($ticker)';
 
-  /// Date formatée
+  /// Date formatÃ©e
   String get dateFormatted =>
       '${generatedAt.day.toString().padLeft(2, '0')}/'
       '${generatedAt.month.toString().padLeft(2, '0')}/'
       '${generatedAt.year}';
 }
+

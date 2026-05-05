@@ -1,11 +1,10 @@
-﻿// ignore_for_file: avoid_print
+// ignore_for_file: avoid_print
 import 'package:flutter/material.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:provider/provider.dart';
 import 'package:hive_flutter/hive_flutter.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-import 'package:flutter_stripe/flutter_stripe.dart';
 
 import 'package:quantum_invest/theme/app_theme.dart';
 import 'providers/sigma_provider.dart';
@@ -35,9 +34,6 @@ void main() async {
       print("Warning: .env file not found.");
     }
 
-    // Initialize Stripe
-    Stripe.publishableKey = dotenv.env['STRIPE_PUBLISHABLE_KEY'] ?? "pk_test_xxxxxxxxxxxxxxxxxxxxxxxx";
-    await Stripe.instance.applySettings();
 
     // Check if onboarding is complete
     final prefs = await SharedPreferences.getInstance();

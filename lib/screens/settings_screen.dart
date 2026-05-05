@@ -10,7 +10,6 @@ import '../theme/app_theme.dart';
 import '../theme/gs_components.dart';
 import '../models/sigma_models.dart';
 import '../utils/apple_compliance.dart';
-import '../widgets/panels/sigma_subscription_panel.dart';
 import 'sigma_academy_landing.dart';
 import 'legal_screen.dart';
 import 'notifications_screen.dart';
@@ -87,32 +86,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
               // ── Section: COMPTE ──────────────────────────────────────
               const GSSectionHeader('COMPTE'),
-              GSSettingsGroup(tiles: [
-                GSListTile(
-                  icon: Icons.workspace_premium_rounded,
-                  label: 'Abonnement',
-                  value: provider.currentTier.name.toUpperCase(),
-                  trailing: provider.currentTier != SigmaTier.free
-                      ? GSBadge('PRO', color: AppTheme.gold)
-                      : null,
-                  onTap: () => showModalBottomSheet(
-                    context: context,
-                    isScrollControlled: true,
-                    backgroundColor: AppTheme.transparent,
-                    builder: (_) => const SigmaSubscriptionPanel(),
-                  ),
-                ),
-                GSListTile(
-                  icon: Icons.open_in_new_rounded,
-                  label: 'Gérer l\'abonnement',
-                  onTap: () => AppleCompliance.manageSubscriptions(),
-                ),
-                GSListTile(
-                  icon: Icons.refresh_rounded,
-                  label: 'Restaurer les achats',
-                  onTap: () => AppleCompliance.restorePurchases(context),
-                ),
-              ]),
 
               // ── Section: PRÉFÉRENCES ─────────────────────────────────
               const GSSectionHeader('PRÉFÉRENCES'),
@@ -478,39 +451,17 @@ class _ConfigHeader extends StatelessWidget {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text(
-                        isPaid ? 'Abonnement actif' : 'Plan gratuit',
+                        'Compte Invité',
                         style: AppTheme.compactTitle(context, size: 13),
                       ),
                       Text(
-                        tier.name.toUpperCase() +
-                            (isPaid ? ' · Accès complet' : ' · Fonctions limitées'),
+                        'Accès SIGMA Standard',
                         style: AppTheme.overline(context,
-                            color: isPaid
-                                ? AppTheme.primary
-                                : AppTheme.getSecondaryText(context)),
+                            color: AppTheme.getSecondaryText(context)),
                       ),
                     ],
                   ),
                 ),
-                if (!isPaid)
-                  TextButton(
-                    onPressed: () => showModalBottomSheet(
-                      context: context,
-                      isScrollControlled: true,
-                      backgroundColor: AppTheme.transparent,
-                      builder: (_) => const SigmaSubscriptionPanel(),
-                    ),
-                    style: TextButton.styleFrom(
-                      foregroundColor: AppTheme.primary,
-                      padding: const EdgeInsets.symmetric(
-                          horizontal: 10, vertical: 6),
-                      minimumSize: Size.zero,
-                      tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                    ),
-                    child: Text('Passer PRO',
-                        style: AppTheme.compactTitle(context,
-                            size: 11, color: AppTheme.primary)),
-                  ),
               ],
             ),
           ),

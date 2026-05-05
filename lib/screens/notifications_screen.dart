@@ -60,7 +60,7 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
             ),
             const SizedBox(width: 8),
             Text(
-              'SIGNAL FEED',
+              'RESEARCH ALERTS',
               style: GoogleFonts.lora(
                 fontSize: 11,
                 fontWeight: FontWeight.w900,
@@ -91,9 +91,9 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
                     padding: EdgeInsets.only(bottom: 12),
                     child: InstitutionalHeader(
                       eyebrow: 'Catalyst monitoring',
-                      title: 'Signal Feed',
+                        title: 'Research Alerts',
                       thesis:
-                          'Alertes classées par impact potentiel sur la thèse, le risque ou le calendrier d’investissement.',
+                          'Alertes classees par impact potentiel sur la these, le risque ou le calendrier de suivi.',
                       icon: Icons.radar_rounded,
                     ),
                   );
@@ -108,9 +108,9 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
   Widget _buildEmptyState(BuildContext context) {
     return const InstitutionalEmptyState(
       icon: Icons.radar_rounded,
-      title: 'Aucun signal actif',
+        title: 'Aucune alerte active',
       message:
-          'Ajoutez des convictions et des sociétés à surveiller pour recevoir les catalyseurs importants dans ce centre d’alertes.',
+          'Ajoutez des valeurs suivies pour recevoir les catalyseurs importants dans ce centre d\'alertes.',
     );
   }
 
@@ -171,7 +171,7 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
                           borderRadius: BorderRadius.circular(2),
                         ),
                         child: Text(
-                          catalyst.isNegative ? 'RISK' : 'CATALYST',
+                          catalyst.isNegative ? 'RISK' : 'EVENT',
                           style: GoogleFonts.lora(
                               fontSize: 8,
                               fontWeight: FontWeight.w900,

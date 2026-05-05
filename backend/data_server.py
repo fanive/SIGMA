@@ -1,11 +1,10 @@
-from __future__ import annotations
-
+import os
 import time
 import threading
 from datetime import datetime, timezone
 from typing import Any
 from urllib.parse import urlparse
-
+import io
 import re as _re
 
 import requests as _requests
@@ -15,6 +14,9 @@ import yfinance as yf
 from cachetools import TTLCache
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
+from dotenv import load_dotenv
+
+load_dotenv()
 
 app = FastAPI(title="SIGMA yfinance Gateway", version="3.1.0")
 
@@ -237,6 +239,13 @@ async def quote(symbol: str):
         website = info.get("website")
         logo = _logo_urls(website, symbol=sym)
 
+        # --- Enrichment from Google Finance ---
+        gf_data = {}
+        try:
+            gf_data = _scrape_google_finance_safe(sym)
+        except:
+            pass
+
         # --- CEO from officers list ---
         officers = info.get("companyOfficers") or []
         ceo = next(
@@ -360,9 +369,10 @@ async def quote(symbol: str):
             "website": website,
             "logoUrl": logo.get("primary"),
             "logoUrls": logo,
-            "fullTimeEmployees": _safe(info.get("fullTimeEmployees")),
-            "description": info.get("longBusinessSummary"),
+            "fullTimeEmployees": _safe(info.get("fullTimeEmployees") or gf_data.get("stats", {}).get("Employees")),
+            "description": info.get("longBusinessSummary") or gf_data.get("description"),
             "quoteType": quote_type,
+            "gf_enrichment": gf_data if gf_data else None,
             "source": "yfinance",
         }
 
@@ -1040,3 +1050,167 @@ async def snapshot(symbol: str):
         "sec_fundamentals": sec_derived,
         "sources": ["yfinance", "openinsider.com", "sec.gov/edgar"],
     }
+# ---------------------------------------------------------------------------
+# /stooq/{symbol} — International historical data via Stooq CSV
+# ---------------------------------------------------------------------------
+_cache_stooq = TTLCache(maxsize=100, ttl=3600)  # 1h
+
+@app.get("/stooq/{symbol}")
+async def stooq_history(symbol: str, range: str = "1mo"):
+    """
+    International historical data from Stooq (CSV).
+    Supported suffixes: .US, .JP, .UK, .PL, .DE, .HK, etc.
+    Example: AAPL.US, 6758.JP (Sony), BMW.DE
+    """
+    sym = symbol.upper().strip()
+    cache_key = f"{sym}:{range}"
+
+    def _fetch():
+        # Stooq range mapping (approximate)
+        # s=d (daily), f=sd2ohlcv (format)
+        url = f"https://stooq.com/q/d/l/?s={sym}&f=sd2ohlcv&h&e=csv"
+        resp = _requests.get(url, timeout=15)
+        resp.raise_for_status()
+        
+        if "Exceeded the daily hits limit" in resp.text:
+            raise Exception("Stooq rate limit exceeded")
+            
+        df = pd.read_csv(io.StringIO(resp.text))
+        if df.empty:
+            return []
+            
+        # Clean column names (sometimes they have spaces or weird casing)
+        df.columns = [c.lower() for c in df.columns]
+        
+        # Sort by date
+        if 'date' in df.columns:
+            df['date'] = pd.to_datetime(df['date'])
+            df = df.sort_values('date', ascending=True)
+            
+        # Filter by range (very basic implementation)
+        if range == "1mo":
+            df = df.tail(30)
+        elif range == "1y":
+            df = df.tail(252)
+            
+        return _df_to_list(df)
+
+    try:
+        return _cached(_cache_stooq, cache_key, _fetch)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Stooq fetch failed for {sym}: {e}")
+
+# ---------------------------------------------------------------------------
+# /fred/{series_id} — Federal Reserve Economic Data (FRED)
+# ---------------------------------------------------------------------------
+_cache_fred = TTLCache(maxsize=100, ttl=86400)  # 24h
+
+@app.get("/fred/{series_id}")
+async def fred_series(series_id: str):
+    """
+    Economic indicators from FRED. Requires FRED_API_KEY in .env.
+    Common series: UNRATE (Unemployment), GDP, CPIAUCSL (CPI), FEDFUNDS.
+    """
+    sid = series_id.upper().strip()
+    api_key = os.getenv("FRED_API_KEY")
+    if not api_key:
+        raise HTTPException(status_code=500, detail="FRED_API_KEY not configured in .env")
+
+    def _fetch():
+        url = "https://api.stlouisfed.org/fred/series/observations"
+        params = {
+            "series_id": sid,
+            "api_key": api_key,
+            "file_type": "json",
+            "sort_order": "desc",
+            "limit": 100
+        }
+        resp = _requests.get(url, params=params, timeout=15)
+        resp.raise_for_status()
+        data = resp.json()
+        
+        obs = data.get("observations", [])
+        return [
+            {
+                "date": o.get("date"),
+                "value": _num(o.get("value"), default=None)
+            }
+            for o in obs
+        ]
+
+    try:
+        return _cached(_cache_fred, sid, _fetch)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"FRED fetch failed for {sid}: {e}")
+
+# ---------------------------------------------------------------------------
+# Google Finance Scraper
+# ---------------------------------------------------------------------------
+
+@app.get("/google_finance/{ticker}")
+def google_finance_info(ticker: str):
+    """
+    Scrapes Google Finance for price, about description, and key stats.
+    """
+    return _cached(_cache_price, f"gf:{ticker}", lambda: _scrape_google_finance_safe(ticker, raise_on_error=True))
+
+
+def _scrape_google_finance_safe(ticker: str, raise_on_error: bool = False):
+    ticker = ticker.upper()
+    # Try different combinations
+    exchanges = ["NASDAQ", "NYSE", "NYSEAMERICAN", "OTCMKTS"]
+    
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+    }
+
+    last_err = None
+    for exch in exchanges:
+        url = f"https://www.google.com/finance/quote/{ticker}:{exch}"
+        try:
+            resp = _requests.get(url, headers=headers, timeout=5)
+            if resp.status_code != 200:
+                continue
+            
+            soup = _BS(resp.text, "html.parser")
+            
+            # 1. Price (using the selector found)
+            price_el = soup.select_one("div.N6SYTe")
+            price = price_el.text.strip() if price_el else "N/A"
+            
+            # 2. About
+            about_el = soup.select_one("div.u3xNFb")
+            about = about_el.text.strip() if about_el else "N/A"
+            
+            # 3. Key Stats
+            stats = {}
+            labels = soup.select("div.SwQK7")
+            values = soup.select("div.dO6ijd")
+            
+            for l, v in zip(labels, values):
+                stats[l.text.strip()] = v.text.strip()
+                
+            if price == "N/A" and not stats:
+                continue 
+                
+            return {
+                "symbol": ticker,
+                "exchange": exch,
+                "price": price,
+                "description": about,
+                "stats": stats,
+                "source": "Google Finance",
+                "timestamp": datetime.now(timezone.utc).isoformat()
+            }
+        except Exception as e:
+            last_err = e
+            continue
+            
+    if raise_on_error:
+        raise HTTPException(status_code=404, detail=f"Google Finance data not found for {ticker}. {str(last_err)}")
+    return {}
+
+
+if __name__ == "__main__":
+    import uvicorn
+    uvicorn.run(app, host="0.0.0.0", port=8000)

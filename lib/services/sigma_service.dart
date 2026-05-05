@@ -8,28 +8,34 @@ import '../models/sigma_models.dart';
 import '../config/ai_config.dart';
 import 'ai_provider_interface.dart';
 import 'ai_provider_factory.dart';
-import 'fmp_service.dart';
+import 'sigma_market_data_service.dart';
 import 'web_search_service.dart';
 import 'sentiment_service.dart';
 import 'ai/fallback_provider.dart';
 import 'ollama_news_service.dart';
 import 'openinsider_service.dart';
+import 'finnhub_service.dart';
+import 'sigma_api_service.dart';
+import '../utils/logo_resolver.dart';
 
 class SigmaService {
   late AIProvider _stockProvider;
   late AIProvider _marketProvider;
   late AIProvider? _deepReasoningProvider; // DeepSeek R1 for deep analysis
-  final FmpService _fmp = FmpService();
+  final SigmaMarketDataService _marketData = SigmaMarketDataService();
   final WebSearchService _webSearch = WebSearchService();
   final SentimentService _sentiment = SentimentService();
   final OpenInsiderService _openInsider = OpenInsiderService();
+  late final FinnhubService _finnhub;
 
   // Agentic Memory: Stores the last market context to enable cross-context reasoning
   MarketOverview? _lastOverview;
+  final Map<String, List<Map<String, dynamic>>> _searchCache = {};
 
-  // Exposer les services pour un accès direct
-  FmpService get fmpService => _fmp;
+  // Exposer les services pour un accÃ¨s direct
+  SigmaMarketDataService get marketDataService => _marketData;
   OpenInsiderService get openInsiderService => _openInsider;
+  FinnhubService get finnhubService => _finnhub;
 
   static SigmaService fromEnv() {
     final service = SigmaService._();
@@ -40,177 +46,112 @@ class SigmaService {
   void reset() {
     WebSearchService.clearCache();
     _initFromEnv();
-    dev.log('🔄 SigmaService Providers Re-initialized', name: 'SigmaService');
+    dev.log('ðŸ”„ SigmaService Providers Re-initialized', name: 'SigmaService');
   }
 
   void _initFromEnv() {
     try {
-      final ollamaKey = dotenv.env['OLLAMA_API_KEY'] ?? '';
-      final ollamaModel = dotenv.env['OLLAMA_MODEL'] ?? '';
-      final ollamaBaseUrl =
-          dotenv.env['OLLAMA_BASE_URL'] ?? AIConfig.ollamaBaseUrl;
-
       final nvidiaKey = dotenv.env['NVIDIA_API_KEY'] ?? '';
+      final finnhubKey = dotenv.env['FINNHUB_API_KEY'] ?? '';
       final hasNvidia = nvidiaKey.isNotEmpty && !nvidiaKey.contains('example');
 
-      final hasOllama = ollamaKey.isNotEmpty && ollamaModel.isNotEmpty;
-
-      // ── DYNAMISME DES PRIORITÉS ───────────────────────────────────────────
-      String primaryChoice =
-          (dotenv.env['PRIMARY_AI_PROVIDER'] ?? 'nvidia').toLowerCase();
-
-      // Auto-correct potential typos in .env
-      if (primaryChoice.contains('nviddia')) primaryChoice = 'nvidia';
-      if (primaryChoice.contains('nvidia')) primaryChoice = 'nvidia';
-
-      final List<String> priorityChain = primaryChoice == 'ollama'
-          ? ['ollama', 'nvidia']
-          : ['nvidia', 'ollama'];
-
-      print(
-          '⚙️ [SigmaService] Initializing with priority chain: $priorityChain');
-
-      // ── CRÉATION DE LA CHAÎNE DE PROVIDERS ───────────────────────────────
-      final List<AIProvider> stockChain = [];
-      final List<AIProvider> marketChain = [];
+      _finnhub = FinnhubService(apiKey: finnhubKey);
 
       final stockModelFromEnv = dotenv.env['STOCK_MODEL'];
       final nvidiaReportModelOverride = dotenv.env['NVIDIA_REPORT_MODEL'];
-      final ollamaReportModel =
-          dotenv.env['OLLAMA_REPORT_MODEL'] ?? dotenv.env['OLLAMA_MODEL'];
       final marketModelFromEnv = dotenv.env['MARKET_MODEL'];
+      final unifiedNvidiaModel = nvidiaReportModelOverride ??
+          stockModelFromEnv ??
+          marketModelFromEnv ??
+          AIConfig.defaultNvidiaModel;
 
-      for (var p in priorityChain) {
-        try {
-          if (p == 'nvidia' && hasNvidia) {
-            // Align Analysis AI model selection with Research Report logic.
-            final model = nvidiaReportModelOverride ??
-                stockModelFromEnv ??
-                AIConfig.defaultNvidiaModel;
-            stockChain.add(AIProviderFactory.createStockProvider(
-              provider: AIConfig.providerNvidia,
-              apiKey: nvidiaKey,
-              modelKey: model,
-            ));
-
-            final mModel = marketModelFromEnv ?? AIConfig.defaultNvidiaModel;
-            marketChain.add(AIProviderFactory.createMarketProvider(
-              provider: AIConfig.providerNvidia,
-              apiKey: nvidiaKey,
-              modelKey: mModel,
-            ));
-          } else if (p == 'ollama' && hasOllama) {
-            final model = ollamaReportModel ?? stockModelFromEnv ?? ollamaModel;
-            stockChain.add(AIProviderFactory.createStockProvider(
-              provider: AIConfig.providerOllama,
-              apiKey: ollamaKey,
-              modelKey: model,
-              baseUrlOverride: ollamaBaseUrl,
-            ));
-
-            final mModel = marketModelFromEnv ?? ollamaModel;
-            marketChain.add(AIProviderFactory.createMarketProvider(
-              provider: AIConfig.providerOllama,
-              apiKey: ollamaKey,
-              modelKey: mModel,
-              baseUrlOverride: ollamaBaseUrl,
-            ));
-          }
-        } catch (e) {
-          dev.log('⚠️ [SigmaService] Failed to init provider $p: $e');
-        }
-      }
-
-      _stockProvider = FallbackProvider(stockChain);
-      _marketProvider = FallbackProvider(marketChain);
-
-      if (stockChain.isEmpty || marketChain.isEmpty) {
-        dev.log(
-          '⚠️ [SigmaService] No AI providers initialized. Check API keys and PRIMARY_AI_PROVIDER in .env',
-          name: 'SigmaService',
+      if (!hasNvidia) {
+        throw StateError(
+          'NVIDIA_API_KEY is required. SIGMA analysis now uses NVIDIA only.',
         );
       }
 
+      _stockProvider = AIProviderFactory.createStockProvider(
+        provider: AIConfig.providerNvidia,
+        apiKey: nvidiaKey,
+        modelKey: unifiedNvidiaModel,
+      );
+      _marketProvider = AIProviderFactory.createMarketProvider(
+        provider: AIConfig.providerNvidia,
+        apiKey: nvidiaKey,
+        modelKey: unifiedNvidiaModel,
+      );
+
       // Choose deep reasoning provider
       try {
-        if (hasNvidia) {
-          _deepReasoningProvider = AIProviderFactory.createStockProvider(
-            provider: AIConfig.providerNvidia,
-            apiKey: nvidiaKey,
-            modelKey: 'llama3.3-70b',
-          );
-        } else {
-          _deepReasoningProvider = hasOllama
-              ? AIProviderFactory.createStockProvider(
-                  provider: AIConfig.providerOllama,
-                  apiKey: ollamaKey,
-                  modelKey: ollamaModel,
-                  baseUrlOverride: ollamaBaseUrl,
-                )
-              : null;
-        }
+        _deepReasoningProvider = AIProviderFactory.createStockProvider(
+          provider: AIConfig.providerNvidia,
+          apiKey: nvidiaKey,
+          modelKey: unifiedNvidiaModel,
+        );
       } catch (e) {
-        dev.log('⚠️ [SigmaService] Failed to init deep reasoning: $e');
+        dev.log('âš ï¸ [SigmaService] Failed to init deep reasoning: $e');
         _deepReasoningProvider = null;
       }
 
       // --- DEBUG LOGGING ---
-      final fmpKey = dotenv.env['FMP_API_KEY'] ?? 'MISSING';
-      dev.log(
-          '🔑 [SigmaService] FMP Key check: ${fmpKey.length > 4 ? fmpKey.substring(0, 4) + '...' : fmpKey}',
+      final sigmaApi = dotenv.env['YF_BACKEND_URL'] ?? 'https://sigma-yfinance-api.onrender.com';
+        dev.log(
+          '🔑 [SigmaService] Sigma backend: $sigmaApi',
           name: 'SigmaService');
-      dev.log('📊 [SigmaService] Initialization Complete',
+      dev.log('ðŸ“Š [SigmaService] Initialization Complete',
           name: 'SigmaService');
     } catch (e) {
-      print('❌ [SigmaService] FATAL INIT ERROR: $e');
+      print('âŒ [SigmaService] FATAL INIT ERROR: $e');
     }
   }
 
   SigmaService._();
 
   static const String _systemInstructionChat = '''
-Tu es l'Intelligence Artificielle SIGMA — expert analyste financier et assistant omniscient de haute-précision.
-RÉPONDS TOUJOURS DANS LA LANGUE DE L'UTILISATEUR AVEC UN TON PROFESSIONNEL ET SOBRE.
+Tu es l'Intelligence Artificielle SIGMA â€” expert analyste financier et assistant omniscient de haute-prÃ©cision.
+RÃ‰PONDS TOUJOURS DANS LA LANGUE DE L'UTILISATEUR AVEC UN TON PROFESSIONNEL ET SOBRE.
 DATE ACTUELLE: 16 AVRIL 2026.
-Toute information datant de 2024 ou 2025 est considérée comme HISTORIQUE et non actuelle.
+Toute information datant de 2024 ou 2025 est considÃ©rÃ©e comme HISTORIQUE et non actuelle.
 ''';
 
   String _getSystemInstructionStock(String language) {
     final bool isFr = language.toUpperCase().startsWith('FR');
     if (isFr) {
       return r'''
-Tu es le moteur d'analyse de SIGMA, une plateforme d'intelligence financière institutionnelle.
-Réponds EXCLUSIVEMENT en FRANÇAIS.
+Tu es le 'SIGMA AGENTIC ORCHESTRATOR'. Tu coordonnes un comité d'experts de classe mondiale.
+RÉPONDS EXCLUSIVEMENT EN FRANÇAIS.
 
-MISSION TECHNIQUE :
-Tu DOIS réaliser une analyse fondamentale et technique rigoureuse basée sur les données fournies.
-Analyse particulièrement la rentabilité, la solidité du bilan et les tendances de marché.
+### COMPOSITION DU COMITÉ :
+1. **Agent de Tendance** : Analyse les cycles macro et sectoriels.
+2. **Agent Sentiment & News** : Scanne les news, le sentiment social et les flux institutionnels.
+3. **Agent Technique** : Identifie les patterns de prix (VCP, SEPA) et le momentum.
+4. **Agent Comparateur** : Analyse la force relative par rapport aux pairs.
+5. **Agent Stratège** : Synthétise le tout en un "Trade Setup" exploitable.
 
-### STRUCTURE DE RÉFLEXION :
-1. **Analyse Macro** : Impact du régime de marché actuel sur le titre.
-2. **Analyse Fondamentale** : Évaluation des flux de trésorerie et des ratios de valorisation.
-3. **Analyse Technique** : Interprétation de la tendance et des indicateurs de momentum.
-4. **Sentiment & Flux** : Analyse du sentiment social et des mouvements des initiés.
+### MISSION :
+Génère un rapport de conviction ultra-précis. S'il y a une divergence (ex: Fondamentaux Bull vs Technique Bear), tu DOIS le souligner.
 
-RÈGLE CRITIQUE POUR "agenticThoughts" ET "hiddenSignals" :
-Ces sections DOIVENT être à très haute densité (high-signal). Interdiction absolue d'utiliser du remplissage conversationnel (fluff) ou des généralités. Sois chirurgical, direct, et apporte un véritable "Alpha". Rédige sous forme de notes de hedge fund quantitatif (ex: "Flux massifs sur le dark pool détéctés à 15h, divergence baissière RSI/Prix ignorée par le marché retail").
-
-Tu DOIS impérativement suivre la STRUCTURE JSON demandée dans le PROMPT à la fin du message utilisateur.
-Ne réponds QUE par le JSON, sans commentaire avant ou après.
+RÈGLE CRITIQUE POUR "agenticThoughts" :
+Ce champ DOIT contenir exactement 5 entrées, une pour chaque agent mentionné ci-dessus. Chaque entrée doit être une note chirurgicale, sans fluff, apportant un véritable "Alpha".
 ''';
     } else {
       return r'''
-You are the 'SIGMA RESEARCH ORCHESTRATOR', coordinating a committee of world-class financial agents.
+You are the 'SIGMA AGENTIC ORCHESTRATOR', coordinating a committee of world-class financial agents.
 You must respond EXCLUSIVELY in ENGLISH.
 
+### COMMITTEE COMPOSITION:
+1. **Trend Analyst** : Reviews global macro and sector-specific trends.
+2. **Sentiment Agent** : Scans news, social sentiment, and institutional flows.
+3. **Technical Agent** : Identifies price patterns (VCP, SEPA) and momentum.
+4. **Signal Comparator** : Analyzes relative strength against peers.
+5. **Strategy Builder** : Synthesizes everything into an actionable trade view.
+
 ### YOUR MISSION:
-Synthesize the debate between these agents. If the Technicals are bullish but the Macro is RISK-OFF, you MUST reflect this tension in the verdict. Provide "Alpha-level" insights that a regular investor would miss.
+Generate a high-conviction research report. If there's a divergence (e.g. Bullish Fundamentals vs Bearish Technicals), you MUST highlight it.
 
-CRITICAL RULE FOR "agenticThoughts" AND "hiddenSignals":
-These sections MUST be high-signal. Do NOT use conversational filler, generic fluff, or basic observations. Be surgical, direct, and provide real "Alpha". Write them as terse quantitative hedge fund notes (e.g. "Massive dark pool prints detected at key resistance, retail market ignoring RSI bearish divergence").
-
-You MUST strictly follow the JSON STRUCTURE requested in the PROMPT at the end of the user message.
-Respond ONLY with the JSON, no preamble or commentary.
+CRITICAL RULE FOR "agenticThoughts":
+This field MUST contain exactly 5 entries, one for each agent mentioned above. Each entry must be a surgical, high-signal note providing real "Alpha".
 ''';
     }
   }
@@ -219,8 +160,8 @@ Respond ONLY with the JSON, no preamble or commentary.
     final bool isFr = language.toUpperCase().startsWith('FR');
     if (isFr) {
       return r'''
-Tu es le Chief Investment Officer de SIGMA. Fournis une analyse macroéconomique mondiale UNIQUE.
-Réponds EXCLUSIVEMENT en FRANÇAIS au format JSON.
+Tu es le Chief Investment Officer de SIGMA. Fournis une analyse macroÃ©conomique mondiale UNIQUE.
+RÃ©ponds EXCLUSIVEMENT en FRANÃ‡AIS au format JSON.
 ''';
     } else {
       return r'''
@@ -233,12 +174,12 @@ You must respond EXCLUSIVELY in ENGLISH in JSON format.
   String _getSystemInstructionSynthesis(String language) {
     if (language.toUpperCase().startsWith('FR')) {
       return '''
-Tu es l'analyste principal de SIGMA. Ta mission est de rédiger une synthèse stratégique institutionnelle.
-RÈGLES CRITIQUES :
-- RÉPONDS EXCLUSIVEMENT EN FRANÇAIS.
-- INTERDICTION ABSOLUE DE RÉPONDRE EN ANGLAIS.
-- INTERDICTION DE COMMENCER PAR "Voici le résumé..." OU "D'après les données...". Entre directement dans le vif du sujet.
-- ÉCRIS EN TEXTE BRUT (PARAGRAPHES).
+Tu es l'analyste principal de SIGMA. Ta mission est de rÃ©diger une synthÃ¨se stratÃ©gique institutionnelle.
+RÃˆGLES CRITIQUES :
+- RÃ‰PONDS EXCLUSIVEMENT EN FRANÃ‡AIS.
+- INTERDICTION ABSOLUE DE RÃ‰PONDRE EN ANGLAIS.
+- INTERDICTION DE COMMENCER PAR "Voici le rÃ©sumÃ©..." OU "D'aprÃ¨s les donnÃ©es...". Entre directement dans le vif du sujet.
+- Ã‰CRIS EN TEXTE BRUT (PARAGRAPHES).
 - STYLE : Direct, analytique, de haute finance.
 ''';
     } else {
@@ -264,318 +205,96 @@ CRITICAL RULES:
     final now = DateTime.now();
     final currentDate = now.toIso8601String().split('T')[0];
 
-    // ── 1. AGENTIC WEB SEARCH (ALPHA) ──────────────────────────────────────────
-    // On lance une recherche web en parallèle pour enrichir le contexte
+    // ── 1. AGENTIC WEB SEARCH (ALPHA) ──────────────────────────────────────
     final webSearchTask =
         _webSearch.search('$symbol stock latest news catalysts $currentDate');
 
     // ── 2. ACQUISITION DE DONNÉES EN PARALLÈLE (OPTIMISÉ) ──────────────────────
-    // On groupe les appels par provider pour maximiser le parallélisme réseau utile
     final results = await Future.wait([
-      // Flux Core (FMP & Yahoo prioritaires)
-      _safeCall(() => _fmp.getFmpContext(symbol), "",
-          timeout: const Duration(seconds: 10)), // 0
-      _safeCall(() => Future.value(<String, dynamic>{}), {},
-          timeout: const Duration(seconds: 1)), // 1
-      _safeCall(() => Future.value(<String, dynamic>{}), {},
-          timeout: const Duration(seconds: 1)), // 2
-
-      // Flux Sentiment & News (Non-critical, fast fail)
-      _safeCall(() => Future.value(""), "",
-          timeout: const Duration(seconds: 1)), // 3
-      _safeCall(() => Future.value(null), null,
-          timeout: const Duration(seconds: 1)), // 4
-
-      // Flux Technique & On-Chain (Non-critical, fast fail)
-      _safeCall(() => Future.value(""), "",
-          timeout: const Duration(seconds: 1)), // 5
-      _safeCall(() => Future.value(""), "",
-          timeout: const Duration(seconds: 1)), // 6
-
-      // Grouped into quoteSummary above
-      _safeCall(() => Future.value([]), [],
-          timeout: const Duration(seconds: 1)), // 7
-      _safeCall(() => Future.value({}), {},
-          timeout: const Duration(seconds: 1)), // 8
-      _safeCall(() => Future.value({}), {},
-          timeout: const Duration(seconds: 1)), // 9
-      _safeCall(() => Future.value({}), {},
-          timeout: const Duration(seconds: 1)), // 10
-      _safeCall(() => Future.value({}), {},
-          timeout: const Duration(seconds: 1)), // 11
-      _safeCall(() => Future.value([]), [],
-          timeout: const Duration(seconds: 1)), // 12
-      _safeCall(() => Future.value([]), [],
-          timeout: const Duration(seconds: 1)), // 13
-      _safeCall(() => webSearchTask, "",
-          timeout: const Duration(seconds: 10)), // 14
-      _safeCall(() => _sentiment.fetchFearGreed(), null,
-          timeout: const Duration(seconds: 6)), // 15
-      _safeCall(() => _sentiment.fetchNews(), [],
-          timeout: const Duration(seconds: 6)), // 16
-      _safeCall(
-          () => _fmp
-              .getPeers(symbol)
-              .then((list) => _fmp.getFullQuotes(list.take(5).toList())),
-          [],
-          timeout: const Duration(seconds: 10)), // 17
-
-      // MULTI-SOURCE NEWS AGGREGATION (Fast fail)
-      _safeCall(() => _fmp.getStockNews(symbol, limit: 10), [],
-          timeout: const Duration(seconds: 8)), // 18
-      _safeCall(() => Future.value(<dynamic>[]), [],
-          timeout: const Duration(seconds: 1)), // 19
-      _safeCall(() => Future.value(<dynamic>[]), [],
-          timeout: const Duration(seconds: 1)), // 20
-      _safeCall(() => Future.value(null), null,
-          timeout: const Duration(seconds: 1)), // 21
-
-      // Grouped into quoteSummary above
-      _safeCall(() => Future.value({}), {},
-          timeout: const Duration(seconds: 1)), // 22
-      _safeCall(() => Future.value({}), {},
-          timeout: const Duration(seconds: 1)), // 23
-      _safeCall(() => Future.value([]), [],
-          timeout: const Duration(seconds: 1)), // 24
-      _safeCall(() => Future.value({}), {},
-          timeout: const Duration(seconds: 1)), // 25
-
-      // RAPIDAPI — Enrichment Pipeline (disabled)
-      _safeCall(() => Future.value(<String, dynamic>{}), {},
-          timeout: const Duration(seconds: 1)), // 26
-      _safeCall(() => Future.value(<String, dynamic>{}), {},
-          timeout: const Duration(seconds: 1)), // 27
-      _safeCall(() => Future.value(<String, dynamic>{}), {},
-          timeout: const Duration(seconds: 1)), // 28
-      _safeCall(() => Future.value(<String, dynamic>{}), {},
-          timeout: const Duration(seconds: 1)), // 29
-      _safeCall(() => Future.value(<String, dynamic>{}), {},
-          timeout: const Duration(seconds: 1)), // 30
-
-      // ALPHA VANTAGE (disabled)
-      _safeCall(() => Future.value(<String, dynamic>{}), {},
-          timeout: const Duration(seconds: 1)), // 31
-
-      // LEGACY FLOWS (Merged for parallelism)
-      _safeCall(() => _fmp.getCompanyProfileStable(symbol), <String, dynamic>{},
-          timeout: const Duration(seconds: 8)), // 32
-      _safeCall(() => _fmp.getKeyMetricsTTM(symbol), <String, dynamic>{},
-          timeout: const Duration(seconds: 8)), // 33
-      _safeCall(() => _fmp.getRatiosTTM(symbol), <String, dynamic>{},
-          timeout: const Duration(seconds: 8)), // 34
-      _safeCall(() => _fmp.getInstitutionalHolders(symbol), <dynamic>[],
-          timeout: const Duration(seconds: 8)), // 35
-      _safeCall(() => _fmp.getInsiderTrading(symbol), <dynamic>[],
-          timeout: const Duration(seconds: 8)), // 36
-      _safeCall(() => _fmp.getIncomeStatement(symbol, limit: 5), <dynamic>[],
-          timeout: const Duration(seconds: 8)), // 37
-      _safeCall(() => _fmp.getQuoteMap(symbol), <String, dynamic>{},
-          timeout: const Duration(seconds: 8)), // 38
-      _getMultiSourcePrice(symbol), // 39
+      _safeCall(() => _marketData.getSigmaContext(symbol), "", timeout: const Duration(seconds: 10)),
+      _safeCall(() => webSearchTask, "", timeout: const Duration(seconds: 12)),
+      _safeCall(() => _marketData.getPeers(symbol).then((list) => _marketData.getFullQuotes(list.take(5).toList())), [], timeout: const Duration(seconds: 10)),
+      _safeCall(() => _marketData.getStockNews(symbol, limit: 12), [], timeout: const Duration(seconds: 8)),
+      _safeCall(() => _marketData.getCompanyProfileStable(symbol), <String, dynamic>{}, timeout: const Duration(seconds: 8)),
+      _safeCall(() => _marketData.getKeyMetricsTTM(symbol), <String, dynamic>{}, timeout: const Duration(seconds: 8)),
+      _safeCall(() => _marketData.getRatiosTTM(symbol), <String, dynamic>{}, timeout: const Duration(seconds: 8)),
+      _safeCall(() => _marketData.getInstitutionalHolders(symbol), <dynamic>[], timeout: const Duration(seconds: 8)),
+      _safeCall(() => _marketData.getInsiderTrading(symbol), <dynamic>[], timeout: const Duration(seconds: 8)),
+      _safeCall(() => _marketData.getIncomeStatement(symbol, limit: 5), <dynamic>[], timeout: const Duration(seconds: 8)),
+      _safeCall(() => _marketData.getQuoteMap(symbol), <String, dynamic>{}, timeout: const Duration(seconds: 8)),
+      _getMultiSourcePrice(symbol),
+      _safeCall(() => _finnhub.basicFinancials(symbol), <String, dynamic>{}, timeout: const Duration(seconds: 8)),
+      _safeCall(() => _finnhub.recommendationTrends(symbol), <dynamic>[], timeout: const Duration(seconds: 8)),
+      _safeCall(() => _finnhub.earningsSurprises(symbol, limit: 4), <dynamic>[], timeout: const Duration(seconds: 8)),
+      _safeCall(() => _sentiment.fetchFearGreed(), null, timeout: const Duration(seconds: 6)),
+      _safeCall(() => _sentiment.fetchNews(), [], timeout: const Duration(seconds: 6)),
+      _safeCall(() => _marketData.getGoogleFinanceInfo(symbol), <String, dynamic>{}, timeout: const Duration(seconds: 8)),
     ]);
 
-    final fmpContext = results[0] as String;
-    final yBundle = results[1] as Map<String, dynamic>;
-    final ySummary = results[2] as Map<String, dynamic>;
-    final marketauxContext = results[3] as String;
-    final peersDataList = results[17] as List<dynamic>;
-
-    // ── RapidAPI Enrichment Extraction ──────────────────────────────────────
-    final saRatings = results[26] as Map<String, dynamic>;
-    final saMetrics = results[27] as Map<String, dynamic>;
-    final mboumStats = results[28] as Map<String, dynamic>;
-    final mboumUpgrades = results[29] as Map<String, dynamic>;
-    final mboumEarnings = results[30] as Map<String, dynamic>;
-
-    final yahooStatsEnriched = mboumStats['body'] ?? mboumStats;
-    final yahooUpgradesEnriched = mboumUpgrades['body'] ?? mboumUpgrades;
-    final yahooEarningsEnriched = mboumEarnings['body'] ?? mboumEarnings;
-    final alphaOverview =
-        (results[31] as Map?)?.cast<String, dynamic>() ?? <String, dynamic>{};
-
-    // YH-Finance Conversations (Social Sentiment) — disabled (RapidAPI removed)
-    final Map<String, dynamic> yahooConversations = {};
-
-    // Construct Peer Context
-    final peerContext = peersDataList
-        .map((p) =>
-            "- ${p['symbol']}: ${p['name']}, MCAP: ${p['marketCap']}, PE: ${p['pe']}")
-        .join('\n');
-
-    // ── NEWS AGGREGATION & NORMALIZATION ──────────────────────────────────────
-    final fmpNews = results[18] as List<dynamic>;
-    final finnhubNews = results[19] as List<dynamic>;
-    final yahooNews = results[20] as List<dynamic>;
-    final marketauxRaw = results[21] as Map<String, dynamic>?;
-    final marketauxNews = marketauxRaw?['data'] as List? ?? [];
-
-    final allNewsContext = [
-      ...fmpNews.map((n) => "FMP: ${n['title']} | ${n['text']}"),
-      ...finnhubNews.map((n) => "Finnhub: ${n['headline']} | ${n['summary']}"),
-      ...yahooNews.map((n) => "Yahoo: ${n['title']} | ${n['summary']}"),
-      ...marketauxNews
-          .map((n) => "Marketaux: ${n['title']} | ${n['description']}"),
-    ].take(30).join('\n---\n');
-
-    // ── 3. CROSS-CONTEXT AGENTIC SYNTHESIS (BETA) ──────────────────────────────
-    // Enriched Macro Context: Including live Fear & Greed metrics
+    final sigmaContext = results[0] as String;
+    final webContext = results[1] as String;
+    final peersDataList = results[2] as List<dynamic>;
+    final sigmaNews = results[3] as List<dynamic>;
+    final sigmaProfile = results[4] as Map<String, dynamic>;
+    final sigmaMetrics = results[5] as Map<String, dynamic>;
+    final sigmaRatios = results[6] as Map<String, dynamic>;
+    final sigmaHolders = results[7] as List<dynamic>;
+    final sigmaInsiderTrading = results[8] as List<dynamic>;
+    final sigmaIncome = results[9] as List<dynamic>;
+    final sigmaQuote = results[10] as Map<String, dynamic>;
+    final realTimePrice = results[11] as Map<String, dynamic>;
+    final finnhubBasic = results[12] as Map<String, dynamic>;
+    final finnhubRecommendations = results[13] as List<dynamic>;
+    final finnhubEarningsSurprises = results[14] as List<dynamic>;
     final fgData = results[15] as FearGreedData?;
     final fgNews = results[16] as List<SentimentNews>;
+    final googleFinance = results[17] as Map<String, dynamic>;
+
+    final peerContext = peersDataList
+        .map((p) => "- ${p['symbol']}: ${p['name']}, MCAP: ${p['marketCap']}, PE: ${p['pe']}")
+        .join('\n');
+
+    final allNewsContext = [
+      ...sigmaNews.map((n) => "SIGMA: ${n['title']} | ${n['text']}"),
+    ].take(30).join('\n---\n');
+
     String macroAwareness = "";
     if (_lastOverview != null || fgData != null) {
-      final fgScore = fgData?.score ??
-          (_lastOverview?.vixLevel != null
-              ? (100 - (double.tryParse(_lastOverview!.vixLevel) ?? 20) * 2)
-              : 50);
       final fgRating = fgData?.rating ?? "NEUTRAL";
-
-      final fgNewsContext =
-          fgNews.map((n) => "- ${n.title} (${n.publisher})").join('\n');
+      final fgNewsContext = fgNews.map((n) => "- ${n.title} (${n.publisher})").join('\n');
 
       macroAwareness = '''
 Sentiment : ${_lastOverview?.sentiment ?? fgRating}
-Niveau VIX : ${_lastOverview?.vixLevel ?? 'N/A'}
-Focus Sectoriel : ${_lastOverview?.sectors.take(3).map((s) => s.name).join(', ') ?? 'N/A'}
+VIX : ${_lastOverview?.vixLevel ?? 'N/A'}
+Secteurs : ${_lastOverview?.sectors.take(3).map((s) => s.name).join(', ') ?? 'N/A'}
 ---
-SENTIMENT HEADLINES :
+HEADLINES :
 $fgNewsContext
 ''';
     }
-    final social = results[4] as Map<String, dynamic>?;
-    final twelveDataContext = results[5] as String;
-    final polygonContext = results[6] as String;
 
-    // Pull from batch instead of dummy indices
-    final yInsiders =
-        (ySummary['insiderTransactions']?['transactions'] as List?) ?? [];
-    final yActions =
-        (ySummary['calendarEvents'] as Map?)?.cast<String, dynamic>() ?? {};
-    final yTargets =
-        (ySummary['financialData'] as Map?)?.cast<String, dynamic>() ?? {};
-    final yEsg = (ySummary['esgScores'] as Map?)?.cast<String, dynamic>() ?? {};
-    final yHoldersRaw =
-        results[11] as Map<String, dynamic>; // Placeholder index
-    final yRecs = (ySummary['recommendationTrend']?['trend'] as List?) ?? [];
-    final yUpgrades =
-        (ySummary['upgradeDowngradeHistory']?['history'] as List?) ?? [];
-    final webContext = results[14] as String;
-
-    // Legacy results from merged batch
-    final fmpProfileRaw = results[32] as Map<String, dynamic>;
-    final fmpProfile = fmpProfileRaw;
-    final fmpMetrics = results[33] as Map<String, dynamic>;
-    final fmpRatios = results[34] as Map<String, dynamic>;
-    final fmpHolders = results[35] as List<dynamic>;
-    final fmpInsiderTrading = results[36] as List<dynamic>;
-    final fmpIncome = results[37] as List<dynamic>;
-    final finnhubBasic = results[38] as Map<String, dynamic>;
-    final realTimePrice = results[39] as Map<String, dynamic>;
-
-    // Reconstruction des variables manquantes à partir des données groupées
-    final yahooProfile =
-        (ySummary['assetProfile'] as Map?)?.cast<String, dynamic>() ??
-            <String, dynamic>{};
-    final yahooHolders = yHoldersRaw.isNotEmpty
-        ? yHoldersRaw
-        : (ySummary['majorHoldersBreakdown'] as Map?)
-                ?.cast<String, dynamic>() ??
-            <String, dynamic>{};
-    final yahooFinancialData =
-        (ySummary['financialData'] as Map?)?.cast<String, dynamic>() ??
-            <String, dynamic>{};
-    final yahooTechnical =
-        (ySummary['technicalInsights'] as Map?)?.cast<String, dynamic>() ??
-            <String, dynamic>{};
-    final yahooTickerInfo =
-        (ySummary['defaultKeyStatistics'] as Map?)?.cast<String, dynamic>() ??
-            <String, dynamic>{};
-    // Merge summaryDetail + financialData into KeyStatistics source (dividends, 52W range, margins, growth)
-    final summaryDetail =
-        (ySummary['summaryDetail'] as Map?)?.cast<String, dynamic>() ??
-            <String, dynamic>{};
-    for (final key in [
-      'dividendYield',
-      'dividendRate',
-      'fiveYearAvgDividendYield',
-      'payoutRatio',
-      'fiftyTwoWeekHigh',
-      'fiftyTwoWeekLow',
-      'fiftyDayAverage',
-      'twoHundredDayAverage',
-      'trailingAnnualDividendYield',
-      'priceToBook'
-    ]) {
-      if (summaryDetail.containsKey(key) && !yahooTickerInfo.containsKey(key)) {
-        yahooTickerInfo[key] = summaryDetail[key];
-      }
-    }
-    for (final key in [
-      'earningsGrowth',
-      'operatingMargins',
-      'profitMargins',
-      'returnOnEquity',
-      'returnOnAssets',
-      'revenueGrowth',
-      'freeCashflow',
-      'operatingCashflow'
-    ]) {
-      if (yahooFinancialData.containsKey(key) &&
-          !yahooTickerInfo.containsKey(key)) {
-        yahooTickerInfo[key] = yahooFinancialData[key];
-      }
-    }
-    final yahooEarningsHistory =
-        (ySummary['earningsHistory']?['history'] as List?) ?? [];
-    final yahooEsg = yEsg;
-    final yahooActions = yActions;
-    final yahooYfinanceBundle = yBundle;
-
-    // REAL DATA ENFORCEMENT: Income Statement & Upgrades
-    final List<dynamic> yIncomeRaw = (ySummary['incomeStatementHistory']
-            ?['incomeStatementHistory'] as List?) ??
-        [];
-
-    // Convert Yahoo Income to FMP-style for compatibility
-    final List<Map<String, dynamic>> yHistoricalFinancials =
-        yIncomeRaw.map((e) {
-      final date = (e['endDate'] as Map?)?['fmt'] ?? 'N/A';
-      return {
-        'date': date,
-        'revenue': (e['totalRevenue'] as Map?)?['raw'] ?? 0,
-        'netIncome': (e['netIncome'] as Map?)?['raw'] ?? 0,
-        'eps': (e['netIncome'] as Map?)?['raw'] != null
-            ? 0.0
-            : 0.0, // Calculated later if needed
-      };
-    }).toList();
-
-    // (Unified results logic above)
+    final finnhubMetricsMap = (finnhubBasic['metric'] is Map)
+        ? Map<String, dynamic>.from(finnhubBasic['metric'] as Map)
+        : <String, dynamic>{};
 
     final prompt1 = '''
 ### RAPPORT D'ANALYSE FINANCIÈRE INSTITUTIONNELLE : $symbol
 Date : $currentDate | Langue : $language
 
-### DONNÉES BRUTES (yfinance-data & Institutional Feed)
-- PROFIL: ${_limitTokens(jsonEncode(yahooProfile), 2500)}
-- CORPORATE: ${_limitTokens(jsonEncode(fmpProfile), 3500)}
+### DONNÉES BRUTES (SIGMA & Institutional Feed)
+- PROFIL: ${_limitTokens(jsonEncode(sigmaProfile), 3000)}
+- CORPORATE CONTEXT: $sigmaContext
 - PEERS (COMPETITORS):
 $peerContext
-- ACTIONS CORPO: ${_limitTokens(jsonEncode(yActions), 1500)} (Dividendes, Splits)
-- INSIDERS: ${_limitTokens(jsonEncode(yInsiders.take(10).toList()), 2500)}
-- ANALYST TARGETS: ${jsonEncode(yTargets)}
-- RECOMMENDATIONS: ${jsonEncode(yRecs)}
-- ESG SCORES: ${jsonEncode(yEsg)}
-- HOLDERS: ${_limitTokens(jsonEncode(yahooHolders), 2000)}
-- SEEKING ALPHA RATINGS: ${_limitTokens(jsonEncode(saRatings), 1500)}
-- SEEKING ALPHA METRICS: ${_limitTokens(jsonEncode(saMetrics), 2000)}
-- KEY STATISTICS (ENHANCED): ${_limitTokens(jsonEncode(yahooStatsEnriched), 2000)}
-- EARNINGS (ENHANCED): ${_limitTokens(jsonEncode(yahooEarningsEnriched), 2000)}
-- UPGRADES/DOWNGRADES (ENHANCED): ${_limitTokens(jsonEncode(yahooUpgradesEnriched), 1500)}
-- ALPHA VANTAGE OVERVIEW: ${_limitTokens(jsonEncode(alphaOverview), 2500)}
+- INSIDERS: ${_limitTokens(jsonEncode(sigmaInsiderTrading.take(10).toList()), 2000)}
+- KEY METRICS & RATIOS: ${jsonEncode(sigmaMetrics)} | ${jsonEncode(sigmaRatios)}
+- INSTITUTIONAL HOLDERS: ${_limitTokens(jsonEncode(sigmaHolders), 2000)}
+- FINNHUB ENRICHMENT: ${jsonEncode(finnhubBasic)} | Recommendations: ${jsonEncode(finnhubRecommendations)}
+- GOOGLE FINANCE INSIGHTS: ${jsonEncode(googleFinance)}
 - MACRO: $macroAwareness
 - NEWS SOURCES:
 $allNewsContext
-- WEB SEARCH: ${_limitTokens(webContext, 5000)}
+- WEB SEARCH INSIGHTS: ${_limitTokens(webContext, 5000)}
 
 ### MISSION CRITIQUE : SEPA® EVALUATION
 Tu DOIS évaluer si ce titre respecte le "SEPA Trend Template" de Mark Minervini (Stage 2 Uptrend).
@@ -605,7 +324,7 @@ STRUCTURE JSON (STRICTE) :
   "riskLevel": "FAIBLE | MOYEN | ÉLEVÉ",
   "sigmaScore": 85,
   "confidence": 0.85,
-  "summary": "Un résumé clair, digeste et percutant (environ 100-150 mots) qui explique ce que fait l'entreprise, son business model, et exactement comment elle génère ses revenus. Le but est qu'un investisseur comprenne immédiatement si le modèle économique l'intéresse.",
+  "summary": "Un résumé clair, digeste et percutant...",
   "pros": [{"point": "Point fort", "analysis": "Détail"}],
   "cons": [{"point": "Risque", "analysis": "Détail"}],
   "catalysts": [{"type": "MOTEUR | RISQUE", "headline": "...", "insight": "..."}],
@@ -617,7 +336,13 @@ STRUCTURE JSON (STRICTE) :
   "projectedTrend": [{"date": "T+1", "price": 0.0, "signal": "..."}],
   "socialSentiment": {"redditSentiment": 0.0, "twitterSentiment": 0.0, "mentions": 0},
   "hiddenSignals": [{"type": "...", "headline": "...", "insight": "..."}],
-  "agenticThoughts": ["Pensée Agent Bull Case", "Pensée Agent Risk Vector"],
+  "agenticThoughts": [
+    "Trend: Clinical analysis of the trend...",
+    "Sentiment: Analysis of news and social flow...",
+    "Technical: Patterns, VCP, RSI, and Volume nodes...",
+    "Comparator: Relative strength vs peers and SPY...",
+    "Strategy: The execution roadmap..."
+  ],
   "insiderBuyRatio": 0.5,
   "esgScore": 0.0-100.0,
   "isin": "...",
@@ -637,53 +362,45 @@ STRUCTURE JSON (STRICTE) :
       "source": "Source",
       "url": "URL",
       "publishedAt": "ISO Date",
-      "summary": "Résumé de HAUTE DENSITÉ (au moins 3 lignes complètes) expliquant les implications stratégiques."
+      "summary": "Résumé de HAUTE DENSITÉ (au moins 3 lignes complètes)."
     }
   ]
 }
-
-SPECIFIC RULE FOR NEWS:
-Tu dois impérativement dédoubler les nouvelles provenant des différentes sources.
-Chaque article dans "companyNews" (5 à 8 articles) doit avoir un "summary" d'au moins 3 lignes. 
-Si le résumé original est court, utilise tes capacités d'analyse pour l'étoffer avec le contexte du titre et tes connaissances du marché.
-La section NEWS doit être la pièce maîtresse du rapport, fournissant des insights profonds et non de simples titres.
 ''';
 
     final apiBackedFallback = AnalysisData.fromJson({
       'ticker': symbol,
       'companyName': _getValidString([
-        fmpProfileRaw['companyName'],
-        ySummary['quoteType']?['longName'],
+        sigmaProfile['companyName'],
         symbol,
       ]),
       'companyProfile': _getValidString([
-        fmpProfileRaw['description'],
-        yahooProfile['longBusinessSummary'],
+        sigmaProfile['description'],
         isFr
-            ? 'Analyse générée depuis les APIs marché (mode sans synthèse IA).'
-            : 'Analysis generated directly from market APIs (no AI synthesis mode).',
+            ? 'Analyse générée depuis les APIs SIGMA.'
+            : 'Analysis generated from SIGMA APIs.',
       ]),
       'lastUpdated': DateTime.now().toIso8601String(),
       'price': _formatPrice(realTimePrice['price']),
       'verdict': isFr ? 'ATTENDRE' : 'HOLD',
       'verdictReasons': [
         isFr
-            ? 'Synthèse IA indisponible; rapport construit depuis les données API brutes.'
-            : 'AI synthesis unavailable; report built from raw API data.',
+            ? 'Rapport construit depuis les données API SIGMA.'
+            : 'Report built from SIGMA API data.',
       ],
       'riskLevel': isFr ? 'MOYEN' : 'MEDIUM',
       'sigmaScore': 55,
       'confidence': 0.45,
       'summary': isFr
-          ? 'Rapport de secours enrichi par APIs: prix, profil société, métriques clés, news et contexte marché sont intégrés malgré l’indisponibilité du moteur IA.'
-          : 'API-enriched fallback report: price, company profile, key metrics, news, and market context are included despite AI engine unavailability.',
+          ? 'Rapport de secours enrichi par SIGMA APIs.'
+          : 'SIGMA API-enriched fallback report.',
       'pros': [],
       'cons': [],
       'hiddenSignals': [],
       'catalysts': [],
       'volatility': {
         'ivRank': 'N/A',
-        'beta': (_extractRaw(yahooTickerInfo['beta']) ?? 'N/A').toString(),
+        'beta': (sigmaMetrics['beta'] ?? 'N/A').toString(),
         'interpretation': 'API',
       },
       'fearAndGreed': {
@@ -712,24 +429,23 @@ La section NEWS doit être la pièce maîtresse du rapport, fournissant des insi
         {
           'label': isFr ? 'CAPITALISATION BOURS.' : 'MARKET CAP.',
           'value': _formatLargeNumber(
-            _extractRaw(yahooTickerInfo['marketCap']) ??
-                fmpProfileRaw['mktCap'] ??
+            sigmaProfile['mktCap'] ??
+                finnhubBasic['marketCapitalization'] ??
                 0,
           ),
           'assessment': 'API',
         },
         {
           'label': 'P/E RATIO',
-          'value': (_extractRaw(yahooTickerInfo['trailingPE']) ??
-                  fmpProfileRaw['pe'] ??
+          'value': (sigmaProfile['pe'] ??
+              finnhubBasic['peTTM'] ??
                   'N/A')
               .toString(),
           'assessment': 'API',
         },
         {
           'label': 'ROE',
-          'value': (_extractRaw(yahooTickerInfo['returnOnEquity']) ??
-                  yahooFinancialData['returnOnEquity'] ??
+          'value': (finnhubBasic['roeTTM'] ??
                   'N/A')
               .toString(),
           'assessment': 'API',
@@ -751,29 +467,24 @@ La section NEWS doit être la pièce maîtresse du rapport, fournissant des insi
       'topSources': [],
       'analystRecommendations': {},
       'companyNews': [
-        ...fmpNews.take(4).map((n) => {
+        ...sigmaNews.take(8).map((n) => {
               'title': (n['title'] ?? '').toString(),
-              'source': 'FMP',
+              'source': 'SIGMA',
               'url': (n['url'] ?? '').toString(),
               'publishedAt': (n['publishedDate'] ?? '').toString(),
               'summary': (n['text'] ?? '').toString(),
             }),
-        ...yahooNews.take(4).map((n) => {
-              'title': (n['title'] ?? '').toString(),
-              'source': 'Yahoo',
+      ],
               'url': (n['link'] ?? n['url'] ?? '').toString(),
               'publishedAt': (n['providerPublishTime'] ?? '').toString(),
               'summary': (n['summary'] ?? '').toString(),
             }),
       ],
-      'sector':
-          _getValidString([fmpProfileRaw['sector'], yahooProfile['sector']]),
-      'industry': _getValidString(
-          [fmpProfileRaw['industry'], yahooProfile['industry']]),
-      'website':
-          _getValidString([fmpProfileRaw['website'], yahooProfile['website']]),
-      'ceo': _getValidString([fmpProfileRaw['ceo']]),
-      'image': _getValidString([fmpProfileRaw['image']]),
+      'sector': (sigmaProfile['sector'] ?? '').toString(),
+      'industry': (sigmaProfile['industry'] ?? '').toString(),
+      'website': (sigmaProfile['website'] ?? '').toString(),
+      'ceo': (sigmaProfile['ceo'] ?? '').toString(),
+      'image': (sigmaProfile['image'] ?? '').toString(),
     });
 
     final resilientFallback = apiBackedFallback.ticker.isNotEmpty
@@ -790,7 +501,7 @@ La section NEWS doit être la pièce maîtresse du rapport, fournissant des insi
           )
           .timeout(const Duration(seconds: 120));
     } catch (e) {
-      dev.log('⚠️ Primary AI Stock Analysis failed, trying fallback: $e');
+      dev.log('âš ï¸ Primary AI Stock Analysis failed, trying fallback: $e');
       if (_deepReasoningProvider != null) {
         try {
           response1 = await _deepReasoningProvider!
@@ -801,7 +512,7 @@ La section NEWS doit être la pièce maîtresse du rapport, fournissant des insi
               )
               .timeout(const Duration(seconds: 150));
         } catch (e2) {
-          dev.log('❌ Fallback failed: $e2');
+          dev.log('âŒ Fallback failed: $e2');
           response1 = jsonEncode(resilientFallback.toJson());
         }
       } else {
@@ -827,82 +538,37 @@ La section NEWS doit être la pièce maîtresse du rapport, fournissant des insi
 
     // --- MERGE DES RÉSULTATS ---
     AnalysisData analysisData = data1.copyWith(
-      historicalEarnings: fmpIncome,
+      historicalEarnings: sigmaIncome.cast<Map<String, dynamic>>(),
       price: _formatPrice(realTimePrice['price']),
-      socialSentiment: data2['socialSentiment'] != null
-          ? SocialSentimentData.fromJson(
-              AnalysisData.parseMap(data2['socialSentiment']),
-            )
-          : null,
-      marketSentiment: data2['marketSentiment'] != null
-          ? MarketSentiment.fromJson(
-              AnalysisData.parseMap(data2['marketSentiment']),
-            )
-          : null,
-      fearAndGreed: data2['fearAndGreed'] != null
-          ? StockSentiment.fromJson(
-              AnalysisData.parseMap(data2['fearAndGreed']),
-            )
-          : data1.fearAndGreed,
-      tradeSetup: data2['tradeSetup'] != null
-          ? TradeSetup.fromJson(AnalysisData.parseMap(data2['tradeSetup']))
-          : data1.tradeSetup,
-      projectedTrend: (data2['projectedTrend'] as List? ?? [])
-          .map((x) => ProjectedTrendPoint.fromJson(AnalysisData.parseMap(x)))
-          .toList(),
-      technicalAnalysis: (data2['technicalAnalysis'] as List? ?? [])
-          .map((x) => TechnicalIndicator.fromJson(AnalysisData.parseMap(x)))
-          .toList(),
-      hiddenSignals: (data2['hiddenSignals'] as List? ?? [])
-          .map((x) => HiddenSignal.fromJson(AnalysisData.parseMap(x)))
-          .toList(),
       isWebEnhanced: webContext.length > 20,
       webIntelligence: data1.webIntelligence,
-      // Inject Corporate Identity (FMP primary, Yahoo fallback, AI final fallback)
+      // Inject Corporate Identity (SIGMA primary, AI final fallback)
       companyName: _getValidString([
         data1.companyName,
-        fmpProfileRaw['companyName'],
-        ySummary['quoteType']?['longName'],
+        sigmaProfile['companyName'],
         symbol
       ]),
-      image: _getValidString([fmpProfileRaw['image'], data1.image]),
-      sector: _getValidString(
-          [fmpProfileRaw['sector'], yahooProfile['sector'], data1.sector]),
-      industry: _getValidString([
-        fmpProfileRaw['industry'],
-        yahooProfile['industry'],
-        data1.industry
-      ]),
-      ceo: _getValidString([fmpProfileRaw['ceo'], data1.ceo]),
-      website: _getValidString(
-          [fmpProfileRaw['website'], yahooProfile['website'], data1.website]),
-      employees: AnalysisData.parseInt(fmpProfileRaw['fullTimeEmployees'] ??
-          fmpProfileRaw['employees'] ??
-          yahooProfile['fullTimeEmployees']),
-      isin: _getValidString([fmpProfileRaw['isin'], data1.isin]),
-      address: _getValidString([fmpProfileRaw['address'], data1.address]),
-      city: _getValidString([fmpProfileRaw['city'], data1.city]),
-      state: _getValidString([fmpProfileRaw['state'], data1.state]),
-      country: _getValidString([fmpProfileRaw['country'], data1.country]),
-      phone: _getValidString([fmpProfileRaw['phone'], data1.phone]),
-      ipoDate: _getValidString([fmpProfileRaw['ipoDate'], data1.ipoDate]),
-      exchangeFullName: _getValidString(
-          [fmpProfileRaw['exchangeFullName'], data1.exchangeFullName]),
-      exchange: _getValidString([fmpProfileRaw['exchange'], data1.exchange]),
-      changePercent: (fmpProfileRaw['changePercentage'] as num?)?.toDouble() ??
-          data1.changePercent,
+      image: _getValidString([sigmaProfileRaw['image'], data1.image]),
+      sector: _getValidString([sigmaProfile['sector'], data1.sector]),
+      industry: _getValidString([sigmaProfile['industry'], data1.industry]),
+      ceo: _getValidString([sigmaProfile['ceo'], data1.ceo]),
+      website: _getValidString([sigmaProfile['website'], data1.website]),
+      employees: AnalysisData.parseInt(sigmaProfile['fullTimeEmployees'] ??
+          finnhubBasic['fullTimeEmployees'] ??
+          0),
     );
 
-    // LOGO RECOVERY (FMP image-stock as primary free source)
+    // LOGO RECOVERY
     if (analysisData.image == null ||
         analysisData.image!.isEmpty ||
-        analysisData.image!.contains('eodhd.com')) {
+        analysisData.image!.contains('eodhd.com') ||
+        analysisData.image!.contains('financialmodelingprep.com')) {
       analysisData = analysisData.copyWith(
-        image: 'https://financialmodelingprep.com/image-stock/$symbol.png',
+        image: LogoResolver.resolve(symbol, providedUrl: analysisData.image),
       );
     }
 
-    // --- ENRICH DES DONNÉES BRUTES (YAHOO DIRECT - BATCH MODE) ---
+    // --- ENRICH DES DONNÃ‰ES BRUTES (YAHOO DIRECT - BATCH MODE) ---
     final yCalendar =
         (ySummary['calendarEvents'] as Map?)?.cast<String, dynamic>() ?? {};
     final yEarningsTrend =
@@ -911,6 +577,22 @@ La section NEWS doit être la pièce maîtresse du rapport, fournissant des insi
         (ySummary['institutionHolders']?['holders'] as List?) ?? [];
     final yFullOwnership =
         (ySummary['insiderHolders'] as Map?)?.cast<String, dynamic>() ?? {};
+    final finnhubRecLatest = finnhubRecommendations.isNotEmpty &&
+        finnhubRecommendations.first is Map
+      ? Map<String, dynamic>.from(finnhubRecommendations.first as Map)
+      : <String, dynamic>{};
+    final finnhubEarningsCalendarMap =
+      finnhubEarningsCalendar.isNotEmpty &&
+          finnhubEarningsCalendar.first is Map
+        ? <String, dynamic>{
+          'Earnings Date':
+            (finnhubEarningsCalendar.first as Map)['date']?.toString() ?? '',
+          'Earnings Average':
+            (finnhubEarningsCalendar.first as Map)['epsEstimate']?.toString() ?? '',
+          'Revenue Estimate':
+            (finnhubEarningsCalendar.first as Map)['revenueEstimate']?.toString() ?? '',
+          }
+        : <String, dynamic>{};
 
     analysisData = analysisData.copyWith(
       insiderTransactions: yInsiders
@@ -928,9 +610,17 @@ La section NEWS doit être la pièce maîtresse du rapport, fournissant des insi
       analystRecommendations: yRecs.isNotEmpty
           ? AnalystRecommendation.fromJson(
               Map<String, dynamic>.from(yRecs.first))
-          : analysisData.analystRecommendations,
+          : (finnhubRecLatest.isNotEmpty
+              ? AnalystRecommendation.fromJson(finnhubRecLatest)
+              : analysisData.analystRecommendations),
       historicalEarnings:
-          yHistoricalFinancials.isNotEmpty ? yHistoricalFinancials : fmpIncome,
+          sigmaApiHistoricalFinancials.isNotEmpty
+            ? sigmaApiHistoricalFinancials
+            : yHistoricalFinancials.isNotEmpty
+            ? yHistoricalFinancials
+            : (finnhubEarningsSurprises.isNotEmpty
+              ? finnhubEarningsSurprises
+              : sigmaIncome),
       esgScore: (yEsg['totalEsg'] as num?)?.toDouble() ?? analysisData.esgScore,
       targetPriceValue:
           (yTargets['targetMeanPrice']?['raw'] as num?)?.toDouble() ??
@@ -947,8 +637,12 @@ La section NEWS doit être la pièce maîtresse du rapport, fournissant des insi
                 )) ??
             []),
       ],
-      // NEW — yfinance Intelligence Pipeline
-      earningsCalendar: yCalendar.isNotEmpty ? yCalendar : null,
+      // NEW â€” yfinance Intelligence Pipeline
+        earningsCalendar: yCalendar.isNotEmpty
+          ? yCalendar
+          : (finnhubEarningsCalendarMap.isNotEmpty
+            ? finnhubEarningsCalendarMap
+            : null),
       earningsTrend: yEarningsTrend.isNotEmpty ? yEarningsTrend : null,
       institutionalHolders: yInstitutionalHolders.isNotEmpty
           ? yInstitutionalHolders
@@ -964,13 +658,16 @@ La section NEWS doit être la pièce maîtresse du rapport, fournissant des insi
         "seekingAlphaMetrics": saMetrics,
         "alphaVantageOverview": alphaOverview,
         "yahooConversations": yahooConversations,
+        "finnhubBasic": finnhubBasic,
+        "finnhubRecommendations": finnhubRecommendations,
+        "finnhubEarningsSurprises": finnhubEarningsSurprises,
       }),
     );
 
     // Sequential Agentic Enrichment removed to improve performance.
     // Key insights now handled by primary model.
 
-    // --- ENRICH DES DONNÉES BRUTES (YAHOO DIRECT) ---
+    // --- ENRICH DES DONNÃ‰ES BRUTES (YAHOO DIRECT) ---
     if (yahooProfile.containsKey('officers')) {
       final officersList = (yahooProfile['officers'] as List? ?? [])
           .map((o) => CompanyOfficer.fromJson(Map<String, dynamic>.from(o)))
@@ -986,8 +683,8 @@ La section NEWS doit être la pièce maîtresse du rapport, fournissant des insi
     }
 
     // --- DATA ENFORCEMENT : FINANCIALS & TECHNICALS ---
-    // On s'assure que les données récupérées directement via Yahoo sont prioritaires
-    // ou complètent ce que l'IA a pu oublier ou mal formater.
+    // On s'assure que les donnÃ©es rÃ©cupÃ©rÃ©es directement via Yahoo sont prioritaires
+    // ou complÃ¨tent ce que l'IA a pu oublier ou mal formater.
 
     // 1. Key Statistics
     if (yahooTickerInfo.isNotEmpty) {
@@ -1067,7 +764,7 @@ La section NEWS doit être la pièce maîtresse du rapport, fournissant des insi
       );
     }
 
-    // 2.2 Key Stats Enforcement (Beta, Short Ratio, Volatilité)
+    // 2.2 Key Stats Enforcement (Beta, Short Ratio, VolatilitÃ©)
     if (yahooTickerInfo.isNotEmpty) {
       updateMetric(
         'Beta (5Y)',
@@ -1137,19 +834,19 @@ La section NEWS doit être la pièce maîtresse du rapport, fournissant des insi
 
     // STATS & NEWS ENRICHMENT
     try {
-      // 1. ACTUALITÉS MULTI-SOURCES (FMP only)
+      // 1. ACTUALITÃ‰S MULTI-SOURCES (SIGMA only)
       try {
         List<Map<String, dynamic>> rawNews = [];
 
-        // FMP news only
-        final fmpNewsResult = await _fmp
+        // SIGMA news only
+        final sigmaNewsResult = await _marketData
             .getStockNews(symbol, limit: 15)
             .catchError((_) => <dynamic>[]);
 
-        for (var n in fmpNewsResult) {
+        for (var n in sigmaNewsResult) {
           rawNews.add({
             'title': n['title'],
-            'source': n['site'] ?? 'FMP',
+            'source': n['site'] ?? 'SIGMA',
             'url': n['url'],
             'publishedAt': n['publishedDate'] ?? '',
             'summary': n['text'] ?? n['title'],
@@ -1157,7 +854,7 @@ La section NEWS doit être la pièce maîtresse du rapport, fournissant des insi
           });
         }
 
-        // Déduplication par titre
+        // DÃ©duplication par titre
         final seenTitles = <String>{};
         final newsArticles = <NewsArticle>[];
         for (var n in rawNews) {
@@ -1181,7 +878,7 @@ La section NEWS doit être la pièce maîtresse du rapport, fournissant des insi
             try {
               final intelService = NewsIntelligenceService.tryCreate();
               if (intelService != null) {
-                dev.log('🧠 Enriching Individual News with AI ($symbol)...');
+                dev.log('ðŸ§  Enriching Individual News with AI ($symbol)...');
                 final marketIntel = await intelService.analyzeMarketNews(
                   news: newsArticles
                       .map((a) => {
@@ -1240,59 +937,59 @@ La section NEWS doit être la pièce maîtresse du rapport, fournissant des insi
         dev.log('Warning: Overall News enrichment process failed: $e');
       }
 
-      // 2. KEY STATISTICS ENRICHMENT (FMP only)
+      // 2. KEY STATISTICS ENRICHMENT (SIGMA only)
       try {
         var keyStats = KeyStatistics.fromJson(<String, dynamic>{});
 
-        // Enrich with FMP for better data coverage
+        // Enrich with SIGMA for better data coverage
         dev.log('Information: Enriching Key Stats and Profile for $symbol...');
         try {
-          // Priority 1: FMP profile (primary source)
-          if (fmpProfile.isNotEmpty) {
-            final fmpMktCap = AnalysisData.parseNum(
-              fmpProfile['marketCap'] ?? fmpProfile['mktCap'],
+          // Priority 1: SIGMA profile (primary source)
+          if (sigmaProfile.isNotEmpty) {
+            final sigmaMktCap = AnalysisData.parseNum(
+              sigmaProfile['marketCap'] ?? sigmaProfile['mktCap'],
             );
-            final fmpPe = AnalysisData.parseNum(
-              fmpProfile['pe'] ?? fmpProfile['peRatio'],
+            final sigmaPe = AnalysisData.parseNum(
+              sigmaProfile['pe'] ?? sigmaProfile['peRatio'],
             );
-            final fmpBeta = AnalysisData.parseNum(fmpProfile['beta']);
+            final sigmaBeta = AnalysisData.parseNum(sigmaProfile['beta']);
 
             keyStats = keyStats.copyWith(
               marketCap:
-                  keyStats.marketCap == 0 ? fmpMktCap : keyStats.marketCap,
+                  keyStats.marketCap == 0 ? sigmaMktCap : keyStats.marketCap,
               trailingPE:
-                  keyStats.trailingPE == 0 ? fmpPe : keyStats.trailingPE,
-              beta: keyStats.beta == 0 ? fmpBeta : keyStats.beta,
+                  keyStats.trailingPE == 0 ? sigmaPe : keyStats.trailingPE,
+              beta: keyStats.beta == 0 ? sigmaBeta : keyStats.beta,
             );
 
-            // Enrich structured profile with FMP data
+            // Enrich structured profile with SIGMA data
             analysisData = analysisData.copyWith(
               employees: analysisData.employees ??
                   AnalysisData.parseNum(
-                    fmpProfile['fullTimeEmployees'] ?? fmpProfile['employees'],
+                    sigmaProfile['fullTimeEmployees'] ?? sigmaProfile['employees'],
                   ).toInt(),
-              website: analysisData.website ?? fmpProfile['website'] as String?,
-              sector: analysisData.sector ?? fmpProfile['sector'] as String?,
+              website: analysisData.website ?? sigmaProfile['website'] as String?,
+              sector: analysisData.sector ?? sigmaProfile['sector'] as String?,
               industry:
-                  analysisData.industry ?? fmpProfile['industry'] as String?,
-              address: analysisData.address ?? fmpProfile['address'] as String?,
-              city: analysisData.city ?? fmpProfile['city'] as String?,
-              state: analysisData.state ?? fmpProfile['state'] as String?,
-              country: analysisData.country ?? fmpProfile['country'] as String?,
-              ipoDate: fmpProfile['ipoDate'] as String?,
-              phone: analysisData.phone ?? fmpProfile['phone'] as String?,
-              exchange: fmpProfile['exchange'] as String?,
-              exchangeFullName: fmpProfile['exchangeFullName'] as String?,
-              ceo: fmpProfile['ceo'] as String?,
-              image: fmpProfile['image'] as String?,
+                  analysisData.industry ?? sigmaProfile['industry'] as String?,
+              address: analysisData.address ?? sigmaProfile['address'] as String?,
+              city: analysisData.city ?? sigmaProfile['city'] as String?,
+              state: analysisData.state ?? sigmaProfile['state'] as String?,
+              country: analysisData.country ?? sigmaProfile['country'] as String?,
+              ipoDate: sigmaProfile['ipoDate'] as String?,
+              phone: analysisData.phone ?? sigmaProfile['phone'] as String?,
+              exchange: sigmaProfile['exchange'] as String?,
+              exchangeFullName: sigmaProfile['exchangeFullName'] as String?,
+              ceo: sigmaProfile['ceo'] as String?,
+              image: sigmaProfile['image'] as String?,
               companyName: analysisData.companyName ??
-                  fmpProfile['companyName'] as String?,
+                  sigmaProfile['companyName'] as String?,
             );
             // Update description if missing or short
             if (analysisData.companyProfile.length < 50) {
-              if (fmpProfile['description'] != null) {
+              if (sigmaProfile['description'] != null) {
                 analysisData = analysisData.copyWith(
-                  companyProfile: fmpProfile['description'] as String,
+                  companyProfile: sigmaProfile['description'] as String,
                 );
               }
             }
@@ -1344,33 +1041,33 @@ La section NEWS doit être la pièce maîtresse du rapport, fournissant des insi
             );
           }
 
-          if (fmpMetrics.isNotEmpty) {
+          if (sigmaMetrics.isNotEmpty) {
             keyStats = keyStats.copyWith(
               returnOnEquity: keyStats.returnOnEquity == 0
-                  ? AnalysisData.parseNum(fmpMetrics['roeTTM'])
+                  ? AnalysisData.parseNum(sigmaMetrics['roeTTM'])
                   : keyStats.returnOnEquity,
               returnOnAssets: keyStats.returnOnAssets == 0
-                  ? AnalysisData.parseNum(fmpMetrics['roaTTM'])
+                  ? AnalysisData.parseNum(sigmaMetrics['roaTTM'])
                   : keyStats.returnOnAssets,
               debtToEquity: keyStats.debtToEquity == 0
-                  ? AnalysisData.parseNum(fmpMetrics['debtToEquityTTM'])
+                  ? AnalysisData.parseNum(sigmaMetrics['debtToEquityTTM'])
                   : keyStats.debtToEquity,
               currentRatio: keyStats.currentRatio == 0
-                  ? AnalysisData.parseNum(fmpMetrics['currentRatioTTM'])
+                  ? AnalysisData.parseNum(sigmaMetrics['currentRatioTTM'])
                   : keyStats.currentRatio,
               profitMargins: keyStats.profitMargins == 0
-                  ? AnalysisData.parseNum(fmpMetrics['netProfitMarginTTM'])
+                  ? AnalysisData.parseNum(sigmaMetrics['netProfitMarginTTM'])
                   : keyStats.profitMargins,
               pegRatio: keyStats.pegRatio == 0
-                  ? AnalysisData.parseNum(fmpMetrics['pegRatioTTM'])
+                  ? AnalysisData.parseNum(sigmaMetrics['pegRatioTTM'])
                   : keyStats.pegRatio,
             );
           }
         } catch (e) {
-          dev.log('Warning: FMP enrichment failed: $e');
+          dev.log('Warning: SIGMA enrichment failed: $e');
         }
 
-        dev.log('📊 FINAL ENRICHMENT RESULTS for $symbol:');
+        dev.log('ðŸ“Š FINAL ENRICHMENT RESULTS for $symbol:');
         dev.log('   Market Cap: ${keyStats.marketCap}');
         dev.log('   PE: ${keyStats.trailingPE}');
         dev.log('   Beta: ${keyStats.beta}');
@@ -1381,13 +1078,13 @@ La section NEWS doit être la pièce maîtresse du rapport, fournissant des insi
         dev.log('Warning: Failed to enrich KeyStatistics: $e');
       }
 
-      // 2.5 HOLDERS & INSIDERS ENRICHMENT (FMP FALLBACK)
+      // 2.5 HOLDERS & INSIDERS ENRICHMENT (SIGMA FALLBACK)
       try {
         if (analysisData.holders == null ||
             analysisData.holders!.topInstitutions.isEmpty) {
-          if (fmpHolders.isNotEmpty) {
-            dev.log('Enriching holders with FMP data...');
-            final institutions = fmpHolders.map((h) {
+          if (sigmaHolders.isNotEmpty) {
+            dev.log('Enriching holders with SIGMA data...');
+            final institutions = sigmaHolders.map((h) {
               return MajorHolder(
                 organization: h['holder'] ?? h['name'] ?? 'Institution',
                 pctHeld: (h['sharesByPercentage'] as num?)?.toDouble() ?? 0.0,
@@ -1401,7 +1098,7 @@ La section NEWS doit être la pièce maîtresse du rapport, fournissant des insi
               holders: HoldersData(
                 insidersPercent: 0,
                 institutionsPercent: 0,
-                institutionsCount: fmpHolders.length,
+                institutionsCount: sigmaHolders.length,
                 topInstitutions: institutions,
                 topFunds: [],
               ),
@@ -1417,21 +1114,21 @@ La section NEWS doit être la pièce maîtresse du rapport, fournissant des insi
                 oiData['transactions'] as List<InsiderTransaction>? ?? [];
             if (oiTransactions.isNotEmpty) {
               dev.log(
-                  '✅ Enriching insider transactions with OpenInsider data (${oiTransactions.length} txns)');
+                  'âœ… Enriching insider transactions with OpenInsider data (${oiTransactions.length} txns)');
               analysisData = analysisData.copyWith(
                 insiderTransactions: oiTransactions,
                 insiderBuyRatio: oiData['insiderBuyRatio'] as double?,
               );
             }
           } catch (e) {
-            dev.log('⚠️ OpenInsider ticker enrichment failed: $e');
+            dev.log('âš ï¸ OpenInsider ticker enrichment failed: $e');
           }
 
-          // SECONDARY FALLBACK: FMP (limited free tier)
+          // SECONDARY FALLBACK: SIGMA (limited free tier)
           if (analysisData.insiderTransactions.isEmpty &&
-              fmpInsiderTrading.isNotEmpty) {
-            dev.log('Enriching insider transactions with FMP data...');
-            final transactions = fmpInsiderTrading.map((t) {
+              sigmaInsiderTrading.isNotEmpty) {
+            dev.log('Enriching insider transactions with SIGMA data...');
+            final transactions = sigmaInsiderTrading.map((t) {
               return InsiderTransaction(
                 name: t['ownerName'] ?? 'Insider',
                 share: (t['securitiesTransacted'] ?? 0).toString(),
@@ -1447,12 +1144,12 @@ La section NEWS doit être la pièce maîtresse du rapport, fournissant des insi
           }
         }
       } catch (e) {
-        dev.log('Warning: FMP Holders/Insiders enrichment failed: $e');
+        dev.log('Warning: SIGMA Holders/Insiders enrichment failed: $e');
       }
 
-      // 2.7 FINANCIAL MATRIX ENRICHMENT (FMP FALLBACK)
+      // 2.7 FINANCIAL MATRIX ENRICHMENT (SIGMA FALLBACK)
       try {
-        if (fmpMetrics.isNotEmpty || fmpProfile.isNotEmpty) {
+        if (sigmaMetrics.isNotEmpty || sigmaProfile.isNotEmpty) {
           final List<FinancialMatrixItem> updatedMatrix = List.from(
             analysisData.financialMatrix,
           );
@@ -1466,45 +1163,45 @@ La section NEWS doit être la pièce maîtresse du rapport, fournissant des insi
                 item.value.isEmpty;
 
             if (isWaiting) {
-              if (label.contains('P/E') && fmpProfile['pe'] != null) {
+              if (label.contains('P/E') && sigmaProfile['pe'] != null) {
                 updatedMatrix[i] = item.copyWith(
-                  value: (fmpProfile['pe'] as num).toStringAsFixed(2),
+                  value: (sigmaProfile['pe'] as num).toStringAsFixed(2),
                 );
                 changed = true;
               } else if (label.contains('CAPITALISATION') &&
-                  (fmpProfile['mktCap'] != null ||
-                      fmpProfile['marketCap'] != null)) {
+                  (sigmaProfile['mktCap'] != null ||
+                      sigmaProfile['marketCap'] != null)) {
                 updatedMatrix[i] = item.copyWith(
                   value: _formatLargeNumber(
-                      fmpProfile['mktCap'] ?? fmpProfile['marketCap']),
+                      sigmaProfile['mktCap'] ?? sigmaProfile['marketCap']),
                 );
                 changed = true;
-              } else if (label.contains('BETA') && fmpProfile['beta'] != null) {
+              } else if (label.contains('BETA') && sigmaProfile['beta'] != null) {
                 updatedMatrix[i] = item.copyWith(
-                  value: (fmpProfile['beta'] as num).toStringAsFixed(2),
+                  value: (sigmaProfile['beta'] as num).toStringAsFixed(2),
                 );
                 changed = true;
               } else if (label.contains('DIVIDENDE') &&
-                  fmpProfile['lastDividend'] != null) {
+                  sigmaProfile['lastDividend'] != null) {
                 updatedMatrix[i] = item.copyWith(
-                  value: (fmpProfile['lastDividend'] as num).toStringAsFixed(2),
+                  value: (sigmaProfile['lastDividend'] as num).toStringAsFixed(2),
                 );
                 changed = true;
               } else if (label.contains('ROE') &&
-                  fmpMetrics['roeTTM'] != null) {
-                final roe = (fmpMetrics['roeTTM'] as num).toDouble();
+                  sigmaMetrics['roeTTM'] != null) {
+                final roe = (sigmaMetrics['roeTTM'] as num).toDouble();
                 updatedMatrix[i] = item.copyWith(
                   value: '${(roe * 100).toStringAsFixed(2)}%',
                 );
                 changed = true;
               } else if (label.contains('D/E') &&
-                  fmpMetrics['debtToEquityTTM'] != null) {
-                final de = (fmpMetrics['debtToEquityTTM'] as num).toDouble();
+                  sigmaMetrics['debtToEquityTTM'] != null) {
+                final de = (sigmaMetrics['debtToEquityTTM'] as num).toDouble();
                 updatedMatrix[i] = item.copyWith(value: de.toStringAsFixed(2));
                 changed = true;
               } else if (label.contains('ROIC')) {
-                final roic = fmpMetrics['roicTTM'] ??
-                    fmpRatios['returnOnInvestedCapitalTTM'];
+                final roic = sigmaMetrics['roicTTM'] ??
+                    sigmaRatios['returnOnInvestedCapitalTTM'];
                 if (roic != null) {
                   updatedMatrix[i] = item.copyWith(
                     value:
@@ -1513,8 +1210,8 @@ La section NEWS doit être la pièce maîtresse du rapport, fournissant des insi
                   changed = true;
                 }
               } else if (label.contains('EPS')) {
-                final eps = fmpMetrics['netIncomePerShareTTM'] ??
-                    (fmpIncome.isNotEmpty ? fmpIncome[0]['eps'] : null);
+                final eps = sigmaMetrics['netIncomePerShareTTM'] ??
+                    (sigmaIncome.isNotEmpty ? sigmaIncome[0]['eps'] : null);
                 if (eps != null) {
                   updatedMatrix[i] = item.copyWith(
                     value: (eps as num).toStringAsFixed(2),
@@ -1522,8 +1219,8 @@ La section NEWS doit être la pièce maîtresse du rapport, fournissant des insi
                   changed = true;
                 }
               } else if (label.contains('EBIT')) {
-                final ebit = (fmpIncome.isNotEmpty
-                    ? (fmpIncome[0]['operatingIncome'] ?? fmpIncome[0]['ebit'])
+                final ebit = (sigmaIncome.isNotEmpty
+                    ? (sigmaIncome[0]['operatingIncome'] ?? sigmaIncome[0]['ebit'])
                     : null);
                 if (ebit != null) {
                   updatedMatrix[i] = item.copyWith(
@@ -1532,8 +1229,8 @@ La section NEWS doit être la pièce maîtresse du rapport, fournissant des insi
                   changed = true;
                 }
               } else if (label.contains('MARGE BRUTE')) {
-                final gm = fmpMetrics['grossProfitMarginTTM'] ??
-                    fmpRatios['grossProfitMarginTTM'];
+                final gm = sigmaMetrics['grossProfitMarginTTM'] ??
+                    sigmaRatios['grossProfitMarginTTM'];
                 if (gm != null) {
                   updatedMatrix[i] = item.copyWith(
                     value:
@@ -1542,8 +1239,8 @@ La section NEWS doit être la pièce maîtresse du rapport, fournissant des insi
                   changed = true;
                 }
               } else if (label.contains('MARGE NETTE')) {
-                final nm = fmpMetrics['netProfitMarginTTM'] ??
-                    fmpRatios['netProfitMarginTTM'];
+                final nm = sigmaMetrics['netProfitMarginTTM'] ??
+                    sigmaRatios['netProfitMarginTTM'];
                 if (nm != null) {
                   updatedMatrix[i] = item.copyWith(
                     value:
@@ -1553,7 +1250,7 @@ La section NEWS doit être la pièce maîtresse du rapport, fournissant des insi
                 }
               } else if (label.contains('RENDEMENT FCF') ||
                   label.contains('FCF YIELD')) {
-                final fcfy = fmpMetrics['freeCashFlowYieldTTM'];
+                final fcfy = sigmaMetrics['freeCashFlowYieldTTM'];
                 if (fcfy != null) {
                   updatedMatrix[i] = item.copyWith(
                     value:
@@ -1574,11 +1271,11 @@ La section NEWS doit être la pièce maîtresse du rapport, fournissant des insi
         dev.log('Warning: Financial Matrix enrichment failed: $e');
       }
 
-      // ENRICHISSEMENT: ANALYSE TECHNIQUE (FMP-only — AI-generated from analyzeStock)
-      // TwelveData technical indicators (RSI, MACD, OBV) removed — FMP doesn't provide these directly.
+      // ENRICHISSEMENT: ANALYSE TECHNIQUE (Sigma-only â€” AI-generated from analyzeStock)
+      // TwelveData technical indicators (RSI, MACD, OBV) removed â€” SIGMA doesn't provide these directly.
       // Technical analysis is AI-generated from price context.
 
-      // ENRICHISSEMENT: DONNÉES D'ACTIONNARIAT (FMP PRIMARY)
+      // ENRICHISSEMENT: DONNÃ‰ES D'ACTIONNARIAT (SIGMA PRIMARY)
       try {
         List<MajorHolder> topInstitutions = [];
         List<MajorHolder> topFunds = [];
@@ -1586,11 +1283,11 @@ La section NEWS doit être la pièce maîtresse du rapport, fournissant des insi
         double institutionsPercent = 0.0;
         int institutionsCount = 0;
 
-        // FMP Institutional Holders
+        // SIGMA Institutional Holders
         try {
-          final fmpHoldersData = await _fmp.getInstitutionalHolders(symbol);
-          if (fmpHoldersData.isNotEmpty) {
-            topInstitutions = fmpHoldersData.take(10).map((h) {
+          final sigmaHoldersData = await _marketData.getInstitutionalHolders(symbol);
+          if (sigmaHoldersData.isNotEmpty) {
+            topInstitutions = sigmaHoldersData.take(10).map((h) {
               return MajorHolder(
                 organization: h['holder'] ?? 'Unknown',
                 position: (h['shares'] as num?)?.toDouble() ?? 0,
@@ -1599,10 +1296,10 @@ La section NEWS doit être la pièce maîtresse du rapport, fournissant des insi
                 reportDate: h['dateReported'] ?? '',
               );
             }).toList();
-            institutionsCount = fmpHoldersData.length;
+            institutionsCount = sigmaHoldersData.length;
           }
         } catch (e) {
-          dev.log('Warning: FMP holders enrichment failed: $e');
+          dev.log('Warning: SIGMA holders enrichment failed: $e');
         }
 
         final holdersData = HoldersData(
@@ -1613,7 +1310,7 @@ La section NEWS doit être la pièce maîtresse du rapport, fournissant des insi
           topFunds: topFunds,
         );
 
-        dev.log('👥 HOLDERS ENRICHMENT for $symbol:');
+        dev.log('ðŸ‘¥ HOLDERS ENRICHMENT for $symbol:');
         dev.log(
           '   Institutions: ${holdersData.institutionsPercent}% (${holdersData.institutionsCount} organizations)',
         );
@@ -1626,7 +1323,7 @@ La section NEWS doit être la pièce maîtresse du rapport, fournissant des insi
         dev.log('Warning: Failed to enrich Holders data: $e');
       }
 
-      // ENRICHISSEMENT: ÉVÉNEMENTS CORPORATIFS (YAHOO)
+      // ENRICHISSEMENT: Ã‰VÃ‰NEMENTS CORPORATIFS (YAHOO)
       try {
         final List<CorporateEvent> events = List.from(
           analysisData.corporateEvents,
@@ -1655,19 +1352,19 @@ La section NEWS doit être la pièce maîtresse du rapport, fournissant des insi
             events.add(
               CorporateEvent(
                 date: earn['date']?.toString() ?? dateStr,
-                event: 'RÉSULTATS',
+                event: 'RÃ‰SULTATS',
                 description:
-                    'EPS Réel: ${earn['epsActual']} (Est: ${earn['epsEstimate']})',
+                    'EPS RÃ©el: ${earn['epsActual']} (Est: ${earn['epsEstimate']})',
               ),
             );
           }
         }
 
-        // 3. Fallback FMP: Dividendes
+        // 3. Fallback Sigma API: Dividendes
         if (events.every((e) => e.event != 'DIVIDENDE')) {
           try {
-            final fmpDivs = await _fmp.getDividends(symbol);
-            for (var div in fmpDivs.take(3)) {
+            final sigmaDivs = await _marketData.getDividends(symbol);
+            for (var div in sigmaDivs.take(3)) {
               events.add(
                 CorporateEvent(
                   date: div['date']?.toString() ?? '',
@@ -1677,26 +1374,26 @@ La section NEWS doit être la pièce maîtresse du rapport, fournissant des insi
               );
             }
           } catch (e) {
-            dev.log('Warning: FMP dividends enrichment failed: $e');
+            dev.log('Warning: SIGMA dividends enrichment failed: $e');
           }
         }
 
-        // 4. Fallback FMP: Earnings
-        if (events.every((e) => e.event != 'RÉSULTATS')) {
+        // 4. Fallback Sigma API: Earnings
+        if (events.every((e) => e.event != 'RÃ‰SULTATS')) {
           try {
-            final fmpEarn = await _fmp.getEarningsHistorical(symbol);
-            for (var earn in fmpEarn.take(2)) {
+            final sigmaEarn = await _marketData.getEarningsHistorical(symbol);
+            for (var earn in sigmaEarn.take(2)) {
               events.add(
                 CorporateEvent(
                   date: earn['date']?.toString() ?? '',
-                  event: 'RÉSULTATS',
+                  event: 'RÃ‰SULTATS',
                   description:
-                      'EPS Réel: ${earn['actualEps']} (Est: ${earn['epsEstimated']})',
+                      'EPS RÃ©el: ${earn['actualEps']} (Est: ${earn['epsEstimated']})',
                 ),
               );
             }
           } catch (e) {
-            dev.log('Warning: FMP earnings enrichment failed: $e');
+            dev.log('Warning: SIGMA earnings enrichment failed: $e');
           }
         }
 
@@ -1707,17 +1404,20 @@ La section NEWS doit être la pièce maîtresse du rapport, fournissant des insi
         dev.log('Warning: Failed to enrich Corporate Events: $e');
       }
 
-      // ── PHASE 3: REMOVED (Redundant after Agentic Web integration) ──────────
+      // â”€â”€ PHASE 3: REMOVED (Redundant after Agentic Web integration) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
       // Previous Ollama phase removed to prioritize unified Intelligence Core.
 
-      return await _enrichPeerData(analysisData);
+      analysisData = _ensureEssentialSectionsData(analysisData, targetLanguage);
+      final withPeers = await _enrichPeerData(analysisData);
+      return _applyDataDrivenCalibration(withPeers, targetLanguage);
     } catch (e) {
-      dev.log('❌ Enrichment Error: $e');
-      return analysisData;
+      dev.log('âŒ Enrichment Error: $e');
+      final essential = _ensureEssentialSectionsData(analysisData, targetLanguage);
+      return _applyDataDrivenCalibration(essential, targetLanguage);
     }
   }
 
-  /// Enrichit les données des pairs avec des prix temps réel et valide les tickers
+  /// Enrichit les donnÃ©es des pairs avec des prix temps rÃ©el et valide les tickers
   Future<AnalysisData> _enrichPeerData(AnalysisData data) async {
     if (data.sectorPeers.isEmpty) return data;
 
@@ -1749,6 +1449,333 @@ La section NEWS doit être la pièce maîtresse du rapport, fournissant des insi
     return data.copyWith(sectorPeers: enrichedPeers);
   }
 
+  AnalysisData _ensureEssentialSectionsData(AnalysisData data, String language) {
+    final isFr = language.toUpperCase().startsWith('FR');
+
+    bool hasMeaningful(String? value) {
+      if (value == null) return false;
+      final v = value.trim().toUpperCase();
+      return v.isNotEmpty && v != 'N/A' && v != 'NA' && v != 'EN ATTENTE...';
+    }
+
+    final filteredFinancial = data.financialMatrix
+        .where((m) => hasMeaningful(m.value) || hasMeaningful(m.assessment))
+        .toList();
+
+    final keyStats = data.keyStatistics;
+    var matrix = filteredFinancial;
+    if (matrix.isEmpty) {
+      matrix = [
+        FinancialMatrixItem(
+          label: isFr ? 'CAPITALISATION BOURS.' : 'MARKET CAP',
+          value: keyStats?.marketCap != null && keyStats!.marketCap > 0
+              ? _formatLargeNumber(keyStats.marketCap)
+              : 'N/A',
+          assessment: 'API',
+        ),
+        FinancialMatrixItem(
+          label: 'P/E RATIO',
+          value: (keyStats?.trailingPE ?? 0) > 0
+              ? keyStats!.trailingPE.toStringAsFixed(2)
+              : 'N/A',
+          assessment: 'API',
+        ),
+        FinancialMatrixItem(
+          label: 'ROE',
+          value: (keyStats?.returnOnEquity ?? 0) > 0
+              ? '${((keyStats!.returnOnEquity) * 100).toStringAsFixed(2)}%'
+              : 'N/A',
+          assessment: 'API',
+        ),
+        FinancialMatrixItem(
+          label: isFr ? 'MARGE NETTE' : 'NET MARGIN',
+          value: (keyStats?.profitMargins ?? 0) > 0
+              ? '${((keyStats!.profitMargins) * 100).toStringAsFixed(2)}%'
+              : 'N/A',
+          assessment: 'API',
+        ),
+      ].where((m) => hasMeaningful(m.value)).toList();
+    }
+
+    final filteredTechnical = data.technicalAnalysis
+        .where((t) => hasMeaningful(t.value) || hasMeaningful(t.interpretation))
+        .toList();
+
+    var technical = filteredTechnical;
+    if (technical.isEmpty) {
+      final target = data.targetPriceValue;
+      final current = double.tryParse(data.price.replaceAll(RegExp(r'[^\d\.]'), ''));
+      if (current != null && current > 0 && target != null && target > 0) {
+        final upside = ((target - current) / current) * 100;
+        technical.add(
+          TechnicalIndicator(
+            indicator: isFr ? 'UPSIDE CIBLE' : 'TARGET UPSIDE',
+            value: '${upside.toStringAsFixed(1)}%',
+            interpretation: upside >= 0
+                ? (isFr
+                    ? 'Potentiel haussier implicite basÃ© sur le prix cible analyste.'
+                    : 'Implied upside based on analyst target price.')
+                : (isFr
+                    ? 'DÃ©cote implicite par rapport Ã  la cible analyste.'
+                    : 'Implied downside versus analyst target price.'),
+          ),
+        );
+      }
+
+      final beta = keyStats?.beta ?? 0;
+      if (beta > 0) {
+        technical.add(
+          TechnicalIndicator(
+            indicator: 'BETA',
+            value: beta.toStringAsFixed(2),
+            interpretation: beta >= 1.2
+                ? (isFr
+                    ? 'VolatilitÃ© supÃ©rieure au marchÃ©.'
+                    : 'Above-market volatility profile.')
+                : (isFr
+                    ? 'VolatilitÃ© contenue vs marchÃ©.'
+                    : 'Contained volatility versus market.'),
+          ),
+        );
+      }
+
+      final ivRangeParts = data.volatility.ivRank
+          .split('-')
+          .map((s) => s.trim())
+          .toList();
+      if (ivRangeParts.length == 2 &&
+          hasMeaningful(ivRangeParts[0]) &&
+          hasMeaningful(ivRangeParts[1])) {
+        technical.add(
+          TechnicalIndicator(
+            indicator: isFr ? 'RANGE 52W' : '52W RANGE',
+            value: '${ivRangeParts[0]} - ${ivRangeParts[1]}',
+            interpretation: isFr
+                ? 'Amplitude 52 semaines issue des donnÃ©es marchÃ©.'
+                : '52-week range extracted from market data.',
+          ),
+        );
+      }
+    }
+
+    return data.copyWith(
+      financialMatrix: matrix,
+      technicalAnalysis: technical,
+    );
+  }
+
+  AnalysisData _applyDataDrivenCalibration(
+      AnalysisData data, String language) {
+    final bool isFr = language.toUpperCase().startsWith('FR');
+
+    final keyStats = data.keyStatistics;
+    final analyst = data.analystRecommendations;
+
+    double score = data.sigmaScore > 0 ? data.sigmaScore : 50.0;
+    final positives = <String>[];
+    final negatives = <String>[];
+    int evidencePoints = 0;
+
+    void addPositive(String msg, double points) {
+      score += points;
+      evidencePoints += 1;
+      positives.add(msg);
+    }
+
+    void addNegative(String msg, double points) {
+      score -= points;
+      evidencePoints += 1;
+      negatives.add(msg);
+    }
+
+    // 1) Valuation
+    final pe = keyStats?.trailingPE ?? 0;
+    if (pe > 0 && pe <= 22) {
+      addPositive(
+          isFr
+              ? 'Valorisation raisonnable (P/E ${pe.toStringAsFixed(1)}).'
+              : 'Reasonable valuation (P/E ${pe.toStringAsFixed(1)}).',
+          6);
+    } else if (pe >= 45) {
+      addNegative(
+          isFr
+              ? 'Valorisation exigeante (P/E ${pe.toStringAsFixed(1)}).'
+              : 'Stretched valuation (P/E ${pe.toStringAsFixed(1)}).',
+          6);
+    }
+
+    // 2) Profitability / quality
+    final roe = keyStats?.returnOnEquity ?? 0;
+    if (roe >= 0.15) {
+      addPositive(
+          isFr
+              ? 'RentabilitÃ© Ã©levÃ©e (ROE ${(roe * 100).toStringAsFixed(1)}%).'
+              : 'High profitability (ROE ${(roe * 100).toStringAsFixed(1)}%).',
+          8);
+    } else if (roe > 0 && roe < 0.06) {
+      addNegative(
+          isFr
+              ? 'RentabilitÃ© faible (ROE ${(roe * 100).toStringAsFixed(1)}%).'
+              : 'Weak profitability (ROE ${(roe * 100).toStringAsFixed(1)}%).',
+          8);
+    }
+
+    final margin = keyStats?.profitMargins ?? 0;
+    if (margin >= 0.15) {
+      addPositive(
+          isFr
+              ? 'Marge nette solide (${(margin * 100).toStringAsFixed(1)}%).'
+              : 'Strong net margin (${(margin * 100).toStringAsFixed(1)}%).',
+          6);
+    } else if (margin > 0 && margin < 0.05) {
+      addNegative(
+          isFr
+              ? 'Marge nette contrainte (${(margin * 100).toStringAsFixed(1)}%).'
+              : 'Compressed net margin (${(margin * 100).toStringAsFixed(1)}%).',
+          6);
+    }
+
+    final growth = keyStats?.revenueGrowth ?? 0;
+    if (growth >= 0.10) {
+      addPositive(
+          isFr
+              ? 'Croissance du chiffre d\'affaires soutenue (${(growth * 100).toStringAsFixed(1)}%).'
+              : 'Solid revenue growth (${(growth * 100).toStringAsFixed(1)}%).',
+          8);
+    } else if (growth < 0) {
+      addNegative(
+          isFr
+              ? 'Contraction du chiffre d\'affaires (${(growth * 100).toStringAsFixed(1)}%).'
+              : 'Revenue contraction (${(growth * 100).toStringAsFixed(1)}%).',
+          8);
+    }
+
+    // 3) Analyst consensus
+    final totalRec = analyst.strongBuy + analyst.buy + analyst.hold + analyst.sell + analyst.strongSell;
+    if (totalRec > 0) {
+      final bias =
+          (analyst.strongBuy + analyst.buy - analyst.sell - analyst.strongSell) /
+              totalRec;
+      if (bias >= 0.35) {
+        addPositive(
+            isFr
+                ? 'Consensus analyste favorable (${analyst.consensusLabel}).'
+                : 'Supportive analyst consensus (${analyst.consensusLabel}).',
+            10);
+      } else if (bias <= -0.20) {
+        addNegative(
+            isFr
+                ? 'Consensus analyste dÃ©favorable (${analyst.consensusLabel}).'
+                : 'Unfavorable analyst consensus (${analyst.consensusLabel}).',
+            10);
+      }
+    }
+
+    // 4) Price target upside (if available)
+    final current = double.tryParse(data.price.replaceAll(RegExp(r'[^\d\.]'), ''));
+    final target = data.targetPriceValue;
+    if (current != null && current > 0 && target != null && target > 0) {
+      final upside = ((target - current) / current) * 100;
+      if (upside >= 15) {
+        addPositive(
+            isFr
+                ? 'Potentiel haussier implicite Ã©levÃ© (${upside.toStringAsFixed(1)}%).'
+                : 'High implied upside (${upside.toStringAsFixed(1)}%).',
+            10);
+      } else if (upside <= -10) {
+        addNegative(
+            isFr
+                ? 'Potentiel implicite nÃ©gatif (${upside.toStringAsFixed(1)}%).'
+                : 'Negative implied upside (${upside.toStringAsFixed(1)}%).',
+            10);
+      }
+    }
+
+    // 5) Insider sentiment
+    final insiderRatio = data.insiderBuyRatio;
+    if (insiderRatio != null) {
+      if (insiderRatio >= 0.60) {
+        addPositive(
+            isFr
+                ? 'Flux insider orientÃ©s achat.'
+                : 'Insider flow skewed to buys.',
+            6);
+      } else if (insiderRatio <= 0.40) {
+        addNegative(
+            isFr
+                ? 'Flux insider orientÃ©s vente.'
+                : 'Insider flow skewed to sells.',
+            6);
+      }
+    }
+
+    // 6) Event and risk overlays
+    if (data.corporateEvents.isNotEmpty) {
+      evidencePoints += 1;
+      final hasEarnings = data.corporateEvents
+          .any((e) => e.event.toUpperCase().contains('RÃ‰SULTATS') ||
+              e.event.toUpperCase().contains('EARNING'));
+      if (hasEarnings) {
+        addPositive(
+            isFr
+                ? 'Catalyseur court terme identifiÃ© (publication de rÃ©sultats).'
+                : 'Near-term catalyst identified (earnings release).',
+            3);
+      }
+    }
+
+    final beta = double.tryParse(data.volatility.beta) ?? 0;
+    if (beta >= 1.8) {
+      addNegative(
+          isFr
+              ? 'Risque de volatilitÃ© Ã©levÃ© (beta ${beta.toStringAsFixed(2)}).'
+              : 'Elevated volatility risk (beta ${beta.toStringAsFixed(2)}).',
+          4);
+    }
+
+    score = score.clamp(0, 100);
+
+    // Confidence = data coverage + score distance from neutral.
+    final coverage = (evidencePoints / 10).clamp(0.0, 1.0);
+    final conviction = ((score - 50).abs() / 50).clamp(0.0, 1.0);
+    final confidence = (0.45 * coverage + 0.55 * conviction).clamp(0.15, 0.95);
+
+    String verdict;
+    if (score >= 67) {
+      verdict = isFr ? 'ACHAT' : 'BUY';
+    } else if (score <= 42) {
+      verdict = isFr ? 'VENTE' : 'SELL';
+    } else {
+      verdict = isFr ? 'ATTENDRE' : 'HOLD';
+    }
+
+    final riskLevel = beta >= 1.8
+        ? (isFr ? 'Ã‰LEVÃ‰' : 'HIGH')
+        : (beta >= 1.1 ? (isFr ? 'MOYEN' : 'MEDIUM') : (isFr ? 'FAIBLE' : 'LOW'));
+
+    final methodology = isFr
+        ? 'Score recalibrÃ© de faÃ§on dÃ©terministe sur donnÃ©es rÃ©elles: valorisation, qualitÃ© (ROE/marges), croissance, consensus analystes, upside implicite, flux insiders et risque volatilitÃ©.'
+        : 'Score deterministically recalibrated from real data: valuation, quality (ROE/margins), growth, analyst consensus, implied upside, insider flow and volatility risk.';
+
+    final reasonPool = <String>[...positives.take(3), ...negatives.take(3)];
+    final calibratedReasons = reasonPool.isNotEmpty
+        ? reasonPool
+        : [
+            isFr
+                ? 'DÃ©cision maintenue en mode neutre faute de signaux quantitatifs suffisants.'
+                : 'Neutral stance maintained due to insufficient quantitative evidence.'
+          ];
+
+    return data.copyWith(
+      sigmaScore: score.toDouble(),
+      confidence: confidence.toDouble(),
+      verdict: verdict,
+      riskLevel: riskLevel,
+      verdictReasons: calibratedReasons,
+      scoreMethodology: methodology,
+    );
+  }
+
   /// Formate un prix pour l'affichage
   String _formatPrice(dynamic price) {
     if (price == null || price == 0) return '0.00';
@@ -1764,27 +1791,27 @@ La section NEWS doit être la pièce maîtresse du rapport, fournissant des insi
     }
   }
 
-  /// Récupère le prix temps réel avec fallback multi-source
-  /// Priorité: YAHOO -> FMP -> Finnhub -> TwelveData
-  /// Gère automatiquement les différents formats de symboles internationaux
+  /// RÃ©cupÃ¨re le prix temps rÃ©el avec fallback multi-source
+  /// PrioritÃ©: YAHOO -> SIGMA -> Finnhub -> TwelveData
+  /// GÃ¨re automatiquement les diffÃ©rents formats de symboles internationaux
   Future<Map<String, dynamic>> _getMultiSourcePrice(String symbol) async {
-    // Générer les variantes de symboles pour les marchés internationaux
+    // GÃ©nÃ©rer les variantes de symboles pour les marchÃ©s internationaux
     final symbolVariants = _getSymbolVariants(symbol);
 
     for (final variant in symbolVariants) {
-      // 1. FMP (primary source)
-      final fmpPriceVal = await _safeCall<double>(
-        () => _fmp.getRealTimePrice(variant),
+      // 1. SIGMA (primary source)
+      final sigmaPriceVal = await _safeCall<double>(
+        () => _marketData.getRealTimePrice(variant),
         0.0,
       );
-      if (fmpPriceVal > 0) {
-        dev.log('💰 Prix trouvé via FMP ($variant): \$$fmpPriceVal');
+      if (sigmaPriceVal > 0) {
+        dev.log('ðŸ’° Prix trouvÃ© via SIGMA ($variant): \$$sigmaPriceVal');
         // Try to get full quote data for richer response
         try {
-          final quoteMap = await _fmp.getQuoteMap(variant);
+          final quoteMap = await _marketData.getQuoteMap(variant);
           if (quoteMap.isNotEmpty) {
             return {
-              'price': quoteMap['price'] ?? fmpPriceVal,
+              'price': quoteMap['price'] ?? sigmaPriceVal,
               'change': quoteMap['change'] ?? 0,
               'changePercent': quoteMap['changesPercentage'] ?? 0,
               'dayHigh': quoteMap['dayHigh'] ?? 0,
@@ -1795,12 +1822,12 @@ La section NEWS doit être la pièce maîtresse du rapport, fournissant des insi
               'marketCap': quoteMap['marketCap'] ?? 0,
               'yearHigh': quoteMap['yearHigh'] ?? 0,
               'yearLow': quoteMap['yearLow'] ?? 0,
-              'source': 'FMP',
+              'source': 'SIGMA',
             };
           }
         } catch (_) {}
         return {
-          'price': fmpPriceVal,
+          'price': sigmaPriceVal,
           'change': 0,
           'changePercent': 0,
           'dayHigh': 0,
@@ -1808,50 +1835,50 @@ La section NEWS doit être la pièce maîtresse du rapport, fournissant des insi
           'previousClose': 0,
           'open': 0,
           'volume': 0,
-          'source': 'FMP',
+          'source': 'SIGMA',
         };
       }
     }
 
-    // 2. RÉSOLUTION AVANCÉE FMP (DERNIER RECOURS)
+    // 2. RÃ‰SOLUTION AVANCÃ‰E SIGMA (DERNIER RECOURS)
     dev.log(
-      '⚠️ Résolution standard échouée. Tentative de résolution FMP Exchange pour $symbol...',
+      'âš ï¸ RÃ©solution standard Ã©chouÃ©e. Tentative de rÃ©solution SIGMA Exchange pour $symbol...',
     );
     try {
-      final validVariants = await _fmp.searchExchangeVariants(symbol);
+      final validVariants = await _marketData.searchExchangeVariants(symbol);
       for (final v in validVariants) {
         final String? newSymbol = v['symbol'];
         if (newSymbol == null || symbolVariants.contains(newSymbol)) continue;
 
         dev.log(
-          '🔍 Test du symbole FMP découvert: $newSymbol (${v['exchange']})',
+          'ðŸ” Test du symbole SIGMA dÃ©couvert: $newSymbol (${v['exchange']})',
         );
 
-        final fmpPriceVal = await _safeCall<double>(
-          () => _fmp.getRealTimePrice(newSymbol),
+        final sigmaPriceVal = await _safeCall<double>(
+          () => _marketData.getRealTimePrice(newSymbol),
           0.0,
         );
-        if (fmpPriceVal > 0) {
+        if (sigmaPriceVal > 0) {
           dev.log(
-            '💰 Prix trouvé via FMP Resolution ($newSymbol): \$$fmpPriceVal',
+            'ðŸ’° Prix trouvÃ© via SIGMA Resolution ($newSymbol): \$$sigmaPriceVal',
           );
           return {
-            'price': fmpPriceVal,
+            'price': sigmaPriceVal,
             'change': 0,
             'changePercent': 0,
-            'source': 'FMP_RESOLVED',
+            'source': 'SIGMA_RESOLVED',
           };
         }
       }
     } catch (e) {
-      dev.log('Warning: FMP Advanced Resolution failed: $e');
+      dev.log('Warning: SIGMA Advanced Resolution failed: $e');
     }
 
-    dev.log('❌ Aucune source n\'a pu fournir le prix pour $symbol');
+    dev.log('âŒ Aucune source n\'a pu fournir le prix pour $symbol');
     return {};
   }
 
-  /// Génère les variantes de symboles pour les différents formats d'échange
+  /// GÃ©nÃ¨re les variantes de symboles pour les diffÃ©rents formats d'Ã©change
   List<String> _getSymbolVariants(String symbol) {
     final variants = <String>[symbol];
     final upperSymbol = symbol.toUpperCase();
@@ -1894,10 +1921,10 @@ La section NEWS doit être la pièce maîtresse du rapport, fournissant des insi
     return variants;
   }
 
-  /// Limite la taille d'un texte pour éviter de dépasser les limites de contexte de l'IA
+  /// Limite la taille d'un texte pour Ã©viter de dÃ©passer les limites de contexte de l'IA
   String _limitTokens(String text, int maxChars) {
     if (text.length <= maxChars) return text;
-    return '${text.substring(0, maxChars)}... [DONNÉES TRONQUÉES POUR OPTIMISATION CONTEXTE]';
+    return '${text.substring(0, maxChars)}... [DONNÃ‰ES TRONQUÃ‰ES POUR OPTIMISATION CONTEXTE]';
   }
 
   String? _getValidString(List<dynamic> candidates) {
@@ -1912,10 +1939,10 @@ La section NEWS doit être la pièce maîtresse du rapport, fournissant des insi
   }
 
   Future<List<Map<String, dynamic>>> _getMarketSummaryWithFallback() async {
-    // FMP : Indices majeurs (Yahoo removed)
+    // SIGMA : Indices majeurs (Yahoo removed)
     try {
       // ^GSPC=S&P500, ^DJI=Dow, ^IXIC=Nasdaq, ^RUT=Russell, EURUSD=X, BTC-USD
-      final quotes = await _fmp.getQuotes([
+      final quotes = await _marketData.getQuotes([
         '^GSPC',
         '^DJI',
         '^IXIC',
@@ -1941,16 +1968,16 @@ La section NEWS doit être la pièce maîtresse du rapport, fournissant des insi
             .toList();
       }
     } catch (e) {
-      dev.log('❌ FMP MarketSummary failed: $e');
+      dev.log('âŒ SIGMA MarketSummary failed: $e');
     }
     return [];
   }
 
   Future<MarketOverview> getMarketOverview({
-    String language = 'FRANÇAIS',
+    String language = 'FRANÃ‡AIS',
   }) async {
     final bool isFr = language.toUpperCase().startsWith('FR');
-    final String targetLanguage = isFr ? 'FRANÇAIS' : 'ENGLISH';
+    final String targetLanguage = isFr ? 'FRANÃ‡AIS' : 'ENGLISH';
 
     final now = DateTime.now();
     final currentDate = now.toIso8601String().split('T')[0];
@@ -1979,45 +2006,57 @@ La section NEWS doit être la pièce maîtresse du rapport, fournissant des insi
     List<GlobalInsiderTrade> insiderTrades = [];
 
     try {
-      // ── 0. AGENTIC SENTIMENT SEARCH (ALPHA) ────────────────────────────────────
-      // On cherche les chiffres RÉELS du sentiment (Fear & Greed Index)
+      // â”€â”€ 0. AGENTIC SENTIMENT SEARCH (ALPHA) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+      // On cherche les chiffres RÃ‰ELS du sentiment (Fear & Greed Index)
       final sentimentSearchTask = _webSearch.search(
           'current CNN Fear and Greed Index exact value, latest CBOE VIX price today, and current US stock market regime (Risk-On or Risk-Off) as of April 2026');
 
-      // ── 1. RÉCUPÉRATION DES DONNÉES EN PARALLÈLE ──────────────────────────────
+      // â”€â”€ 1. RÃ‰CUPÃ‰RATION DES DONNÃ‰ES EN PARALLÃˆLE â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
       final results = await Future.wait([
-        _safeCall(() => _fmp.getGeneralNews(limit: 30), {'data': []}), // 0
-        _safeCall(() => Future.value(null), null), // 1 (treasury — disabled)
-        _safeCall(() => _fmp.getSectorPerformance(), []), // 2
-        _safeCall(() => _fmp.getMergersAndAcquisitions(), []), // 3
-        _safeCall(() => _fmp.getFmpArticles(''), []), // 4
-        _safeCall(() => _fmp.getIndustryPerformance(), []), // 5
+        _safeCall(() => _marketData.getGeneralNews(limit: 30), {'data': []}), // 0
+        _safeCall(() => Future.value(null), null), // 1 (treasury â€” disabled)
+        _safeCall(() => _marketData.getSectorPerformance(), []), // 2
+        _safeCall(() => _marketData.getMergersAndAcquisitions(), []), // 3
+        _safeCall(() => _marketData.getMarketArticles(''), []), // 4
+        _safeCall(() => _marketData.getIndustryPerformance(), []), // 5
         _safeCall(() => Future.value({'data': []}),
-            {'data': []}), // 6 (trending — disabled)
+            {'data': []}), // 6 (trending â€” disabled)
         _safeCall(() => _getMarketSummaryWithFallback(), []), // 7
-        _safeCall(() => _fmp.getGainers(), []), // 8
-        _safeCall(() => _fmp.getLosers(), []), // 9
-        _safeCall(() => _fmp.getGeneralNews(limit: 20), []), // 10
+        _safeCall(() => _marketData.getGainers(), []), // 8
+        _safeCall(() => _marketData.getLosers(), []), // 9
+        _safeCall(() => _finnhub.marketNews(category: 'general'), []), // 10
         _safeCall(
-          () => _fmp.getQuotes(['^TNX', '^VIX', 'GLD', 'USO', 'UUP']),
+          () => _marketData.getQuotes(['^TNX', '^VIX', 'GLD', 'USO', 'UUP']),
           [],
         ), // 11
-        _safeCall(() => Future.value(<Map<String, dynamic>>[]),
-            []), // 12 (market news — FMP general news used)
-        _safeCall(() => _fmp.getGeneralNews(limit: 30), []), // 13
-        _safeCall(() => _fmp.getGainers(), []), // 14
-        _safeCall(() => _fmp.getLosers(), []), // 15
-        _safeCall(() => _fmp.getEconomicCalendar(), []), // 16
+        _safeCall(() => _marketData.getGeneralNews(limit: 25), []), // 12
+        _safeCall(() => _marketData.getGeneralNews(limit: 30), []), // 13
+        _safeCall(() => _marketData.getGainers(), []), // 14
+        _safeCall(() => _marketData.getLosers(), []), // 15
+        _safeCall(
+          () => _finnhub.earningsCalendar(
+            from: DateTime.now()
+                .subtract(const Duration(days: 30))
+                .toIso8601String()
+                .split('T')[0],
+            to: DateTime.now()
+                .add(const Duration(days: 30))
+                .toIso8601String()
+                .split('T')[0],
+          ),
+          [],
+        ), // 16
         _safeCall(() => sentimentSearchTask, ""), // 17
         _safeCall(() => _sentiment.fetchFearGreed(), null), // 18
         _safeCall(() => _sentiment.fetchNews(), []), // 19
         _safeCall(() => _sentiment.fetchHistory(), []), // 20
         _safeCall(() => getGlobalInsiderTrades(), []), // 21
-        _safeCall(() => _fmp.getEconomicCalendar(), []), // 22
+        _safeCall(() => _marketData.getEconomicCalendar(), []), // 22
       ]);
 
-      final Map<String, dynamic>? macroNews =
-          results[0] as Map<String, dynamic>?;
+      // results[0] is List<dynamic> from getGeneralNews â€” treat as news list directly
+      final List<dynamic> macroNewsList =
+          (results[0] is List) ? results[0] as List<dynamic> : [];
       final t10yOriginal = results[1] as double?;
       sectorPerf = results[2] as List<dynamic>;
       if (sectorPerf.isEmpty) {
@@ -2035,7 +2074,7 @@ La section NEWS doit être la pièce maîtresse du rapport, fournissant des insi
           'XLC'
         ];
         final sectorQuotes =
-            await _safeCall(() => _fmp.getQuotes(sectorTickers), []);
+            await _safeCall(() => _marketData.getQuotes(sectorTickers), []);
         sectorPerf = sectorQuotes
             .map((q) => {
                   'sector': q['name']
@@ -2048,17 +2087,17 @@ La section NEWS doit être la pièce maîtresse du rapport, fournissant des insi
             .toList();
       }
       final mergers = results[3] as List<dynamic>;
-      final fmpArticles = results[4] as List<dynamic>;
+      final sigmaArticles = results[4] as List<dynamic>;
       final industryPerf = results[5] as List<dynamic>;
       final trending = results[6] as Map<String, dynamic>?;
       yahooMarketSummary = results[7] as List<Map<String, dynamic>>;
-      final fmpGainers = results[8] as List<dynamic>;
-      final fmpLosers = results[9] as List<dynamic>;
+      final sigmaGainers = results[8] as List<dynamic>;
+      final sigmaLosers = results[9] as List<dynamic>;
 
       final finnhubNews = results[10] as List<dynamic>;
       final macroQuotes = results[11] as List<dynamic>;
-      final yahooNews = results[12] as List<Map<String, dynamic>>;
-      final fmpGeneralNews = results[13] as List<dynamic>;
+      final yahooNews = results[12] as List<dynamic>;
+      final sigmaGeneralNews = results[13] as List<dynamic>;
       final yahooGainersRaw = results[14] as List<Map<String, dynamic>>;
       final yahooLosersRaw = results[15] as List<Map<String, dynamic>>;
       yahooEarningsCalendar = results[16] as List<dynamic>;
@@ -2085,7 +2124,7 @@ La section NEWS doit être la pièce maîtresse du rapport, fournissant des insi
           final s = (g['symbol'] ?? g['ticker'] ?? '').toString().toUpperCase();
           if (s.isEmpty || map.containsKey(s)) continue;
 
-          // Autoriser les indices (^), les commodités (=), et les symboles US/Canada standard
+          // Autoriser les indices (^), les commoditÃ©s (=), et les symboles US/Canada standard
           final bool isIndexOrCommodity =
               s.startsWith('^') || s.contains('=') || s.contains('-');
           final bool isUSOrCanada =
@@ -2104,9 +2143,9 @@ La section NEWS doit être la pièce maîtresse du rapport, fournissant des insi
         }
       }
 
-      processMovers(fmpGainers, uniqueGainers, true);
+      processMovers(sigmaGainers, uniqueGainers, true);
       processMovers(yahooGainersRaw, uniqueGainers, false);
-      processMovers(fmpLosers, uniqueLosers, true);
+      processMovers(sigmaLosers, uniqueLosers, true);
       processMovers(yahooLosersRaw, uniqueLosers, false);
 
       finalGainers = uniqueGainers.values.toList()
@@ -2114,7 +2153,7 @@ La section NEWS doit être la pièce maîtresse du rapport, fournissant des insi
       finalLosers = uniqueLosers.values.toList()
         ..sort((a, b) => (a['change'] as num).compareTo(b['change'] as num));
 
-      // Extraction des valeurs macro réelles (FMP)
+      // Extraction des valeurs macro rÃ©elles (Sigma API)
       goldReal = 0.0;
       oilReal = 0.0;
       dxyReal = 0.0;
@@ -2166,59 +2205,57 @@ La section NEWS doit être la pièce maîtresse du rapport, fournissant des insi
       macroContext = "";
       aggregatedNews = [];
 
-      // Ajouter les news Marketaux
-      if (macroNews != null && macroNews['data'] != null) {
-        final List newsList = macroNews['data'];
-        for (var n in newsList.take(15)) {
-          String ticker = "";
-          final entities = n['entities'];
-          if (entities is List && entities.isNotEmpty) {
-            ticker = entities[0]['symbol']?.toString() ?? "";
-          }
-          aggregatedNews.add({
-            'title': n['title']?.toString() ?? '',
-            'source': n['source']?.toString() ?? 'MARKETAUX',
-            'url': n['url']?.toString() ?? '',
-            'ticker': ticker,
-            'publishedAt': n['published_at']?.toString() ?? '',
-          });
+      // Helper: extract a news item from any provider format (yfinance / Finnhub / Marketaux)
+      Map<String, String> _mapNewsItem(dynamic n, String defaultSource) {
+        if (n is! Map) return {};
+        final m = Map<String, dynamic>.from(n);
+        // Title: yfinance = 'title', Finnhub = 'headline', Marketaux = 'title'
+        final title = (m['title'] ?? m['headline'] ?? '').toString();
+        // Source: yfinance = 'publisher', Finnhub = 'source', SIGMA = 'site'
+        final source = (m['publisher'] ?? m['source'] ?? m['site'] ?? defaultSource).toString();
+        // URL: yfinance = 'link', others = 'url'
+        final url = (m['url'] ?? m['link'] ?? '').toString();
+        // Ticker: yfinance may have 'symbols' list or 'relatedTickers'
+        final relatedRaw = m['relatedTickers'] ?? m['symbols'] ?? m['related'] ?? '';
+        String ticker = '';
+        if (relatedRaw is List && relatedRaw.isNotEmpty) {
+          ticker = relatedRaw[0]?.toString() ?? '';
+        } else if (relatedRaw is String) {
+          ticker = relatedRaw.split(',').first.trim();
         }
+        ticker = m['symbol']?.toString() ?? ticker;
+        // PublishedAt: yfinance = 'publishedAt', Finnhub = 'datetime', Marketaux = 'published_at'
+        final publishedAt = (m['publishedAt'] ?? m['publishedDate'] ?? m['datetime']?.toString() ?? m['published_at'] ?? '').toString();
+        if (title.isEmpty) return {};
+        return {
+          'title': title, 'source': source, 'url': url, 'ticker': ticker, 'publishedAt': publishedAt,
+        };
       }
 
-      // Ajouter les news Finnhub
-      if (finnhubNews.isNotEmpty) {
-        for (var n in finnhubNews.take(15)) {
-          final related = n['related']?.toString() ?? '';
-          final splitted = related.split(',');
-          aggregatedNews.add({
-            'title': n['headline']?.toString() ?? '',
-            'source': n['source']?.toString() ?? 'FINNHUB',
-            'url': n['url']?.toString() ?? '',
-            'ticker': splitted.isNotEmpty ? splitted[0] : '',
-            'publishedAt': n['datetime']?.toString() ?? '',
-          });
-        }
+      // results[0] â€” from getGeneralNews (yfinance /news/SPY)
+      for (var n in macroNewsList.take(20)) {
+        final item = _mapNewsItem(n, 'SIGMA');
+        if (item.isNotEmpty) aggregatedNews.add(item);
       }
 
-      // Ajouter les news Yahoo
-      if (yahooNews.isNotEmpty) {
-        for (var n in yahooNews.take(15)) {
-          aggregatedNews.add({
-            'title': n['title']?.toString() ?? '',
-            'source': n['publisher']?.toString() ?? 'YAHOO',
-            'url': n['link']?.toString() ?? '',
-            'ticker': '',
-            'publishedAt': n['providerPublishTime']?.toString() ?? '',
-          });
-        }
+      // results[10] = finnhubNews (actually yfinance via SigmaMarketDataService)
+      for (var n in finnhubNews.take(20)) {
+        final item = _mapNewsItem(n, 'SIGMA');
+        if (item.isNotEmpty) aggregatedNews.add(item);
       }
 
-      // Ajouter les articles FMP General
-      if (fmpGeneralNews.isNotEmpty) {
-        for (var n in fmpGeneralNews.take(15)) {
+      // results[12] = yahooNews (actually yfinance)
+      for (var n in yahooNews.take(15)) {
+        final item = _mapNewsItem(n, 'YAHOO');
+        if (item.isNotEmpty) aggregatedNews.add(item);
+      }
+
+      // Ajouter les articles SIGMA General
+      if (sigmaGeneralNews.isNotEmpty) {
+        for (var n in sigmaGeneralNews.take(15)) {
           aggregatedNews.add({
             'title': n['title']?.toString() ?? '',
-            'source': n['site']?.toString() ?? 'FMP',
+            'source': n['site']?.toString() ?? 'SIGMA',
             'url': n['url']?.toString() ?? '',
             'ticker': n['symbol']?.toString() ?? '',
             'publishedAt': n['publishedDate']?.toString() ?? '',
@@ -2259,10 +2296,10 @@ La section NEWS doit être la pièce maîtresse du rapport, fournissant des insi
           .map((i) => "- ${i['industry']}: ${i['changesPercentage']}%")
           .join("\n");
 
-      // Récupérer les IPOs et le Calendrier Économique pour le contexte
+      // RÃ©cupÃ©rer les IPOs et le Calendrier Ã‰conomique pour le contexte
       final ipoResults = await Future.wait([
-        _safeCall(() => _fmp.getIposCalendar(), []),
-        _safeCall(() => _fmp.getEconomicCalendar(), []),
+        _safeCall(() => _marketData.getIposCalendar(), []),
+        _safeCall(() => _marketData.getEconomicCalendar(), []),
       ]);
       final ipos = ipoResults[0];
       final ecoCalendarRaw = ipoResults[1];
@@ -2288,7 +2325,7 @@ La section NEWS doit être la pièce maîtresse du rapport, fournissant des insi
 
       final mergerContext =
           mergers.take(3).map((m) => "- ${m['title']}").join("\n");
-      final articleContext = fmpArticles
+      final articleContext = sigmaArticles
           .take(3)
           .map((a) => "- ${a['title']} (${a['site']})")
           .join("\n");
@@ -2300,51 +2337,58 @@ La section NEWS doit être la pièce maîtresse du rapport, fournissant des insi
           )
           .join("\n");
 
-      final earningsContextYahoo = yahooEarningsCalendar
-          .take(10)
-          .map(
-            (e) =>
-                "- ${e['symbol']}: Date ${e['earningsDate']?[0]?['fmt'] ?? 'N/A'}",
-          )
-          .join("\n");
+      final earningsContextYahoo = yahooEarningsCalendar.take(10).map((e) {
+        if (e is! Map) return '- N/A';
+        final symbol = e['symbol']?.toString() ?? '';
+        final finnhubDate = e['date']?.toString();
+        final yahooDate = e['earningsDate'] is List
+            ? ((e['earningsDate'] as List).isNotEmpty
+                ? (e['earningsDate'][0]?['fmt']?.toString())
+                : null)
+            : null;
+        final date = finnhubDate ?? yahooDate ?? 'N/A';
+        final hour = e['hour']?.toString();
+        final hourSuffix = (hour != null && hour.isNotEmpty) ? ' ($hour)' : '';
+        return '- $symbol: Date $date$hourSuffix';
+      }).join("\n");
 
       final prompt = '''
 ANALYSE MACRO SIGMA : $currentDate
-LANGUE DE RÉPONSE : $targetLanguage
-10Y TREASURY YIELD (RÉEL): ${t10yReal.toStringAsFixed(2)}%
-DOLLAR INDEX DXY (RÉEL): ${dxyReal.toStringAsFixed(2)}
-GOLD (RÉEL): \$${goldReal.toStringAsFixed(2)}
-OIL WTI (RÉEL): \$${oilReal.toStringAsFixed(2)}
-VIX VOLATILITY index (RÉEL): ${vixReal.toStringAsFixed(2)}
+LANGUE DE RÃ‰PONSE : $targetLanguage
+10Y TREASURY YIELD (RÃ‰EL): ${t10yReal.toStringAsFixed(2)}%
+DOLLAR INDEX DXY (RÃ‰EL): ${dxyReal.toStringAsFixed(2)}
+GOLD (RÃ‰EL): \$${goldReal.toStringAsFixed(2)}
+OIL WTI (RÃ‰EL): \$${oilReal.toStringAsFixed(2)}
+VIX VOLATILITY index (RÃ‰EL): ${vixReal.toStringAsFixed(2)}
 
-RÉSUMÉ MARCHÉS YAHOO FINANCE :
+RÃ‰SUMÃ‰ MARCHÃ‰S YAHOO FINANCE :
 $yahooMarketContext
 
-TENDANCES (ENTITÉS À FORT VOLUMENÉTIQUE) :
+TENDANCES (ENTITÃ‰S Ã€ FORT VOLUMENÃ‰TIQUE) :
 $trendingContext
 
-SÉCTEURS PERFORMANCE :
+SÃ‰CTEURS PERFORMANCE :
 $sectorContext
 
 INDUSTRIES PERFORMANCE (TOP 8) :
 $industryContext
 
-FUSIONS & ACQUISITIONS RÉCENTES :
+FUSIONS & ACQUISITIONS RÃ‰CENTES :
 $mergerContext
 
 UPCOMING IPOs (INTRODUCTIONS EN BOURSE) :
 $ipoContext
 
-CALENDRIER ÉCONOMIQUE :
+CALENDRIER Ã‰CONOMIQUE :
 $ecoContext
 
 CALENDRIER EARNINGS (YAHOO) :
 $earningsContextYahoo
 
-ARTICLES FINANCIERS CLÉS (FMP) :
+ARTICLES FINANCIERS CLÃ‰S (SIGMA API) :
 $articleContext
 
-### DERNIÈRES NEWS RÉELLES DU MARCHÉ (CONTEXTE CRUCIAL) :
+### DERNIÃˆRES NEWS RÃ‰ELLES DU MARCHÃ‰ (CONTEXTE CRUCIAL) :
 $macroContext
 
 ### SENTIMENT NEWS (SOURCE: FEAR & GREED) :
@@ -2363,12 +2407,12 @@ Notable Events (Derniers contextes historiques): ${fgData?.notableEvents.map((e)
 ${fgHistory.length > 180 ? fgHistory.sublist(fgHistory.length - 180).map((h) => "${h['date']}: ${h['score']}").join(' | ') : fgHistory.map((h) => "${h['date']}: ${h['score']}").join(' | ')}
 
 MISSION : Fournir un MarketOverview JSON COMPACT.
-CONSIGNE NEWS : Extrais les 15 actualités les plus pertinentes et variées du contexte ci-dessus. Inclue absolument les URLs réelles fournies.
+CONSIGNE NEWS : Extrais les 15 actualitÃ©s les plus pertinentes et variÃ©es du contexte ci-dessus. Inclue absolument les URLs rÃ©elles fournies.
 
 STRUCTURE JSON (STRICTE, PAS DE TEXTE SUPERFLU) :
 {
   "marketRegime": "RISK-ON ou RISK-OFF",
-  "regimeDescription": "ANALYSE TECHNIQUE DÉTAILLÉE DE 3 LIGNES MINIMUM (STYLE BIM DANS UN RAPPORT INSTITUTIONNEL).",
+  "regimeDescription": "ANALYSE TECHNIQUE DÃ‰TAILLÃ‰E DE 3 LIGNES MINIMUM (STYLE BIM DANS UN RAPPORT INSTITUTIONNEL).",
   "vixLevel": "15.5",
   "lastUpdated": "YYYY-MM-DD",
   "news": [{"title": "Short title", "source": "SOURCE", "ticker": "AAPL", "impact": "HIGH", "url": "URL", "time": "2m ago"}],
@@ -2391,7 +2435,7 @@ STRUCTURE JSON (STRICTE, PAS DE TEXTE SUPERFLU) :
             )
             .timeout(const Duration(seconds: 45));
       } catch (e) {
-        dev.log('⚠️ NVIDIA Market Overview failed, trying Ollama: $e');
+        dev.log('âš ï¸ NVIDIA Market Overview failed, trying Ollama: $e');
         if (_deepReasoningProvider != null) {
           try {
             jsonResponse = await _deepReasoningProvider!
@@ -2403,7 +2447,7 @@ STRUCTURE JSON (STRICTE, PAS DE TEXTE SUPERFLU) :
                 )
                 .timeout(const Duration(seconds: 60));
           } catch (e2) {
-            dev.log('❌ Ollama Market Fallback failed: $e2');
+            dev.log('âŒ Ollama Market Fallback failed: $e2');
             throw e;
           }
         } else {
@@ -2416,10 +2460,10 @@ STRUCTURE JSON (STRICTE, PAS DE TEXTE SUPERFLU) :
         jsonDecode(cleanedJson),
       );
       dev.log(
-        '✅ Market Overview successfully parsed (length: ${cleanedJson.length})',
+        'âœ… Market Overview successfully parsed (length: ${cleanedJson.length})',
       );
 
-      // Injecter les données réelles de Yahoo et Macro extraites
+      // Injecter les donnÃ©es rÃ©elles de Yahoo et Macro extraites
       decoded['yahooSummary'] = yahooMarketSummary;
       decoded['topGainers'] = finalGainers
           .take(15)
@@ -2437,7 +2481,7 @@ STRUCTURE JSON (STRICTE, PAS DE TEXTE SUPERFLU) :
       decoded['vixChange'] = vixRealChange;
       decoded['vixChangePercent'] = vixRealChangePct;
 
-      // Injecter MacroIndicators Réels
+      // Injecter MacroIndicators RÃ©els
       decoded['macroIndicators'] = {
         "treasury10Y": t10yReal,
         "dollarIndex": dxyReal,
@@ -2448,9 +2492,9 @@ STRUCTURE JSON (STRICTE, PAS DE TEXTE SUPERFLU) :
       // Injecter Fear & Greed Data
       if (fgData != null) {
         print(
-            '🔍 [SigmaService] fgData detected. Score: ${fgData.score}, Backtest: ${fgData.backtest.length} items, Sectors: ${fgData.sectors.length} items');
+            'ðŸ” [SigmaService] fgData detected. Score: ${fgData.score}, Backtest: ${fgData.backtest.length} items, Sectors: ${fgData.sectors.length} items');
         if (fgData.backtest.isEmpty) {
-          dev.log('⚠️ [SigmaService] Warning: fgData.backtest is EMPTY');
+          dev.log('âš ï¸ [SigmaService] Warning: fgData.backtest is EMPTY');
         }
         decoded['sentiment'] = fgData.rating;
         decoded['sentimentValue'] = fgData.score;
@@ -2476,10 +2520,10 @@ STRUCTURE JSON (STRICTE, PAS DE TEXTE SUPERFLU) :
               .toList();
         }
       } else {
-        dev.log('⚠️ FearGreedData is NULL in getMarketOverview');
+        dev.log('âš ï¸ FearGreedData is NULL in getMarketOverview');
       }
 
-      // ── SENTIMEMT HISTORY INJECTION
+      // â”€â”€ SENTIMEMT HISTORY INJECTION
       if (fgHistory.isNotEmpty) {
         decoded['sentimentHistory'] = fgHistory;
       }
@@ -2490,7 +2534,7 @@ STRUCTURE JSON (STRICTE, PAS DE TEXTE SUPERFLU) :
             insiderTrades.map((t) => t.toJson()).toList();
       }
 
-      // Injecter le Calendrier Économique Réel (Priorité à la donnée brute)
+      // Injecter le Calendrier Ã‰conomique RÃ©el (PrioritÃ© Ã  la donnÃ©e brute)
       if (ecoCalendar.isNotEmpty) {
         decoded['economicCalendar'] = ecoCalendar
             .take(15)
@@ -2506,11 +2550,11 @@ STRUCTURE JSON (STRICTE, PAS DE TEXTE SUPERFLU) :
             .toList();
       }
 
-      // ── FALLBACK NEWS : si l'IA ne retourne pas de news, on injecte les raw
+      // â”€â”€ FALLBACK NEWS : si l'IA ne retourne pas de news, on injecte les raw
       final aiNews = decoded['news'] as List?;
       if (aiNews == null || aiNews.isEmpty) {
         dev.log(
-            '⚠️ AI returned no news — injecting raw aggregatedNews (${aggregatedNews.length} items)');
+            'âš ï¸ AI returned no news â€” injecting raw aggregatedNews (${aggregatedNews.length} items)');
         decoded['news'] = aggregatedNews
             .where((n) => (n['title'] ?? '').isNotEmpty)
             .map((n) => {
@@ -2525,7 +2569,7 @@ STRUCTURE JSON (STRICTE, PAS DE TEXTE SUPERFLU) :
             .toList();
       }
 
-      // Enrichir les secteurs avec les données réelles de performance
+      // Enrichir les secteurs avec les donnÃ©es rÃ©elles de performance
       if (sectorPerf.isNotEmpty) {
         final List<dynamic> aiSectors = decoded['sectors'] as List? ?? [];
         for (var s in sectorPerf) {
@@ -2570,7 +2614,7 @@ STRUCTURE JSON (STRICTE, PAS DE TEXTE SUPERFLU) :
 
       return overview;
     } catch (e) {
-      dev.log('❌ Market Overview AI Error, using raw fallback: $e');
+      dev.log('âŒ Market Overview AI Error, using raw fallback: $e');
       final fallbackVix = vixReal > 0 ? vixReal.toStringAsFixed(2) : "15.0";
 
       final webSentiment = _parseSentiment(realSentimentContext, vixReal);
@@ -2687,15 +2731,15 @@ STRUCTURE JSON (STRICTE, PAS DE TEXTE SUPERFLU) :
         limit: 100,
       );
       if (oiTrades.isNotEmpty) {
-        dev.log('✅ OpenInsider: SUCCESS - Retrieved ${oiTrades.length} trades',
+        dev.log('âœ… OpenInsider: SUCCESS - Retrieved ${oiTrades.length} trades',
             name: 'SigmaService');
         return oiTrades;
       }
 
-      // 2. FALLBACK: FMP Bulk Feed
-      dev.log('⚠️ OpenInsider unavailable, falling back to FMP...',
+      // 2. FALLBACK: SIGMA Bulk Feed
+      dev.log('âš ï¸ OpenInsider unavailable, falling back to Sigma API...',
           name: 'SigmaService');
-      final List<dynamic> raw = await _fmp.getBulkInsiderTrading(limit: 100);
+      final List<dynamic> raw = await _marketData.getBulkInsiderTrading(limit: 100);
 
       if (raw.isEmpty) {
         // 3. FALLBACK: FearGreed API
@@ -2716,7 +2760,7 @@ STRUCTURE JSON (STRICTE, PAS DE TEXTE SUPERFLU) :
         return [];
       }
 
-      // Map FMP to Model with labelling
+      // Map SIGMA to Model with labelling
       List<GlobalInsiderTrade> trades = raw
           .map((x) => GlobalInsiderTrade.fromJson(Map<String, dynamic>.from(x)))
           .toList();
@@ -2747,14 +2791,14 @@ STRUCTURE JSON (STRICTE, PAS DE TEXTE SUPERFLU) :
         );
       }).toList();
     } catch (e) {
-      dev.log('❌ Error fetching global insider trades: $e',
+      dev.log('âŒ Error fetching global insider trades: $e',
           name: 'SigmaService');
       return [];
     }
   }
 
-  /// Helper pour exécuter une future de manière sécurisée (fallback en cas d'erreur)
-  /// Helper pour exécuter une future de manière sécurisée avec retry automatique
+  /// Helper pour exÃ©cuter une future de maniÃ¨re sÃ©curisÃ©e (fallback en cas d'erreur)
+  /// Helper pour exÃ©cuter une future de maniÃ¨re sÃ©curisÃ©e avec retry automatique
   Future<T> _safeCall<T>(
     Future<T> Function() call,
     T fallback, {
@@ -2770,15 +2814,15 @@ STRUCTURE JSON (STRICTE, PAS DE TEXTE SUPERFLU) :
       try {
         final result = await call().timeout(timeout);
 
-        // Enregistrer le succès
+        // Enregistrer le succÃ¨s
         if (sourceName != null) {
-          dev.log('✅ Source OK: $sourceName', name: 'SigmaService');
+          dev.log('âœ… Source OK: $sourceName', name: 'SigmaService');
         }
 
-        // Si c'est un retry réussi, logger le succès
+        // Si c'est un retry rÃ©ussi, logger le succÃ¨s
         if (attempt > 0) {
           dev.log(
-              '✅ Service Call succeeded on retry $attempt${sourceName != null ? " ($sourceName)" : ""}',
+              'âœ… Service Call succeeded on retry $attempt${sourceName != null ? " ($sourceName)" : ""}',
               name: 'SigmaService');
         }
 
@@ -2787,21 +2831,21 @@ STRUCTURE JSON (STRICTE, PAS DE TEXTE SUPERFLU) :
         lastError = e is Exception ? e : Exception(e.toString());
         attempt++;
 
-        // Enregistrer l'échec
+        // Enregistrer l'Ã©chec
         if (sourceName != null && attempt > maxRetries) {
-          dev.log('❌ Source failed: $sourceName — $e', name: 'SigmaService');
+          dev.log('âŒ Source failed: $sourceName â€” $e', name: 'SigmaService');
         }
 
         if (attempt <= maxRetries) {
-          // Attendre avant de réessayer (backoff exponentiel)
+          // Attendre avant de rÃ©essayer (backoff exponentiel)
           final delay = retryDelay * attempt;
           dev.log(
-              '⚠️ Service Call failed (attempt $attempt/$maxRetries)${sourceName != null ? " ($sourceName)" : ""}, retrying in ${delay.inMilliseconds}ms: $e',
+              'âš ï¸ Service Call failed (attempt $attempt/$maxRetries)${sourceName != null ? " ($sourceName)" : ""}, retrying in ${delay.inMilliseconds}ms: $e',
               name: 'SigmaService');
           await Future.delayed(delay);
         } else {
           dev.log(
-              '❌ Service Call failed after $maxRetries retries${sourceName != null ? " ($sourceName)" : ""}: $e',
+              'âŒ Service Call failed after $maxRetries retries${sourceName != null ? " ($sourceName)" : ""}: $e',
               name: 'SigmaService');
         }
       }
@@ -2830,7 +2874,7 @@ STRUCTURE JSON (STRICTE, PAS DE TEXTE SUPERFLU) :
     cleaned = cleaned.replaceAll(RegExp(r'\s*```\s*$', multiLine: true), '');
     cleaned = cleaned.trim();
 
-    // 3. Find first '{' — skip any preamble text before JSON
+    // 3. Find first '{' â€” skip any preamble text before JSON
     final firstBrace = cleaned.indexOf('{');
     if (firstBrace == -1) return '{}';
     cleaned = cleaned.substring(firstBrace);
@@ -2983,20 +3027,20 @@ STRUCTURE JSON (STRICTE, PAS DE TEXTE SUPERFLU) :
     return buf.toString();
   }
 
-  /// Tente de récupérer un JSON partiel ou malformé
+  /// Tente de rÃ©cupÃ©rer un JSON partiel ou malformÃ©
   AnalysisData _recoverFromBadJson(
     String symbol,
     String language,
   ) {
-    dev.log('⚠️ Tentative de récupération JSON pour $symbol...');
+    dev.log('âš ï¸ Tentative de rÃ©cupÃ©ration JSON pour $symbol...');
 
     final bool isFr = language.toUpperCase().startsWith('FR');
 
-    // Créer une analyse minimale de fallback
+    // CrÃ©er une analyse minimale de fallback
     return AnalysisData(
       ticker: symbol,
       companyProfile: isFr
-          ? 'Analyse temporairement indisponible. SIGMA tente de stabiliser la connexion aux sources de données.'
+          ? 'Analyse temporairement indisponible. SIGMA tente de stabiliser la connexion aux sources de donnÃ©es.'
           : 'Analysis temporarily unavailable. SIGMA is attempting to stabilize connection to data sources.',
       lastUpdated: DateTime.now().toIso8601String(),
       price: 'N/A',
@@ -3012,7 +3056,7 @@ STRUCTURE JSON (STRICTE, PAS DE TEXTE SUPERFLU) :
       sigmaScore: 50.0,
       confidence: 0.0,
       summary: isFr
-          ? 'Une erreur s\'est produite lors de l\'agrégation des données. Veuillez réessayer dans quelques instants.'
+          ? 'Une erreur s\'est produite lors de l\'agrÃ©gation des donnÃ©es. Veuillez rÃ©essayer dans quelques instants.'
           : 'An error occurred during data aggregation. Please try again in a few moments.',
       hiddenSignals: [],
       catalysts: [],
@@ -3089,7 +3133,7 @@ STRUCTURE JSON (STRICTE, PAS DE TEXTE SUPERFLU) :
         period: '',
       ),
       technicalAnalysis: [],
-      actionPlan: [isFr ? 'Réessayer l\'analyse' : 'Retry analysis'],
+      actionPlan: [isFr ? 'RÃ©essayer l\'analyse' : 'Retry analysis'],
       analystRatings: [],
       insiderTransactions: [],
       institutionalActivity: InstitutionalActivity(
@@ -3106,10 +3150,10 @@ STRUCTURE JSON (STRICTE, PAS DE TEXTE SUPERFLU) :
       socialSentiment: null,
       recommendationSteps: [
         isFr
-            ? 'Étape 1 : Analyse des terminaux SIGMA en cours...'
+            ? 'Ã‰tape 1 : Analyse des terminaux SIGMA en cours...'
             : 'Step 1: SIGMA terminal analysis in progress...',
         isFr
-            ? 'Étape 2 : Vérification des flux asymétriques...'
+            ? 'Ã‰tape 2 : VÃ©rification des flux asymÃ©triques...'
             : 'Step 2: Verifying asymmetric flows...',
       ],
     );
@@ -3123,7 +3167,7 @@ STRUCTURE JSON (STRICTE, PAS DE TEXTE SUPERFLU) :
     String language = 'EN',
   }) async {
     final langInstr = language == 'FR'
-        ? 'RÉPONDS ENTIÈREMENT EN FRANÇAIS.'
+        ? 'RÃ‰PONDS ENTIÃˆREMENT EN FRANÃ‡AIS.'
         : 'RESPOND ENTIRELY IN ENGLISH.';
 
     final topFinancials = context.financialMatrix
@@ -3143,23 +3187,23 @@ STRUCTURE JSON (STRICTE, PAS DE TEXTE SUPERFLU) :
     final prompt = '''
 $langInstr
 
-Tu es l'Intelligence Artificielle SIGMA, expert en marchés financiers globaux.
-Ta mission est de répondre de manière CHIRURGICALE et PRÉCISE à la question de l'utilisateur.
+Tu es l'Intelligence Artificielle SIGMA, expert en marchÃ©s financiers globaux.
+Ta mission est de rÃ©pondre de maniÃ¨re CHIRURGICALE et PRÃ‰CISE Ã  la question de l'utilisateur.
 
-DONNÉES TEMPS RÉEL DU TERMINAL ($ticker):
+DONNÃ‰ES TEMPS RÃ‰EL DU TERMINAL ($ticker):
 - Prix: ${context.price} | Verdict: ${context.verdict} | Score: ${context.sigmaScore.toInt()}/100
 - Fondamentaux: $topFinancials
 - Technique: $topTech
-- Résumé: ${context.summary.length > 400 ? '${context.summary.substring(0, 400)}...' : context.summary}$historyPrompt
+- RÃ©sumÃ©: ${context.summary.length > 400 ? '${context.summary.substring(0, 400)}...' : context.summary}$historyPrompt
 
 QUESTION DE L'UTILISATEUR:
 "$question"
 
-OBJECTIF : Réponds UNIQUEMENT à cette question. Ne fais pas de résumé général si ce n'est pas demandé. Utilise les chiffres du contexte pour prouver tes dires.
+OBJECTIF : RÃ©ponds UNIQUEMENT Ã  cette question. Ne fais pas de rÃ©sumÃ© gÃ©nÃ©ral si ce n'est pas demandÃ©. Utilise les chiffres du contexte pour prouver tes dires.
 
-DIRECTIVE DE RÉPONSE (STRICTE) : 
-1. RÉPONSE CIBLÉE : Si la question porte sur un indicateur précis, ne parle que de cet indicateur.
-2. ZÉRO MARKDOWN : Texte brut uniquement. Pas de ** ou #.
+DIRECTIVE DE RÃ‰PONSE (STRICTE) : 
+1. RÃ‰PONSE CIBLÃ‰E : Si la question porte sur un indicateur prÃ©cis, ne parle que de cet indicateur.
+2. ZÃ‰RO MARKDOWN : Texte brut uniquement. Pas de ** ou #.
 3. PAS DE BLA-BLA : Va droit au but.
 ''';
 
@@ -3173,7 +3217,7 @@ DIRECTIVE DE RÉPONSE (STRICTE) :
         .timeout(const Duration(seconds: 90));
   }
 
-  /// Version streaming du chat pour une meilleure réactivité
+  /// Version streaming du chat pour une meilleure rÃ©activitÃ©
   Stream<String> chatWithSigmaStream({
     required String ticker,
     required AnalysisData context,
@@ -3183,7 +3227,7 @@ DIRECTIVE DE RÉPONSE (STRICTE) :
     String ragContext = '',
   }) {
     final langInstr = language == 'FR'
-        ? 'RÉPONDS ENTIÈREMENT EN FRANÇAIS.'
+        ? 'RÃ‰PONDS ENTIÃˆREMENT EN FRANÃ‡AIS.'
         : 'RESPOND ENTIRELY IN ENGLISH.';
 
     final topFinancials = context.financialMatrix
@@ -3205,23 +3249,23 @@ DIRECTIVE DE RÉPONSE (STRICTE) :
     final prompt = '''
 $langInstr
 
-Tu es l'Intelligence Artificielle SIGMA, expert en marchés financiers globaux.
-Ta mission est de répondre de manière CHIRURGICALE et PRÉCISE à la question de l'utilisateur.
+Tu es l'Intelligence Artificielle SIGMA, expert en marchÃ©s financiers globaux.
+Ta mission est de rÃ©pondre de maniÃ¨re CHIRURGICALE et PRÃ‰CISE Ã  la question de l'utilisateur.
 
-DONNÉES TEMPS RÉEL DU TERMINAL ($ticker):
+DONNÃ‰ES TEMPS RÃ‰EL DU TERMINAL ($ticker):
 - Prix: ${context.price} | Verdict: ${context.verdict} | Score: ${context.sigmaScore.toInt()}/100
 - Fondamentaux: $topFinancials
 - Technique: $topTech
-- Résumé: ${context.summary.length > 400 ? '${context.summary.substring(0, 400)}...' : context.summary}$ragBlock$historyPrompt
+- RÃ©sumÃ©: ${context.summary.length > 400 ? '${context.summary.substring(0, 400)}...' : context.summary}$ragBlock$historyPrompt
 
 QUESTION DE L'UTILISATEUR:
 "$question"
 
-OBJECTIF : Réponds UNIQUEMENT à cette question. Ne fais pas de résumé général si ce n'est pas demandé. Utilise les chiffres du contexte pour prouver tes dires.
+OBJECTIF : RÃ©ponds UNIQUEMENT Ã  cette question. Ne fais pas de rÃ©sumÃ© gÃ©nÃ©ral si ce n'est pas demandÃ©. Utilise les chiffres du contexte pour prouver tes dires.
 
-DIRECTIVE DE RÉPONSE (STRICTE) : 
-1. RÉPONSE CIBLÉE : Si la question porte sur un indicateur précis, ne parle que de cet indicateur.
-2. ZÉRO MARKDOWN : Texte brut uniquement. Pas de ** ou #.
+DIRECTIVE DE RÃ‰PONSE (STRICTE) : 
+1. RÃ‰PONSE CIBLÃ‰E : Si la question porte sur un indicateur prÃ©cis, ne parle que de cet indicateur.
+2. ZÃ‰RO MARKDOWN : Texte brut uniquement. Pas de ** ou #.
 3. PAS DE BLA-BLA : Va droit au but.
 ''';
 
@@ -3232,7 +3276,7 @@ DIRECTIVE DE RÉPONSE (STRICTE) :
     );
   }
 
-  /// Stream une synthèse stratégique basée sur les données d'analyse déjà extraites
+  /// Stream une synthÃ¨se stratÃ©gique basÃ©e sur les donnÃ©es d'analyse dÃ©jÃ  extraites
   Stream<String> streamAnalysisSynthesis({
     required AnalysisData analysis,
     String language = 'fr',
@@ -3240,20 +3284,20 @@ DIRECTIVE DE RÉPONSE (STRICTE) :
     final bool isFr = language.toUpperCase().startsWith('FR');
     final prompt = '''
 Tu es le 'SIGMA RESEARCH ORCHESTRATOR'. 
-Génère une synthèse stratégique PERCUTANTE et ANALYTIQUE pour ${analysis.ticker} (${analysis.companyName}).
+GÃ©nÃ¨re une synthÃ¨se stratÃ©gique PERCUTANTE et ANALYTIQUE pour ${analysis.ticker} (${analysis.companyName}).
 
-DONNÉES CLÉS :
+DONNÃ‰ES CLÃ‰S :
 - Prix : ${analysis.price} | Verdict : ${analysis.verdict} | Score : ${analysis.sigmaScore.toInt()}
 5. Finance : ${analysis.financialMatrix.take(5).map((e) => "${e.label}:${e.value}").join(", ")}
 - Technique : ${analysis.technicalAnalysis.take(5).map((e) => "${e.indicator}:${e.value}").join(", ")}
 
-MISSON : Rédige une synthèse de MAXIMUM 60 MOTS.
+MISSON : RÃ©dige une synthÃ¨se de MAXIMUM 60 MOTS.
 STYLE : Institutionnel, chirurgical, sans blabla.
 DATE : 11 AVRIL 2026.
-LANGUE : ${isFr ? "FRANÇAIS (OBLIGATOIRE)" : "ENGLISH"}.
+LANGUE : ${isFr ? "FRANÃ‡AIS (OBLIGATOIRE)" : "ENGLISH"}.
 
-ZÉRO MARKDOWN (pas de ** ou #). Texte brut uniquement.
-SI LA LANGUE EST FRANÇAIS, NE GÉNÈRE AUCUN MOT EN ANGLAIS.
+ZÃ‰RO MARKDOWN (pas de ** ou #). Texte brut uniquement.
+SI LA LANGUE EST FRANÃ‡AIS, NE GÃ‰NÃˆRE AUCUN MOT EN ANGLAIS.
 ''';
 
     return _marketProvider.generateStream(
@@ -3280,11 +3324,11 @@ SI LA LANGUE EST FRANÇAIS, NE GÉNÈRE AUCUN MOT EN ANGLAIS.
     return n.toStringAsFixed(2);
   }
 
-  /// Extrait le sentiment du marché de manière "agentique" depuis les résultats de recherche web
+  /// Extrait le sentiment du marchÃ© de maniÃ¨re "agentique" depuis les rÃ©sultats de recherche web
   Map<String, dynamic> _parseSentiment(String context, double vix) {
     if (context.isEmpty) return {'label': 'NEUTRAL', 'value': 0.0};
 
-    // 1. Recherche du score numérique exact (ex: "Fear and Greed Index: 42")
+    // 1. Recherche du score numÃ©rique exact (ex: "Fear and Greed Index: 42")
     final scoreRegex =
         RegExp(r'(?:Fear|Greed|Index)[:\s]+(\d{1,2})', caseSensitive: false);
     final match = scoreRegex.firstMatch(context);
@@ -3294,7 +3338,7 @@ SI LA LANGUE EST FRANÇAIS, NE GÉNÈRE AUCUN MOT EN ANGLAIS.
       value = double.tryParse(match.group(1)!) ?? 0.0;
     }
 
-    // 2. Si pas de score numérique, recherche de mots-clés de sentiment
+    // 2. Si pas de score numÃ©rique, recherche de mots-clÃ©s de sentiment
     String label = "";
     if (value > 0) {
       if (value <= 25) {
@@ -3352,7 +3396,7 @@ JSON STRUCTURE:
 - ONLY report catalysts explicitly mentioned in the "LIVE DATA FEED" below.
 - If a ticker is provided but no news is found in the feed, IGNORE IT.
 - For massive price moves (>10%), EXPLAIN the specific reason found in the news.
-- FOCUS STRICT SUR LES DONNÉES DE 2026. DATE ACTUELLE: 11 AVRIL 2026. 
+- FOCUS STRICT SUR LES DONNÃ‰ES DE 2026. DATE ACTUELLE: 11 AVRIL 2026. 
 - Focus sur CROSS-CORRELATIONS.
 - Be extremely specific and high-conviction.
 ''';
@@ -3361,7 +3405,7 @@ JSON STRUCTURE:
     if (tickers.isEmpty) return [];
 
     try {
-      // 1. Gather Macro Data (FMP)
+      // 1. Gather macro data (Sigma API)
       final macroSummaryList = await _getMarketSummaryWithFallback();
       final macroStr = macroSummaryList
           .take(5)
@@ -3371,9 +3415,9 @@ JSON STRUCTURE:
       // 2. Fetch Deep News for outlier tickers (Agentic scan) in PARALLEL
       final List<String> tickersToScan = tickers.take(8).toList();
 
-      // Multi-threading data discovery via FMP
+      // Multi-threading data discovery via SIGMA
       final newsResults = await Future.wait(tickersToScan.map((t) =>
-          _fmp.getStockNews(t, limit: 3).catchError((_) => <dynamic>[])));
+          _marketData.getStockNews(t, limit: 3).catchError((_) => <dynamic>[])));
 
       final webSearchTask = _webSearch
           .search(
@@ -3415,7 +3459,7 @@ Don't use old data. Focus on the news titles provided.
       final List<dynamic> list = jsonDecode(cleanResponse);
       return list.map((e) => CatalystInsight.fromJson(e)).toList();
     } catch (e) {
-      dev.log("❌ Error in Agentic Radar: $e", name: "SigmaService");
+      dev.log("âŒ Error in Agentic Radar: $e", name: "SigmaService");
       return [];
     }
   }
@@ -3453,9 +3497,68 @@ JSON STRUCTURE:
     }
   }
 
+  /// Search symbols using a single-source-of-truth approach.
+  /// Prioritizes the SIGMA backend and only uses Finnhub as a sequential fallback if no results are found.
+  Future<List<Map<String, dynamic>>> searchTickerSymbolsUnified(String query) async {
+    final q = query.trim().toLowerCase();
+    if (q.isEmpty) return [];
+
+    if (_searchCache.containsKey(q)) {
+      return _searchCache[q]!;
+    }
+
+    try {
+      // 1. Primary: SIGMA backend
+      List<Map<String, dynamic>> results = await _marketData.searchTickerSymbols(q).catchError((e) {
+        dev.log('Sigma search error: $e', name: 'SigmaService');
+        return <Map<String, dynamic>>[];
+      });
+
+      // 2. Secondary: Finnhub fallback (only if primary is empty to avoid confusion)
+      if (results.isEmpty && _finnhub.isConfigured) {
+        results = await _finnhub.searchSymbols(q).catchError((e) {
+          dev.log('Finnhub search error: $e', name: 'SigmaService');
+          return <Map<String, dynamic>>[];
+        });
+      }
+
+      // Map and sort results consistently
+      final isPrimary = results.isNotEmpty && results.any((r) => r['source'] == 'SIGMA' || r['source'] == null);
+      
+      final out = results.map((raw) {
+        final symbol = (raw['symbol'] ?? raw['displaySymbol'] ?? '').toString().toUpperCase();
+        return {
+          ...raw,
+          'symbol': symbol,
+          'name': raw['name'] ?? raw['description'] ?? symbol,
+          'description': raw['description'] ?? raw['name'] ?? symbol,
+          'source': raw['source'] ?? (isPrimary ? 'SIGMA' : 'FINNHUB'), 
+        };
+      }).toList();
+
+      // Ensure the exact match is always first
+      out.sort((a, b) {
+        final sa = (a['symbol'] ?? '').toString().toUpperCase();
+        final sb = (b['symbol'] ?? '').toString().toUpperCase();
+        final qa = sa == q.toUpperCase() ? 0 : (sa.startsWith(q.toUpperCase()) ? 1 : 2);
+        final qb = sb == q.toUpperCase() ? 0 : (sb.startsWith(q.toUpperCase()) ? 1 : 2);
+        if (qa != qb) return qa.compareTo(qb);
+        return sa.compareTo(sb);
+      });
+      
+      _searchCache[q] = out;
+      return out;
+    } catch (e) {
+      dev.log('Search failure: $e', name: 'SigmaService');
+      return [];
+    }
+  }
+
+
+
   Future<String> analyzeHistoricalPoint(
       String ticker, Map<String, dynamic> point,
-      {String language = 'FRANÇAIS'}) async {
+      {String language = 'FRANÃ‡AIS'}) async {
     try {
       final date = point['date'].toString().split(' ')[0];
       final prompt = '''
@@ -3483,8 +3586,8 @@ JSON STRUCTURE:
 
   Future<String> analyzeHistoricalRange(AnalysisData contextData,
       List<Map<String, dynamic>> history, String range,
-      {String language = 'FRANÇAIS'}) async {
-    if (history.isEmpty) return "Données insuffisantes.";
+      {String language = 'FRANÃ‡AIS'}) async {
+    if (history.isEmpty) return "DonnÃ©es insuffisantes.";
     try {
       final first = history.first['close'];
       final last = history.last['close'];
@@ -3513,7 +3616,7 @@ JSON STRUCTURE:
       );
       return _cleanPointResponse(res);
     } catch (e) {
-      return "Analyse de période $range complétée.";
+      return "Analyse de pÃ©riode $range complÃ©tÃ©e.";
     }
   }
 
@@ -3550,7 +3653,7 @@ JSON STRUCTURE:
     return clean
         .trim()
         .replaceAll(
-            RegExp(r'^(Résumé|Summary|Analysis|Verdict)\s*:\s*',
+            RegExp(r'^(RÃ©sumÃ©|Summary|Analysis|Verdict)\s*:\s*',
                 caseSensitive: false),
             '')
         .replaceAll(RegExp(r'^["{]|["}]$'), '')
@@ -3562,6 +3665,78 @@ JSON STRUCTURE:
     final start = text.indexOf('[');
     final end = text.lastIndexOf(']') + 1;
     return text.substring(start, end);
+  }
+
+  // ---------------------------------------------------------------------------
+  // 🐂 BULL VS 🐻 BEAR DEBATE
+  // ---------------------------------------------------------------------------
+  Future<Map<String, String>> generateBullBearDebate(AnalysisData data) async {
+    final ticker = data.ticker.toUpperCase();
+    final bool isFr = data.summary.toLowerCase().contains('le') || data.summary.toLowerCase().contains('est');
+    
+    final dataContext = '''
+Ticker: $ticker
+Company: ${data.companyName ?? ticker}
+Current Price: ${data.price}
+SIGMA Score: ${data.sigmaScore}/100
+Verdict: ${data.verdict}
+Institutional Sentiment: ${data.institutionalActivity.darkPoolInterpretation}
+Pros: ${data.pros.map((e) => e.text).join(' | ')}
+Cons: ${data.cons.map((e) => e.text).join(' | ')}
+Financials: ${data.financialMatrix.map((e) => '${e.label}: ${e.value}').join(', ')}
+''';
+
+    final bearPrompt = """
+You are a Bear Analyst making the case against investing in the stock. Your goal is to present a well-reasoned argument emphasizing risks, challenges, and negative indicators. Leverage the provided research and data to highlight potential downsides and counter bullish arguments effectively.
+
+Key points to focus on:
+- Risks and Challenges: Highlight factors like market saturation, financial instability, or macroeconomic threats that could hinder the stock's performance.
+- Competitive Weaknesses: Emphasize vulnerabilities such as weaker market positioning, declining innovation, or threats from competitors.
+- Negative Indicators: Use evidence from financial data, market trends, or recent adverse news to support your position.
+- Bull Counterpoints: Critically analyze the bull argument with specific data and sound reasoning, exposing weaknesses or over-optimistic assumptions.
+- Engagement: Present your argument in a conversational style, directly engaging with the bull analyst's points and debating effectively rather than simply listing facts.
+
+RESPOND IN ${isFr ? 'FRENCH' : 'ENGLISH'}.
+""";
+
+    final bullPrompt = """
+You are a Bull Analyst advocating for investing in the stock. Your task is to build a strong, evidence-based case emphasizing growth potential, competitive advantages, and positive market indicators. Leverage the provided research and data to address concerns and counter bearish arguments effectively.
+
+Key points to focus on:
+- Growth Potential: Highlight the company's market opportunities, revenue projections, and scalability.
+- Competitive Advantages: Emphasize factors like unique products, strong branding, or dominant market positioning.
+- Positive Indicators: Use financial health, industry trends, and recent positive news as evidence.
+- Bear Counterpoints: Critically analyze the bear argument with specific data and sound reasoning, addressing concerns thoroughly and showing why the bull perspective holds stronger merit.
+- Engagement: Present your argument in a conversational style, engaging directly with the bear analyst's points and debating effectively rather than just listing data.
+
+RESPOND IN ${isFr ? 'FRENCH' : 'ENGLISH'}.
+""";
+
+    try {
+      final provider = _deepReasoningProvider ?? _stockProvider;
+      
+      final results = await Future.wait([
+        provider.generateContent(
+          prompt: "$bearPrompt\n\nMarket Data:\n$dataContext",
+          systemInstruction: "You are the Bear Analyst. Be critical, data-driven, and persuasive.",
+        ),
+        provider.generateContent(
+          prompt: "$bullPrompt\n\nMarket Data:\n$dataContext",
+          systemInstruction: "You are the Bull Analyst. Be optimistic, growth-oriented, and data-driven.",
+        ),
+      ]);
+
+      return {
+        'bear': results[0],
+        'bull': results[1],
+      };
+    } catch (e) {
+      dev.log('❌ Error generating debate: $e');
+      return {
+        'bear': "Failed to generate bear case.",
+        'bull': "Failed to generate bull case.",
+      };
+    }
   }
 
   DateTime _parseAnyDate(dynamic raw) {
@@ -3586,3 +3761,10 @@ JSON STRUCTURE:
     return DateTime.now();
   }
 }
+
+
+
+
+
+
+

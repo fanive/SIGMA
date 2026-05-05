@@ -1,7 +1,6 @@
-﻿import 'package:flutter/material.dart';
+import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:provider/provider.dart';
-import '../panels/sigma_subscription_panel.dart';
 import '../../models/sigma_models.dart';
 
 import '../../providers/sigma_provider.dart';
@@ -49,9 +48,6 @@ class TerminalSidebar extends StatelessWidget {
                         ),
                       ),
                     ),
-                if (context.watch<SigmaProvider>().currentTier ==
-                    SigmaTier.free)
-                  _PremiumSidebarItem(isDark: isDark, isHorizontal: true),
                 Expanded(
                   child: _SidebarItem(
                     panel: TerminalPanel.settings,
@@ -110,8 +106,6 @@ class TerminalSidebar extends StatelessWidget {
                         isHorizontal: false,
                       )),
               const Spacer(),
-              if (context.watch<SigmaProvider>().currentTier == SigmaTier.free)
-                _PremiumSidebarItem(isDark: isDark, isHorizontal: false),
               const SizedBox(height: 8),
               // ── Settings at the bottom ────────────────────────────
               _SidebarItem(
@@ -217,7 +211,7 @@ class _SidebarItemState extends State<_SidebarItem> {
                 const SizedBox(height: 2),
                 Text(
                   widget.panel.getLabel(lang),
-                  style: GoogleFonts.lora(
+                  style: GoogleFonts.ibmPlexSans(
                     color: widget.isActive
                         ? activeColor
                         : _isHovered
@@ -230,7 +224,7 @@ class _SidebarItemState extends State<_SidebarItem> {
                     fontSize: 7,
                     fontWeight:
                         widget.isActive ? FontWeight.w700 : FontWeight.w500,
-                    letterSpacing: 0.5,
+                    letterSpacing: 0.8,
                   ),
                   textAlign: TextAlign.center,
                 ),
@@ -243,53 +237,3 @@ class _SidebarItemState extends State<_SidebarItem> {
   }
 }
 
-class _PremiumSidebarItem extends StatelessWidget {
-  final bool isDark;
-  final bool isHorizontal;
-
-  const _PremiumSidebarItem({required this.isDark, required this.isHorizontal});
-
-  @override
-  Widget build(BuildContext context) {
-    return GestureDetector(
-      onTap: () {
-        showModalBottomSheet(
-          context: context,
-          isScrollControlled: true,
-          backgroundColor: AppTheme.transparent,
-          builder: (context) => const SigmaSubscriptionPanel(),
-        );
-      },
-      child: Container(
-        width: isHorizontal ? null : AppTheme.sidebarWidth,
-        height: isHorizontal ? AppTheme.sidebarWidth : 56,
-        padding: const EdgeInsets.symmetric(vertical: 4),
-        margin: isHorizontal
-            ? const EdgeInsets.symmetric(horizontal: 4)
-            : const EdgeInsets.symmetric(vertical: 4),
-        decoration: BoxDecoration(
-          color: AppTheme.gold.withValues(alpha: 0.1),
-          borderRadius: BorderRadius.circular(8),
-          border: Border.all(
-              color: AppTheme.gold.withValues(alpha: 0.3), width: 0.5),
-        ),
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            const Icon(Icons.bolt, color: AppTheme.gold, size: 18),
-            const SizedBox(height: 2),
-            Text(
-              'PRO',
-              style: GoogleFonts.lora(
-                color: AppTheme.gold,
-                fontSize: 8,
-                fontWeight: FontWeight.w900,
-                letterSpacing: 1.0,
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-}

@@ -90,6 +90,11 @@ class _OmnibarState extends State<Omnibar> with SingleTickerProviderStateMixin {
 
   void _onFocusChange() {
     context.read<TerminalProvider>().setOmnibarFocus(_focusNode.hasFocus);
+    if (_focusNode.hasFocus && _controller.text.trim().isNotEmpty) {
+      context.read<SigmaProvider>().updateSearchResults(_controller.text.trim());
+      _showOverlay();
+      return;
+    }
     if (!_focusNode.hasFocus) {
       Future.delayed(const Duration(milliseconds: 180), () {
         if (mounted) _hideOverlay();
@@ -111,27 +116,14 @@ class _OmnibarState extends State<Omnibar> with SingleTickerProviderStateMixin {
     });
   }
 
-  void _onSubmit(String value) {
+  Future<void> _onSubmit(String value) async {
     final raw = value.trim();
     final query = raw.toUpperCase();
     if (query.isEmpty) return;
 
-    // Autocomplete: if an exact symbol doesn't exist, open the best match.
     final sp = context.read<SigmaProvider>();
-    String selected = query;
-    if (sp.searchResults.isNotEmpty) {
-      final exact = sp.searchResults.firstWhere(
-        (r) => (r['symbol'] ?? '').toString().toUpperCase() == query,
-        orElse: () => <String, dynamic>{},
-      );
-      if ((exact['symbol'] ?? '').toString().isEmpty) {
-        final prefix = sp.searchResults.firstWhere(
-          (r) => (r['symbol'] ?? '').toString().toUpperCase().startsWith(query),
-          orElse: () => sp.searchResults.first,
-        );
-        selected = (prefix['symbol'] ?? query).toString().toUpperCase();
-      }
-    }
+    final selected = await sp.resolveTickerInput(query);
+    if (!mounted || selected.isEmpty) return;
 
     _controller.clear();
     _focusNode.unfocus();
@@ -204,7 +196,7 @@ class _OmnibarState extends State<Omnibar> with SingleTickerProviderStateMixin {
           color: AppTheme.isDark(context)
               ? AppTheme.surfaceDeep
               : AppTheme.lightSurfaceLight,
-          borderRadius: BorderRadius.circular(AppTheme.radiusSm),
+          borderRadius: BorderRadius.circular(2),
           border: Border.all(
             color: _focusNode.hasFocus
                 ? AppTheme.primary.withValues(alpha: 0.5)
@@ -224,6 +216,13 @@ class _OmnibarState extends State<Omnibar> with SingleTickerProviderStateMixin {
                 focusNode: _focusNode,
                 onChanged: _onChanged,
                 onSubmitted: _onSubmit,
+                onTap: () {
+                  final query = _controller.text.trim();
+                  if (query.isNotEmpty) {
+                    context.read<SigmaProvider>().updateSearchResults(query);
+                    _showOverlay();
+                  }
+                },
                 style: AppTheme.compactBody(context,
                     size: 13,
                     color: AppTheme.getPrimaryText(context)),
@@ -297,7 +296,7 @@ class _TickerLogo extends StatelessWidget {
       alignment: Alignment.center,
       decoration: BoxDecoration(
         color: AppTheme.primary.withValues(alpha: 0.12),
-        borderRadius: BorderRadius.circular(8),
+        borderRadius: BorderRadius.circular(2),
       ),
       child: Text(
         symbol.isNotEmpty ? symbol[0] : '?',
@@ -309,7 +308,7 @@ class _TickerLogo extends StatelessWidget {
     if (url.isEmpty) return fallback;
 
     return ClipRRect(
-      borderRadius: BorderRadius.circular(8),
+      borderRadius: BorderRadius.circular(2),
       child: Image.network(
         url,
         width: 26,
@@ -364,7 +363,7 @@ class _ResultsOverlay extends StatelessWidget {
                   decoration: BoxDecoration(
                     color: AppTheme.getSurface(context),
                     borderRadius:
-                        BorderRadius.circular(AppTheme.radiusMd),
+                        BorderRadius.circular(2),
                     border: Border.all(
                         color: AppTheme.getBorder(context), width: 0.5),
                     boxShadow: [
@@ -377,7 +376,7 @@ class _ResultsOverlay extends StatelessWidget {
                   ),
                   child: ClipRRect(
                     borderRadius:
-                        BorderRadius.circular(AppTheme.radiusMd),
+                        BorderRadius.circular(2),
                     child: sp.isSearching
                         ? const _OmniLoadingState()
                         : sp.searchResults.isEmpty
@@ -471,7 +470,7 @@ class _OmniResultRow extends StatelessWidget {
         (result['stockExchange'] ?? result['exchange'] ?? '').toString();
     final type =
       (result['type'] ?? result['quoteType'] ?? 'EQUITY').toString().toUpperCase();
-    final logoUrl = (result['logo'] ?? result['logoUrl']).toString();
+    final logoUrl = (result['logo'] ?? result['logoUrl'])?.toString() ?? '';
     final double price = (result['price'] ?? 0.0).toDouble();
     final double change = (result['change'] ?? 0.0).toDouble();
     final bool isUp = change >= 0;
@@ -491,7 +490,7 @@ class _OmniResultRow extends StatelessWidget {
               alignment: Alignment.center,
               decoration: BoxDecoration(
                 color: AppTheme.primary.withValues(alpha: 0.08),
-                borderRadius: BorderRadius.circular(AppTheme.radiusSm),
+                borderRadius: BorderRadius.circular(2),
               ),
               child: Text(
                 symbol.length <= 5 ? symbol : symbol.substring(0, 5),
@@ -527,7 +526,7 @@ class _OmniResultRow extends StatelessWidget {
                         padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
                         decoration: BoxDecoration(
                           color: AppTheme.primary.withValues(alpha: 0.08),
-                          borderRadius: BorderRadius.circular(6),
+                          borderRadius: BorderRadius.circular(2),
                         ),
                         child: Text(
                           type,

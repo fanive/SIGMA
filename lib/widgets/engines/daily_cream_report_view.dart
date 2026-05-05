@@ -44,7 +44,7 @@ class _DailyCreamReportScreenState extends State<DailyCreamReportScreen> {
         backgroundColor: AppTheme.transparent,
         elevation: 0,
         title: Text(
-          'DAILY CREAM REPORT™',
+          'DAILY MARKET BRIEF™',
           style: GoogleFonts.lora(
               fontSize: 14, fontWeight: FontWeight.w900, letterSpacing: 1),
         ),
@@ -61,7 +61,7 @@ class _DailyCreamReportScreenState extends State<DailyCreamReportScreen> {
                     children: [
                       _buildSynthesis(isDark),
                       const SizedBox(height: 32),
-                      _buildSectionTitle('ALPHA PICKS OF THE DAY'),
+                      _buildSectionTitle('TICKERS TO REVIEW'),
                       const SizedBox(height: 16),
                       ..._report!.alphaPicks
                           .map((s) => _buildSignalRow(s, isDark)),
@@ -96,7 +96,7 @@ class _DailyCreamReportScreenState extends State<DailyCreamReportScreen> {
               const Icon(Icons.insights, color: AppTheme.amberAccent, size: 18),
               const SizedBox(width: 10),
               Text(
-                'MARKET SYNTHESIS',
+                'MARKET SUMMARY',
                 style: GoogleFonts.lora(
                     fontSize: 10,
                     fontWeight: FontWeight.w900,
@@ -194,7 +194,7 @@ class _DailyCreamReportScreenState extends State<DailyCreamReportScreen> {
                         borderRadius: BorderRadius.circular(4),
                       ),
                       child: Text(
-                        'RATED ${signal.score.toInt()}',
+                        'SCORE ${signal.score.toInt()}',
                         style: GoogleFonts.lora(
                             fontSize: 8,
                             fontWeight: FontWeight.w900,

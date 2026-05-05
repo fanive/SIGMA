@@ -268,18 +268,42 @@ class AppTheme {
       const EdgeInsets.all(panelPadding);
 
   static TextStyle overline(BuildContext context, {Color? color}) =>
-      GoogleFonts.lora(
+      GoogleFonts.ibmPlexSans(
         fontSize: 9,
-        fontWeight: FontWeight.w900,
-        color: color ?? gold,
-        letterSpacing: 1.6,
+        fontWeight: FontWeight.w600,
+        color: color ?? getSecondaryText(context),
+        letterSpacing: 1.8,
+      );
+
+  /// IBM Plex Sans label — precision section overline, column header.
+  static TextStyle ibmLabel(BuildContext context,
+          {double size = 9,
+          FontWeight weight = FontWeight.w600,
+          double spacing = 1.8,
+          Color? color}) =>
+      GoogleFonts.ibmPlexSans(
+        fontSize: size,
+        fontWeight: weight,
+        letterSpacing: spacing,
+        color: color ?? getSecondaryText(context),
+      );
+
+  /// IBM Plex Sans sans — UI body, metric values.
+  static TextStyle ibmSans(BuildContext context,
+          {double size = 12,
+          FontWeight weight = FontWeight.w500,
+          Color? color}) =>
+      GoogleFonts.ibmPlexSans(
+        fontSize: size,
+        fontWeight: weight,
+        color: color ?? getPrimaryText(context),
       );
 
   static TextStyle compactTitle(BuildContext context,
           {double size = 18, Color? color}) =>
-      GoogleFonts.lora(
+      GoogleFonts.ibmPlexSans(
         fontSize: size,
-        fontWeight: FontWeight.w800,
+        fontWeight: FontWeight.w700,
         color: color ?? getPrimaryText(context),
         height: 1.12,
       );
@@ -294,30 +318,16 @@ class AppTheme {
       );
 
   // ─── Widget Builders (GS Style) ──────────────────────────────────────────
-  static Widget section(String title, Widget child) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Padding(
-          padding: const EdgeInsets.fromLTRB(0, 32, 0, 16),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(title.toUpperCase(),
-                  style: GoogleFonts.lora(
-                      fontSize: 10,
-                      fontWeight: FontWeight.w900,
-                      color: accent,
-                      letterSpacing: 2)),
-              const SizedBox(height: 8),
-              const Divider(height: 1, thickness: 0.5, color: accent),
-            ],
-          ),
-        ),
-        child,
-      ],
-    );
+  static Widget section(String title, Widget child,
+      {BuildContext? context}) {
+    return _SectionWidget(title: title, child: child);
   }
+
+  /// Thin 0.6 px horizontal rule using the current border colour.
+  static Widget hRule(BuildContext context) => Container(
+        height: 0.6,
+        color: getBorder(context),
+      );
 
   static Widget editorialTile({required Widget child, Color? accentColor}) {
     return Container(
@@ -384,10 +394,10 @@ class AppTheme {
         elevation: 0,
         scrolledUnderElevation: 0,
         centerTitle: false,
-        titleTextStyle: GoogleFonts.lora(
-          fontSize: 11,
-          fontWeight: FontWeight.w800,
-          color: accent,
+        titleTextStyle: GoogleFonts.ibmPlexSans(
+          fontSize: 10,
+          fontWeight: FontWeight.w600,
+          color: textSec,
           letterSpacing: 2.0,
         ),
         iconTheme: IconThemeData(color: primary, size: 20),
@@ -583,15 +593,23 @@ class AppTheme {
           size: size ?? 15,
           color: muted ? getSecondaryText(context) : getPrimaryText(context));
 
-  static TextStyle label(BuildContext context) => sans(context,
-          size: 11, weight: FontWeight.w900, color: getSecondaryText(context))
-      .copyWith(letterSpacing: 1.2);
+  static TextStyle label(BuildContext context) =>
+      GoogleFonts.ibmPlexSans(
+        fontSize: 9,
+        fontWeight: FontWeight.w600,
+        letterSpacing: 1.8,
+        color: getSecondaryText(context),
+      );
 
   static TextStyle numeric(BuildContext context,
           {Color? color,
           double size = 14.0,
           FontWeight weight = FontWeight.w600}) =>
-      sans(context, size: size, weight: weight, color: color);
+      GoogleFonts.ibmPlexSans(
+        fontSize: size,
+        fontWeight: weight,
+        color: color ?? getPrimaryText(context),
+      );
 
   // Additional aliases for terminal components
   static TextStyle terminalLabel(BuildContext context) => label(context);
@@ -613,4 +631,45 @@ extension SigmaThemeExtensions on BuildContext {
   Color get border => AppTheme.getBorder(this);
   Color get primaryText => AppTheme.getPrimaryText(this);
   Color get secondaryText => AppTheme.getSecondaryText(this);
+}
+
+/// Private widget backing [AppTheme.section()] — renders an IBM Plex Sans
+/// section label with a thin 0.6 px rule underneath.
+class _SectionWidget extends StatelessWidget {
+  final String title;
+  final Widget child;
+
+  const _SectionWidget({required this.title, required this.child});
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Padding(
+          padding: const EdgeInsets.fromLTRB(0, 32, 0, 16),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                title.toUpperCase(),
+                style: GoogleFonts.ibmPlexSans(
+                  fontSize: 9,
+                  fontWeight: FontWeight.w600,
+                  color: AppTheme.getSecondaryText(context),
+                  letterSpacing: 1.8,
+                ),
+              ),
+              const SizedBox(height: 8),
+              Container(
+                height: 0.6,
+                color: AppTheme.getBorder(context),
+              ),
+            ],
+          ),
+        ),
+        child,
+      ],
+    );
+  }
 }

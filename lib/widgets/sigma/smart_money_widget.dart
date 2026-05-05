@@ -31,8 +31,8 @@ class _SmartMoneyWidgetState extends State<SmartMoneyWidget> {
     setState(() => _isLoading = true);
     try {
       final results = await Future.wait([
-        _sigma.fmpService.getInstitutionalHolders(widget.ticker),
-        _sigma.fmpService.getInsiderTrading(widget.ticker),
+        _sigma.marketDataService.getInstitutionalHolders(widget.ticker),
+        _sigma.marketDataService.getInsiderTrading(widget.ticker),
       ]);
 
       if (mounted) {
@@ -262,5 +262,7 @@ class _SmartMoneyWidgetState extends State<SmartMoneyWidget> {
     return n.toStringAsFixed(0);
   }
 }
+
+
 
 

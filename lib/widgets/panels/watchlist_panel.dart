@@ -18,7 +18,7 @@ class WatchlistPanel extends StatelessWidget {
     final isDark = AppTheme.isDark(context);
 
     return ResearchPanelContainer(
-      title: 'Convictions',
+      title: 'Watchlist',
       icon: Icons.bookmark_added_rounded,
       child: Consumer<SigmaProvider>(
         builder: (context, sp, _) {
@@ -56,7 +56,10 @@ class WatchlistPanel extends StatelessWidget {
                     ),
                     itemBuilder: (ctx, i) {
                       final ticker = tickers[i].toUpperCase();
-                      final data = quotes[ticker];
+                      final rawData = quotes[ticker];
+                      final data = rawData == null
+                          ? null
+                          : Map<String, dynamic>.from(rawData);
 
                       final price =
                           _dbl(data?['price'] ?? data?['regularMarketPrice']);
@@ -90,11 +93,11 @@ class WatchlistPanel extends StatelessWidget {
   }
 
   Widget _buildHeaderRow(BuildContext context, bool isDark) {
-    final txtStyle = GoogleFonts.lora(
+    final txtStyle = GoogleFonts.ibmPlexSans(
       color: isDark ? AppTheme.white24 : AppTheme.black26,
       fontSize: 8,
-      fontWeight: FontWeight.w900,
-      letterSpacing: 2.0,
+      fontWeight: FontWeight.w600,
+      letterSpacing: 1.8,
     );
 
     return Container(
@@ -183,9 +186,9 @@ class WatchlistPanel extends StatelessWidget {
   Widget _buildEmptyState() {
     return const InstitutionalEmptyState(
       icon: Icons.bookmark_add_outlined,
-      title: 'Aucune conviction suivie',
+        title: 'Aucune valeur suivie',
       message:
-          'Ajoutez des sociétés depuis la recherche pour construire votre univers d’investissement et lancer les analyses prioritaires.',
+          'Ajoutez des societes depuis la recherche pour construire votre liste de suivi et lancer les analyses prioritaires.',
     );
   }
 
@@ -354,3 +357,4 @@ class _WatchlistTileFlat extends StatelessWidget {
     );
   }
 }
+

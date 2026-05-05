@@ -33,7 +33,7 @@ class _ChartPanelState extends State<ChartPanel> {
         icon: Icons.query_stats_rounded,
         title: 'Aucun actif sélectionné',
         message:
-            'Sélectionnez une société depuis la recherche ou vos convictions pour ouvrir le graphique, les volumes et les niveaux clés.',
+      'Selectionnez une societe depuis la recherche ou votre liste de suivi pour ouvrir le graphique, les volumes et les niveaux cles.',
       );
 
   Widget _chart(bool isDark, String ticker) {

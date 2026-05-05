@@ -1,4 +1,4 @@
-﻿// ignore_for_file: prefer_const_declarations, unnecessary_import, unused_import
+// ignore_for_file: prefer_const_declarations, unnecessary_import, unused_import
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
@@ -16,10 +16,10 @@ import '../widgets/institutional/institutional_components.dart';
 import '../widgets/panels/market_overview_panel.dart';
 import '../widgets/panels/watchlist_panel.dart';
 import '../widgets/panels/news_feed_panel.dart';
-import '../widgets/panels/analysis_panel.dart';
 import '../widgets/panels/intelligence_hub_panel.dart';
 import '../widgets/panels/portfolio_panel.dart';
 import '../widgets/panels/chart_panel.dart';
+import '../widgets/panels/institutional_note_lab_panel.dart';
 import 'settings_screen.dart';
 import '../widgets/sigma/sigma_ai_chatbot.dart';
 import 'notifications_screen.dart';
@@ -55,8 +55,6 @@ class _TerminalShellState extends State<TerminalShell> {
         return const WatchlistPanel();
       case TerminalPanel.newsFeed:
         return const NewsFeedPanel();
-      case TerminalPanel.analysis:
-        return const AnalysisPanel();
       case TerminalPanel.settings:
         return const SettingsScreen();
       case TerminalPanel.intelligence:
@@ -65,6 +63,10 @@ class _TerminalShellState extends State<TerminalShell> {
         return const PortfolioPanel();
       case TerminalPanel.charts:
         return const ChartPanel();
+      case TerminalPanel.noteLab:
+        return const InstitutionalNoteLabPanel();
+      default:
+        return const MarketOverviewPanel();
     }
   }
 
@@ -195,20 +197,6 @@ class _TerminalShellState extends State<TerminalShell> {
               end: Alignment.bottomRight,
             ),
             shape: BoxShape.circle,
-            boxShadow: [
-              BoxShadow(
-                color: const Color(0xFF1565C0).withValues(alpha: 0.50),
-                blurRadius: 20,
-                spreadRadius: 0,
-                offset: const Offset(0, 4),
-              ),
-              BoxShadow(
-                color: const Color(0xFF1565C0).withValues(alpha: 0.15),
-                blurRadius: 6,
-                spreadRadius: 2,
-                offset: Offset.zero,
-              ),
-            ],
           ),
           child: Stack(
             alignment: Alignment.center,
@@ -373,21 +361,36 @@ class _InvestmentBriefingRail extends StatelessWidget {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               InstitutionalHeader(
-                eyebrow: 'Context',
-                title: 'Brief',
-                thesis: 'Priorités du workspace actuel.',
+                eyebrow: 'Product promise',
+                title: '3 promesses',
+                thesis: 'Comprendre vite, comparer proprement, decider avec methode.',
                 icon: Icons.insights_rounded,
               ),
               const SizedBox(height: 12),
+              const _PromiseCard(
+                title: 'Comprendre un ticker en 3 minutes',
+                body: 'Une lecture courte pour voir prix, these, valorisation, risques et catalyseurs.',
+              ),
+              const SizedBox(height: 10),
+              const _PromiseCard(
+                title: 'Comparer deux entreprises proprement',
+                body: 'Un cadre simple pour opposer croissance, marges, qualite, valorisation et risque.',
+              ),
+              const SizedBox(height: 10),
+              const _PromiseCard(
+                title: 'Decider avec methode, pas avec hype',
+                body: 'Des reperes explicites, des donnees fraiches et un ton honnete pour garder votre discipline.',
+              ),
+              const SizedBox(height: 14),
               _BriefRow('Workspace', activePanel.getLabel(sp.language ?? 'EN')),
               _BriefRow('Focus', focus),
-              _BriefRow('Convictions', '${sp.favoriteTickers.length}'),
+              _BriefRow('Watchlist', '${sp.favoriteTickers.length}'),
               _BriefRow('Market sync', marketReady ? 'Ready' : 'Loading'),
               const SizedBox(height: 14),
               InstitutionalSectionTitle(
                 label: 'Research agenda',
                 detail:
-                    'Priorités suggérées pour garder une discipline de desk.',
+                    'Priorites suggerees pour garder une discipline de recherche.',
               ),
               _AgendaItem(
                 icon: Icons.public_rounded,
@@ -412,7 +415,7 @@ class _InvestmentBriefingRail extends StatelessWidget {
               ),
               const Spacer(),
               Text(
-                'Chaque vue doit répondre à une question d’investissement.',
+                'Chaque vue doit repondre a une question de recherche.',
                 style: AppTheme.compactBody(context, size: 11),
               ),
             ],
@@ -453,6 +456,41 @@ class _BriefRow extends StatelessWidget {
   }
 }
 
+class _PromiseCard extends StatelessWidget {
+  final String title;
+  final String body;
+
+  const _PromiseCard({required this.title, required this.body});
+
+  @override
+  Widget build(BuildContext context) {
+    final isDark = AppTheme.isDark(context);
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: isDark ? AppTheme.bgSecondary : AppTheme.lightSurface,
+        border: Border.all(color: AppTheme.borderShim(context), width: 0.5),
+        borderRadius: BorderRadius.circular(2),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            title,
+            style: AppTheme.compactTitle(context, size: 12),
+          ),
+          const SizedBox(height: 6),
+          Text(
+            body,
+            style: AppTheme.compactBody(context, size: 11),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
 class _AgendaItem extends StatelessWidget {
   final IconData icon;
   final String title;
@@ -479,10 +517,11 @@ class _AgendaItem extends StatelessWidget {
               children: [
                 Text(
                   title,
-                  style: GoogleFonts.lora(
+                  style: GoogleFonts.ibmPlexSans(
                     fontSize: 12,
-                    fontWeight: FontWeight.w800,
+                    fontWeight: FontWeight.w600,
                     color: AppTheme.getPrimaryText(context),
+                    letterSpacing: 0.2,
                   ),
                 ),
                 const SizedBox(height: 2),
@@ -522,7 +561,7 @@ class _SigmaBottomNav extends StatelessWidget {
     _NavItem(TerminalPanel.marketOverview, Icons.account_balance, 'Macro'),
     _NavItem(TerminalPanel.watchlist, Icons.bookmark_added, 'Ideas'),
     _NavItem(TerminalPanel.newsFeed, Icons.article, 'Brief'),
-    _NavItem(TerminalPanel.analysis, Icons.manage_search, 'Research'),
+    _NavItem(TerminalPanel.noteLab, Icons.menu_book_rounded, 'Note'),
     _NavItem(TerminalPanel.settings, Icons.person_outline, 'Profile'),
   ];
 
@@ -575,12 +614,11 @@ class _SigmaBottomNav extends StatelessWidget {
                       const SizedBox(height: 4),
                       Text(
                         item.label.toUpperCase(),
-                        style: GoogleFonts.lora(
-                          fontSize: 10,
-                          fontWeight:
-                              isActive ? FontWeight.w900 : FontWeight.w600,
+                        style: GoogleFonts.ibmPlexSans(
+                          fontSize: 9,
+                          fontWeight: FontWeight.w600,
                           color: isActive ? activeColor : inactiveColor,
-                          letterSpacing: 0.8,
+                          letterSpacing: 1.3,
                         ),
                       ),
                     ],

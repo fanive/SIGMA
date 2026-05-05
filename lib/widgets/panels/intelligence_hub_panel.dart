@@ -23,7 +23,7 @@ class _IntelligencePanelState extends State<IntelligencePanel> {
       const SigmaEngineMetadata(
         title: 'Daily Cream Report',
         description:
-            'Daily market newsletter with top movers & alpha synthesis.',
+          'Daily market briefing with top movers and research synthesis.',
         icon: Icons.local_cafe,
         color: AppTheme.amberAccent,
         trademark: '™',
@@ -35,35 +35,35 @@ class _IntelligencePanelState extends State<IntelligencePanel> {
         color: AppTheme.blueAccent,
       ),
     ],
-    'SIGNAL INTELLIGENCE': [
+    'RESEARCH MONITORING': [
       const SigmaEngineMetadata(
         title: 'Earnings Beat Signal',
-        description: 'Beat Odds™, Guidance Raise Odds™ & Options convictions.',
+        description: 'Earnings scenario monitor, guidance context and options positioning.',
         icon: Icons.bolt,
         color: AppTheme.yellowAccent,
         trademark: '™',
       ),
       const SigmaEngineMetadata(
         title: 'Earnings Intelligence',
-        description: 'Transform complex earnings calls into actionable intel.',
+        description: 'Transform complex earnings calls into structured research notes.',
         icon: Icons.mic,
         color: AppTheme.purpleAccent,
       ),
       const SigmaEngineMetadata(
         title: 'Unusual Options Signal',
-        description: 'Institutional conviction on FCF-positive stocks.',
+        description: 'Highlights unusual options activity around cash-generative companies.',
         icon: Icons.monitor_heart,
         color: AppTheme.redAccent,
       ),
       const SigmaEngineMetadata(
         title: 'Deep Value Signal',
-        description: 'Profitability, valuation & fortress cash flow screening.',
+        description: 'Profitability, valuation and balance-sheet screening.',
         icon: Icons.diamond,
         color: AppTheme.emerald,
       ),
       const SigmaEngineMetadata(
         title: 'Trend Reversal Signal',
-        description: 'Institutional-grade trend change & breakout detection.',
+        description: 'Trend change and breakout monitoring for research follow-up.',
         icon: Icons.trending_up,
         color: AppTheme.academyTrackPattern,
       ),
@@ -71,7 +71,7 @@ class _IntelligencePanelState extends State<IntelligencePanel> {
     'FUNDAMENTAL ENGINES': [
       const SigmaEngineMetadata(
         title: 'FCF Growth Engine',
-        description: 'Single source of truth — spot compounders early.',
+        description: 'Cash-flow growth monitor for recurring quality patterns.',
         icon: Icons.water_drop,
         color: AppTheme.cyan,
       ),
@@ -83,25 +83,25 @@ class _IntelligencePanelState extends State<IntelligencePanel> {
       ),
       const SigmaEngineMetadata(
         title: 'Margin Acceleration',
-        description: 'Find institutions\' most watched margin signals.',
+        description: 'Track margin expansion patterns watched by the market.',
         icon: Icons.north_east,
         color: AppTheme.orangeAccent,
       ),
       const SigmaEngineMetadata(
         title: 'First Positive Quarter',
-        description: 'The biggest signal for early stock breakouts.',
+        description: 'Monitor inflection points after a first positive quarter.',
         icon: Icons.star,
         color: AppTheme.white,
       ),
       const SigmaEngineMetadata(
         title: 'Consistency Engine',
-        description: 'Revenue & EPS beat patterns that predict winners.',
+        description: 'Revenue and EPS consistency patterns for follow-up research.',
         icon: Icons.check_circle,
         color: AppTheme.greenAccent,
       ),
       const SigmaEngineMetadata(
         title: 'Balance Sheet Engine',
-        description: 'Top 100 companies ranked by fortress cash positions.',
+        description: 'Companies ranked by cash strength and balance-sheet resilience.',
         icon: Icons.account_balance,
         color: AppTheme.orange,
       ),
@@ -109,27 +109,27 @@ class _IntelligencePanelState extends State<IntelligencePanel> {
     'GROWTH & STRATEGY': [
       const SigmaEngineMetadata(
         title: 'AskiDojo Growth/Value',
-        description: 'High-conviction growth stocks, ETFs & dividend plays.',
+        description: 'Growth, value, ETF and dividend universes for comparative research.',
         icon: Icons.eco,
         color: AppTheme.green,
         isVerified: true,
       ),
       const SigmaEngineMetadata(
         title: 'Momentum Growth',
-        description: 'Find breakout companies leading the markets first.',
+        description: 'Momentum leaders to review as part of market leadership analysis.',
         icon: Icons.rocket_launch,
         color: AppTheme.pinkAccent,
       ),
       const SigmaEngineMetadata(
         title: 'Sector Intelligence',
-        description: 'Find best stocks in every sector. AskiDojo Rated.',
+        description: 'Sector-by-sector ranking for comparative company review.',
         icon: Icons.layers,
         color: AppTheme.indigo,
         isVerified: true,
       ),
       const SigmaEngineMetadata(
         title: 'Research Report Engine',
-        description: 'Personal institutional-grade depth research machine.',
+        description: 'Long-form research drafting tool for deep-dive review.',
         icon: Icons.find_in_page,
         color: AppTheme.teal,
       ),
@@ -145,7 +145,6 @@ class _IntelligencePanelState extends State<IntelligencePanel> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          _buildHeader(context),
           Expanded(
             child: ListView.builder(
               padding: const EdgeInsets.symmetric(horizontal: 16),
@@ -172,11 +171,11 @@ class _IntelligencePanelState extends State<IntelligencePanel> {
           padding: const EdgeInsets.fromLTRB(4, 24, 0, 12),
           child: Text(
             title,
-            style: GoogleFonts.lora(
-              fontSize: 10,
-              fontWeight: FontWeight.w900,
+            style: GoogleFonts.ibmPlexSans(
+              fontSize: 9,
+              fontWeight: FontWeight.w600,
               color: isDark ? AppTheme.white38 : AppTheme.black38,
-              letterSpacing: 2,
+              letterSpacing: 1.8,
             ),
           ),
         ),
@@ -203,10 +202,10 @@ class _IntelligencePanelState extends State<IntelligencePanel> {
     return Padding(
       padding: const EdgeInsets.fromLTRB(20, 20, 20, 8),
       child: InstitutionalHeader(
-        eyebrow: 'Signal library',
+        eyebrow: 'Research library',
         title: 'Research Engines',
         thesis:
-            'Des modules spécialisés pour transformer le bruit de marché en signaux actionnables : earnings, cash-flow, momentum, qualité et valorisation.',
+          'Des modules specialises pour comprendre un ticker vite, comparer des societes proprement et decider avec methode.',
         icon: Icons.auto_graph_rounded,
         actions: [_buildPulseIndicator()],
       ),
@@ -226,10 +225,10 @@ class _IntelligencePanelState extends State<IntelligencePanel> {
         ),
         const SizedBox(width: 8),
         Text(
-          'LIVE CORE ONLINE',
-          style: GoogleFonts.lora(
+          'RESEARCH CORE ONLINE',
+          style: GoogleFonts.ibmPlexSans(
             fontSize: 9,
-            fontWeight: FontWeight.w700,
+            fontWeight: FontWeight.w600,
             color: AppTheme.greenAccent,
           ),
         ),
@@ -269,11 +268,11 @@ class _IntelligencePanelState extends State<IntelligencePanel> {
                           Flexible(
                             child: Text(
                               '${engine.title.toUpperCase()}${engine.trademark}',
-                              style: GoogleFonts.lora(
-                                fontSize: 13,
-                                fontWeight: FontWeight.w900,
+                              style: GoogleFonts.ibmPlexSans(
+                                fontSize: 12,
+                                fontWeight: FontWeight.w700,
                                 color: isDark ? AppTheme.white : AppTheme.black,
-                                letterSpacing: 0.2,
+                                letterSpacing: 0.3,
                               ),
                               overflow: TextOverflow.ellipsis,
                             ),

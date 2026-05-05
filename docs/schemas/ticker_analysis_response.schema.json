@@ -1,0 +1,296 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://sigma.local/schemas/ticker-analysis-response.schema.json",
+  "title": "TickerAnalysisResponse",
+  "type": "object",
+  "required": [
+    "meta",
+    "ticker",
+    "company",
+    "summary",
+    "fundamentals",
+    "valuation",
+    "performance",
+    "businessQuality",
+    "risks",
+    "catalysts",
+    "events",
+    "explainableScore",
+    "scenarios",
+    "educationalSummary",
+    "disclaimer"
+  ],
+  "properties": {
+    "meta": {
+      "type": "object",
+      "required": ["asOf", "dataFreshness", "confidence", "sources", "limitations"],
+      "properties": {
+        "asOf": { "type": "string", "format": "date-time" },
+        "dataFreshness": { "type": "string", "enum": ["fresh", "delayed", "stale", "mixed"] },
+        "confidence": { "type": "string", "enum": ["high", "medium", "low"] },
+        "sources": {
+          "type": "array",
+          "items": { "type": "string" },
+          "minItems": 1
+        },
+        "limitations": {
+          "type": "array",
+          "items": { "type": "string" }
+        }
+      }
+    },
+    "ticker": {
+      "type": "object",
+      "required": ["symbol", "exchange", "currency", "sector", "industry"],
+      "properties": {
+        "symbol": { "type": "string" },
+        "exchange": { "type": "string" },
+        "currency": { "type": "string" },
+        "sector": { "type": "string" },
+        "industry": { "type": "string" }
+      }
+    },
+    "company": {
+      "type": "object",
+      "required": ["name"],
+      "properties": {
+        "name": { "type": "string" },
+        "description": { "type": "string" },
+        "country": { "type": "string" },
+        "employees": { "type": ["integer", "null"] },
+        "website": { "type": ["string", "null"] }
+      }
+    },
+    "summary": {
+      "type": "object",
+      "required": ["thesis", "stance", "reasoning"],
+      "properties": {
+        "thesis": { "type": "string" },
+        "stance": { "type": "string", "enum": ["constructive", "neutral", "cautious", "mixed"] },
+        "reasoning": { "type": "array", "items": { "type": "string" }, "minItems": 2 }
+      }
+    },
+    "fundamentals": {
+      "type": "object",
+      "required": ["revenue", "growth", "margins", "eps", "freeCashFlow", "debt", "returns", "liquidity"],
+      "properties": {
+        "revenue": { "type": "number" },
+        "growth": {
+          "type": "object",
+          "required": ["revenueYoY", "epsYoY"],
+          "properties": {
+            "revenueYoY": { "type": ["number", "null"] },
+            "epsYoY": { "type": ["number", "null"] }
+          }
+        },
+        "margins": {
+          "type": "object",
+          "required": ["gross", "operating", "net"],
+          "properties": {
+            "gross": { "type": ["number", "null"] },
+            "operating": { "type": ["number", "null"] },
+            "net": { "type": ["number", "null"] }
+          }
+        },
+        "eps": { "type": ["number", "null"] },
+        "freeCashFlow": { "type": ["number", "null"] },
+        "debt": {
+          "type": "object",
+          "required": ["totalDebt", "netDebt", "debtToEquity"],
+          "properties": {
+            "totalDebt": { "type": ["number", "null"] },
+            "netDebt": { "type": ["number", "null"] },
+            "debtToEquity": { "type": ["number", "null"] }
+          }
+        },
+        "returns": {
+          "type": "object",
+          "required": ["roe", "roic"],
+          "properties": {
+            "roe": { "type": ["number", "null"] },
+            "roic": { "type": ["number", "null"] }
+          }
+        },
+        "liquidity": {
+          "type": "object",
+          "required": ["currentRatio", "quickRatio"],
+          "properties": {
+            "currentRatio": { "type": ["number", "null"] },
+            "quickRatio": { "type": ["number", "null"] }
+          }
+        }
+      }
+    },
+    "valuation": {
+      "type": "object",
+      "required": ["pe", "forwardPe", "evEbitda", "priceToSales", "fcfYield"],
+      "properties": {
+        "pe": { "type": ["number", "null"] },
+        "forwardPe": { "type": ["number", "null"] },
+        "evEbitda": { "type": ["number", "null"] },
+        "priceToSales": { "type": ["number", "null"] },
+        "fcfYield": { "type": ["number", "null"] },
+        "sectorPercentile": {
+          "type": "object",
+          "properties": {
+            "pe": { "type": ["number", "null"] },
+            "evEbitda": { "type": ["number", "null"] },
+            "priceToSales": { "type": ["number", "null"] }
+          }
+        }
+      }
+    },
+    "performance": {
+      "type": "object",
+      "required": ["return1M", "return6M", "return1Y", "return3Y", "return5Y"],
+      "properties": {
+        "return1M": { "type": ["number", "null"] },
+        "return6M": { "type": ["number", "null"] },
+        "return1Y": { "type": ["number", "null"] },
+        "return3Y": { "type": ["number", "null"] },
+        "return5Y": { "type": ["number", "null"] }
+      }
+    },
+    "businessQuality": {
+      "type": "object",
+      "required": ["profitability", "stability", "capitalAllocation", "notes"],
+      "properties": {
+        "profitability": { "type": "string", "enum": ["strong", "average", "weak"] },
+        "stability": { "type": "string", "enum": ["high", "medium", "low"] },
+        "capitalAllocation": { "type": "string", "enum": ["disciplined", "mixed", "aggressive"] },
+        "notes": { "type": "array", "items": { "type": "string" } }
+      }
+    },
+    "risks": {
+      "type": "object",
+      "required": ["debt", "concentration", "cyclicality", "dilution", "slowdown", "macroDependency"],
+      "properties": {
+        "debt": { "type": "string", "enum": ["low", "medium", "high"] },
+        "concentration": { "type": "string", "enum": ["low", "medium", "high"] },
+        "cyclicality": { "type": "string", "enum": ["low", "medium", "high"] },
+        "dilution": { "type": "string", "enum": ["low", "medium", "high"] },
+        "slowdown": { "type": "string", "enum": ["low", "medium", "high"] },
+        "macroDependency": { "type": "string", "enum": ["low", "medium", "high"] },
+        "details": { "type": "array", "items": { "type": "string" } }
+      }
+    },
+    "catalysts": {
+      "type": "object",
+      "required": ["news", "watchItems"],
+      "properties": {
+        "news": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["title", "source", "publishedAt"],
+            "properties": {
+              "title": { "type": "string" },
+              "source": { "type": "string" },
+              "url": { "type": ["string", "null"] },
+              "publishedAt": { "type": "string" }
+            }
+          }
+        },
+        "watchItems": { "type": "array", "items": { "type": "string" } }
+      }
+    },
+    "events": {
+      "type": "object",
+      "required": ["earningsCalendar"],
+      "properties": {
+        "earningsCalendar": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["date"],
+            "properties": {
+              "date": { "type": "string" },
+              "hour": { "type": ["string", "null"] },
+              "epsEstimate": { "type": ["number", "null"] },
+              "revenueEstimate": { "type": ["number", "null"] }
+            }
+          }
+        }
+      }
+    },
+    "explainableScore": {
+      "type": "object",
+      "required": ["overall", "subscores", "explanations"],
+      "properties": {
+        "overall": { "type": "number", "minimum": 0, "maximum": 100 },
+        "subscores": {
+          "type": "object",
+          "required": ["growth", "margins", "profitability", "valuation", "momentum", "risk", "businessQuality"],
+          "properties": {
+            "growth": { "type": "number", "minimum": 0, "maximum": 100 },
+            "margins": { "type": "number", "minimum": 0, "maximum": 100 },
+            "profitability": { "type": "number", "minimum": 0, "maximum": 100 },
+            "valuation": { "type": "number", "minimum": 0, "maximum": 100 },
+            "momentum": { "type": "number", "minimum": 0, "maximum": 100 },
+            "risk": { "type": "number", "minimum": 0, "maximum": 100 },
+            "businessQuality": { "type": "number", "minimum": 0, "maximum": 100 }
+          }
+        },
+        "explanations": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["factor", "value", "impact", "explanation"],
+            "properties": {
+              "factor": { "type": "string" },
+              "value": { "type": ["string", "number", "null"] },
+              "impact": { "type": "string", "enum": ["positive", "neutral", "negative"] },
+              "explanation": { "type": "string" }
+            }
+          }
+        }
+      }
+    },
+    "scenarios": {
+      "type": "object",
+      "required": ["bull", "base", "bear"],
+      "properties": {
+        "bull": {
+          "type": "object",
+          "required": ["narrative", "conditions", "risks"],
+          "properties": {
+            "narrative": { "type": "string" },
+            "conditions": { "type": "array", "items": { "type": "string" } },
+            "risks": { "type": "array", "items": { "type": "string" } }
+          }
+        },
+        "base": {
+          "type": "object",
+          "required": ["narrative", "conditions", "risks"],
+          "properties": {
+            "narrative": { "type": "string" },
+            "conditions": { "type": "array", "items": { "type": "string" } },
+            "risks": { "type": "array", "items": { "type": "string" } }
+          }
+        },
+        "bear": {
+          "type": "object",
+          "required": ["narrative", "conditions", "risks"],
+          "properties": {
+            "narrative": { "type": "string" },
+            "conditions": { "type": "array", "items": { "type": "string" } },
+            "risks": { "type": "array", "items": { "type": "string" } }
+          }
+        }
+      }
+    },
+    "educationalSummary": {
+      "type": "object",
+      "required": ["whyConsider", "whyAvoid", "whatToWatch"],
+      "properties": {
+        "whyConsider": { "type": "array", "items": { "type": "string" }, "minItems": 2 },
+        "whyAvoid": { "type": "array", "items": { "type": "string" }, "minItems": 2 },
+        "whatToWatch": { "type": "array", "items": { "type": "string" }, "minItems": 2 }
+      }
+    },
+    "disclaimer": {
+      "type": "string",
+      "const": "outil d'aide a la recherche, pas un conseil financier"
+    }
+  }
+}

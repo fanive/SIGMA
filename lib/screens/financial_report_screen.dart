@@ -1,4 +1,4 @@
-﻿// ignore_for_file: no_leading_underscores_for_local_identifiers
+// ignore_for_file: no_leading_underscores_for_local_identifiers
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'dart:convert';
@@ -15,7 +15,7 @@ import '../services/financial_report_service.dart';
 import '../widgets/sigma/sigma_favorite_button.dart';
 import 'package:quantum_invest/theme/app_theme.dart';
 import 'package:cached_network_image/cached_network_image.dart';
-import 'analysis_screen.dart';
+import '../widgets/panels/institutional_note_lab_panel.dart';
 
 // ---------------------------------------------------------------------------
 // SIGMA Financial Report Screen
@@ -47,7 +47,7 @@ class _FinancialReportScreenState extends State<FinancialReportScreen>
     (icon: Icons.trending_up, label: 'Computing valuation...'),
     (icon: Icons.verified_user, label: 'Assessing risk factors...'),
     (icon: Icons.find_in_page, label: 'Cross-referencing sources...'),
-    (icon: Icons.auto_awesome, label: 'Drafting recommendation...'),
+    (icon: Icons.auto_awesome, label: 'Drafting research note...'),
   ];
 
   @override
@@ -90,7 +90,7 @@ class _FinancialReportScreenState extends State<FinancialReportScreen>
       // Final Real-time Sync before AI analysis to ensure report accuracy
       AnalysisData analysisToUse = widget.analysis;
       try {
-        final q = await context.read<SigmaProvider>().sigmaService.fmpService.getQuoteMap(widget.analysis.ticker);
+        final q = await context.read<SigmaProvider>().sigmaService.marketDataService.getQuoteMap(widget.analysis.ticker);
         if (q.isNotEmpty && q['price'] != null) {
           analysisToUse = widget.analysis.copyWith(price: '\$${(q['price'] as num).toStringAsFixed(2)}');
         }
@@ -168,24 +168,15 @@ class _FinancialReportScreenState extends State<FinancialReportScreen>
         backgroundColor: bg,
         surfaceTintColor: AppTheme.transparent,
         elevation: 0,
-        leadingWidth: 80,
-        leading: GestureDetector(
-          onTap: () => Navigator.pop(context),
-          behavior: HitTestBehavior.opaque,
-          child: Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              const SizedBox(width: 8),
-              Icon(
-                Theme.of(context).platform == TargetPlatform.iOS
-                    ? Icons.arrow_back_ios_new
-                    : Icons.arrow_back,
-                size: 18,
-                color: appBarIconColor,
-              ),
-              const SizedBox(width: 4),
-              Text('Retour', style: GoogleFonts.lora(fontSize: 13, color: appBarIconColor, fontWeight: FontWeight.w500)),
-            ],
+        leadingWidth: 48,
+        leading: IconButton(
+          onPressed: () => Navigator.pop(context),
+          icon: Icon(
+            Theme.of(context).platform == TargetPlatform.iOS
+                ? Icons.arrow_back_ios_new
+                : Icons.arrow_back,
+            size: 18,
+            color: appBarIconColor,
           ),
         ),
         title: Column(
@@ -564,7 +555,7 @@ class _FinancialReportScreenState extends State<FinancialReportScreen>
                 builder: (context) {
                   final ticker = report.ticker.toUpperCase();
 
-                  final fmpUrl = 'https://financialmodelingprep.com/image-stock/$ticker.png';
+                  final logoUrl = 'https://financialmodelingprep.com/image-stock/$ticker.png';
 
                   return Container(
                     width: 52, height: 52,
@@ -577,7 +568,7 @@ class _FinancialReportScreenState extends State<FinancialReportScreen>
                     ),
                     padding: const EdgeInsets.all(10),
                     child: Image.network(
-                      fmpUrl, 
+                      logoUrl, 
                       fit: BoxFit.contain,
                       errorBuilder: (_, __, ___) => Center(
                         child: Text(
@@ -874,6 +865,42 @@ class _ReportBody extends StatelessWidget {
               ],
             ),
 
+          // ── TECHNICAL INDICATORS ──────────────────────────────────────
+          if ((j['technical_indicators'] as List?)?.isNotEmpty == true) ...[
+            _divider(dividerColor),
+            _buildTechnicalIndicators(context, j['technical_indicators'] as List, isDark, dividerColor),
+          ],
+
+          // ── INSIDER ACTIVITY ──────────────────────────────────────────
+          if (j['insider_activity'] is Map && (j['insider_activity'] as Map).isNotEmpty) ...[
+            _divider(dividerColor),
+            _buildInsiderActivity(context, j['insider_activity'] as Map<String, dynamic>, isDark),
+          ],
+
+          // ── TRADE SETUP ───────────────────────────────────────────────
+          if (j['trade_setup'] is Map && (j['trade_setup'] as Map).isNotEmpty) ...[
+            _divider(dividerColor),
+            _buildTradeSetup(context, j['trade_setup'] as Map<String, dynamic>, isDark),
+          ],
+
+          // ── EARNINGS FORWARD ──────────────────────────────────────────
+          if (j['earnings_forward'] is Map && (j['earnings_forward'] as Map).isNotEmpty) ...[
+            _divider(dividerColor),
+            _buildEarningsForward(context, j['earnings_forward'] as Map<String, dynamic>, isDark, dim),
+          ],
+
+          // ── OWNERSHIP BREAKDOWN ───────────────────────────────────────
+          if (j['ownership_breakdown'] is Map && (j['ownership_breakdown'] as Map).isNotEmpty) ...[
+            _divider(dividerColor),
+            _buildOwnershipBreakdown(context, j['ownership_breakdown'] as Map<String, dynamic>, isDark, dim, dividerColor),
+          ],
+
+          // ── ESG RATING ────────────────────────────────────────────────
+          if (j['esg_rating'] is Map && (j['esg_rating'] as Map).isNotEmpty) ...[
+            _divider(dividerColor),
+            _buildEsgRating(context, j['esg_rating'] as Map<String, dynamic>, isDark, dim),
+          ],
+
           // ── SECTOR COMPETITORS ─────────────────────────────────────────
           if ((j['sector_peers'] as List?)?.isNotEmpty == true) ...[            _divider(dividerColor),
             _label('SECTOR COMPETITORS', dim),
@@ -890,8 +917,8 @@ class _ReportBody extends StatelessWidget {
               borderRadius: BorderRadius.circular(4),
             ),
             child: Text(
-              'This report is generated by SIGMA AI based on institutional data and real-time signals. '
-              'It does not constitute financial advice. All investments carry risk.',
+              'This report is generated by SIGMA AI from third-party data and analytical models. '
+              'It is provided for research support only and does not constitute financial advice, a personal recommendation, or an offer to buy or sell any security. All investing involves risk.',
               style: GoogleFonts.lora(fontSize: 9, color: dim, height: 1.5),
             ),
           ),
@@ -1265,11 +1292,351 @@ class _ReportBody extends StatelessWidget {
     );
   }
 
+  // ── TECHNICAL INDICATORS ──────────────────────────────────────────────
+  Widget _buildTechnicalIndicators(
+      BuildContext context, List items, bool isDark, Color dividerColor) {
+    final dim = isDark ? AppTheme.white38 : AppTheme.lightTextMuted;
+    final txt = isDark ? AppTheme.white.withValues(alpha: 0.87) : AppTheme.lightTextPrimary;
+
+    Color signalColor(String signal) {
+      final s = signal.toUpperCase();
+      if (s.contains('BUY') || s.contains('BULLISH') || s.contains('STRONG')) return AppTheme.positive;
+      if (s.contains('SELL') || s.contains('BEARISH')) return AppTheme.negative;
+      if (s.contains('OVERBOUGHT')) return AppTheme.warning;
+      if (s.contains('OVERSOLD')) return AppTheme.successStrong;
+      return AppTheme.warning;
+    }
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        _label('TECHNICAL INDICATORS', dim),
+        const SizedBox(height: 10),
+        ...items.take(8).map((item) {
+          final m = item is Map<String, dynamic> ? item : <String, dynamic>{};
+          final name = (m['name'] ?? m['indicator'] ?? '').toString();
+          final value = (m['value'] ?? '').toString();
+          final signal = (m['signal'] ?? m['interpretation'] ?? 'NEUTRAL').toString();
+          final sc = signalColor(signal);
+          return Container(
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 9),
+            decoration: BoxDecoration(
+              border: Border(bottom: BorderSide(color: dividerColor, width: 0.5)),
+            ),
+            child: Row(children: [
+              Expanded(
+                flex: 3,
+                child: Text(name,
+                    style: GoogleFonts.lora(
+                        fontSize: 11, fontWeight: FontWeight.w600, color: dim, letterSpacing: 0.3)),
+              ),
+              Expanded(
+                flex: 2,
+                child: Text(value,
+                    style: GoogleFonts.lora(
+                        fontSize: 12, fontWeight: FontWeight.w700, color: txt)),
+              ),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
+                decoration: BoxDecoration(
+                  color: sc.withValues(alpha: 0.12),
+                  borderRadius: BorderRadius.circular(3),
+                  border: Border.all(color: sc.withValues(alpha: 0.3)),
+                ),
+                child: Text(signal.length > 14 ? signal.substring(0, 14) : signal,
+                    style: GoogleFonts.lora(
+                        fontSize: 8, fontWeight: FontWeight.w800, color: sc, letterSpacing: 0.5)),
+              ),
+            ]),
+          );
+        }),
+      ],
+    );
+  }
+
+  // ── INSIDER ACTIVITY ──────────────────────────────────────────────────
+  Widget _buildInsiderActivity(
+      BuildContext context, Map<String, dynamic> data, bool isDark) {
+    final dim = isDark ? AppTheme.white38 : AppTheme.lightTextMuted;
+    final txt = isDark ? AppTheme.white.withValues(alpha: 0.87) : AppTheme.lightTextPrimary;
+    final buyRatio = (data['buy_ratio'] as num? ?? 0.5).toDouble();
+    final direction = (data['net_direction'] ?? 'NEUTRAL').toString();
+    final summary = (data['summary'] ?? '').toString();
+    final isAccum = direction.contains('ACCUM');
+    final dirColor = isAccum ? AppTheme.positive : (direction.contains('DIST') ? AppTheme.negative : AppTheme.warning);
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        _label('INSIDER ACTIVITY', dim),
+        const SizedBox(height: 10),
+        Row(children: [
+          // Buy ratio gauge
+          Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Text('BUY/SELL MIX', style: GoogleFonts.lora(fontSize: 9, color: dim, letterSpacing: 1)),
+            const SizedBox(height: 4),
+            SizedBox(
+              width: 120,
+              child: ClipRRect(
+                borderRadius: BorderRadius.circular(3),
+                child: LinearProgressIndicator(
+                  value: buyRatio.clamp(0.0, 1.0),
+                  backgroundColor: AppTheme.negative.withValues(alpha: 0.2),
+                  valueColor: AlwaysStoppedAnimation<Color>(AppTheme.positive),
+                  minHeight: 8,
+                ),
+              ),
+            ),
+            const SizedBox(height: 4),
+            Text('${(buyRatio * 100).toStringAsFixed(0)}% buy-side filings',
+                style: GoogleFonts.lora(fontSize: 10, fontWeight: FontWeight.w700,
+                    color: AppTheme.positive)),
+          ]),
+          const SizedBox(width: 24),
+          // Direction badge
+          Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Text('READING', style: GoogleFonts.lora(fontSize: 9, color: dim, letterSpacing: 1)),
+            const SizedBox(height: 4),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+              decoration: BoxDecoration(
+                color: dirColor.withValues(alpha: 0.12),
+                borderRadius: BorderRadius.circular(4),
+                border: Border.all(color: dirColor.withValues(alpha: 0.35)),
+              ),
+              child: Text(direction,
+                  style: GoogleFonts.lora(
+                      fontSize: 10, fontWeight: FontWeight.w800, color: dirColor, letterSpacing: 0.5)),
+            ),
+          ]),
+        ]),
+        if (summary.isNotEmpty) ...[
+          const SizedBox(height: 10),
+          Text(summary, style: GoogleFonts.lora(fontSize: 12, height: 1.5, color: txt)),
+        ],
+      ],
+    );
+  }
+
+  // ── TRADE SETUP ───────────────────────────────────────────────────────
+  Widget _buildTradeSetup(
+      BuildContext context, Map<String, dynamic> data, bool isDark) {
+    final dim = isDark ? AppTheme.white38 : AppTheme.lightTextMuted;
+    final txt = isDark ? AppTheme.white.withValues(alpha: 0.87) : AppTheme.lightTextPrimary;
+    final subtle = isDark ? AppTheme.surfaceCharcoal : AppTheme.black.withValues(alpha: 0.04);
+
+    final entry = (data['entry'] ?? 'N/A').toString();
+    final target = (data['target'] ?? 'N/A').toString();
+    final stop = (data['stop'] ?? 'N/A').toString();
+    final rr = (data['rr_ratio'] ?? 'N/A').toString();
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        _label('TRADE SETUP', dim),
+        const SizedBox(height: 10),
+        Container(
+          decoration: BoxDecoration(
+            color: subtle,
+            borderRadius: BorderRadius.circular(6),
+            border: Border.all(color: AppTheme.primary.withValues(alpha: 0.12)),
+          ),
+          child: Row(children: [
+            _tradeCell('ENTRY', entry, AppTheme.warning, txt, dim),
+            _vertDivider(),
+            _tradeCell('TARGET', target, AppTheme.positive, txt, dim),
+            _vertDivider(),
+            _tradeCell('STOP', stop, AppTheme.negative, txt, dim),
+            _vertDivider(),
+            _tradeCell('R:R', rr, AppTheme.primary, txt, dim),
+          ]),
+        ),
+      ],
+    );
+  }
+
+  Widget _tradeCell(String label, String value, Color accent, Color txt, Color dim) =>
+      Expanded(
+        child: Padding(
+          padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 10),
+          child: Column(crossAxisAlignment: CrossAxisAlignment.center, children: [
+            Text(label,
+                style: GoogleFonts.lora(
+                    fontSize: 8, fontWeight: FontWeight.w800, color: accent, letterSpacing: 1)),
+            const SizedBox(height: 4),
+            Text(value,
+                style: GoogleFonts.lora(fontSize: 11, fontWeight: FontWeight.w800, color: txt),
+                overflow: TextOverflow.ellipsis, textAlign: TextAlign.center),
+          ]),
+        ),
+      );
+
+  Widget _vertDivider() => Container(
+        width: 0.5, height: 44,
+        color: AppTheme.primary.withValues(alpha: 0.15));
+
+  // ── EARNINGS FORWARD ──────────────────────────────────────────────────
+  Widget _buildEarningsForward(BuildContext context, Map<String, dynamic> data,
+      bool isDark, Color dim) {
+    final txt = isDark ? AppTheme.white.withValues(alpha: 0.87) : AppTheme.lightTextPrimary;
+    final subtle = isDark ? AppTheme.surfaceCharcoal : AppTheme.black.withValues(alpha: 0.04);
+
+    final epsEst = (data['next_eps_estimate'] ?? 'N/A').toString();
+    final revEst = (data['next_revenue_estimate'] ?? 'N/A').toString();
+    final nextDate = (data['next_date'] ?? '').toString();
+    final analystCount = (data['analyst_count'] ?? 0).toString();
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        _label('EARNINGS FORWARD ESTIMATES', dim),
+        const SizedBox(height: 10),
+        Container(
+          padding: const EdgeInsets.all(14),
+          decoration: BoxDecoration(
+            color: subtle,
+            borderRadius: BorderRadius.circular(6),
+            border: Border.all(color: AppTheme.primary.withValues(alpha: 0.1)),
+          ),
+          child: Row(children: [
+            Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              Text('NEXT EPS ESTIMATE', style: GoogleFonts.lora(fontSize: 8, color: dim, letterSpacing: 1)),
+              const SizedBox(height: 4),
+              Text(epsEst, style: GoogleFonts.lora(fontSize: 18, fontWeight: FontWeight.w900, color: AppTheme.positive)),
+            ])),
+            Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              Text('REVENUE ESTIMATE', style: GoogleFonts.lora(fontSize: 8, color: dim, letterSpacing: 1)),
+              const SizedBox(height: 4),
+              Text(revEst, style: GoogleFonts.lora(fontSize: 16, fontWeight: FontWeight.w800, color: txt)),
+            ])),
+            Column(crossAxisAlignment: CrossAxisAlignment.end, children: [
+              if (nextDate.isNotEmpty)
+                Text(nextDate, style: GoogleFonts.lora(fontSize: 10, fontWeight: FontWeight.w700, color: AppTheme.primary)),
+              if (analystCount != '0')
+                Text('$analystCount analysts', style: GoogleFonts.lora(fontSize: 9, color: dim)),
+            ]),
+          ]),
+        ),
+      ],
+    );
+  }
+
+  // ── OWNERSHIP BREAKDOWN ───────────────────────────────────────────────
+  Widget _buildOwnershipBreakdown(BuildContext context, Map<String, dynamic> data,
+      bool isDark, Color dim, Color dividerColor) {
+    final txt = isDark ? AppTheme.white.withValues(alpha: 0.87) : AppTheme.lightTextPrimary;
+    final instPct = (data['institutional_pct'] ?? 'N/A').toString();
+    final insiderPct = (data['insider_pct'] ?? 'N/A').toString();
+    final instCount = (data['institutions_count'] ?? '').toString();
+    final topHolders = (data['top_holders'] as List?) ?? [];
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        _label('OWNERSHIP BREAKDOWN', dim),
+        const SizedBox(height: 10),
+        Row(children: [
+          Expanded(child: _ownershipStat('INSTITUTIONAL', instPct, AppTheme.primary, dim)),
+          Expanded(child: _ownershipStat('INSIDER', insiderPct, AppTheme.gold, dim)),
+          if (instCount.isNotEmpty && instCount != '0')
+            Expanded(child: _ownershipStat('INST. COUNT', instCount, AppTheme.warning, dim)),
+        ]),
+        if (topHolders.isNotEmpty) ...[
+          const SizedBox(height: 14),
+          Text('TOP HOLDERS', style: GoogleFonts.lora(fontSize: 9, color: dim, letterSpacing: 1.2, fontWeight: FontWeight.w700)),
+          const SizedBox(height: 8),
+          ...topHolders.take(5).map((h) {
+            final m = h is Map ? h : <String, dynamic>{};
+            final name = (m['name'] ?? '').toString();
+            final pct = (m['pct'] ?? '').toString();
+            return Container(
+              padding: const EdgeInsets.symmetric(vertical: 7, horizontal: 4),
+              decoration: BoxDecoration(
+                  border: Border(bottom: BorderSide(color: dividerColor, width: 0.5))),
+              child: Row(children: [
+                Expanded(child: Text(name,
+                    style: GoogleFonts.lora(fontSize: 11, color: txt, fontWeight: FontWeight.w600))),
+                Text(pct, style: GoogleFonts.lora(fontSize: 11, fontWeight: FontWeight.w800, color: AppTheme.primary)),
+              ]),
+            );
+          }),
+        ],
+      ],
+    );
+  }
+
+  Widget _ownershipStat(String label, String value, Color accent, Color dim) =>
+      Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Text(label, style: GoogleFonts.lora(fontSize: 8, color: dim, letterSpacing: 0.8)),
+        const SizedBox(height: 3),
+        Text(value, style: GoogleFonts.lora(fontSize: 16, fontWeight: FontWeight.w900, color: accent)),
+      ]);
+
+  // ── ESG RATING ────────────────────────────────────────────────────────
+  Widget _buildEsgRating(BuildContext context, Map<String, dynamic> data,
+      bool isDark, Color dim) {
+    final score = (data['score'] as num? ?? 0).toDouble();
+    final controversy = (data['controversy'] as num? ?? 0).toInt();
+    final label = (data['label'] ?? 'N/A').toString();
+    final subtle = isDark ? AppTheme.surfaceCharcoal : AppTheme.black.withValues(alpha: 0.04);
+
+    Color esgColor(double s) {
+      if (s >= 70) return AppTheme.positive;
+      if (s >= 50) return AppTheme.warning;
+      return AppTheme.negative;
+    }
+
+    final ec = esgColor(score);
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        _label('ESG RATING', dim),
+        const SizedBox(height: 10),
+        Container(
+          padding: const EdgeInsets.all(14),
+          decoration: BoxDecoration(
+            color: subtle,
+            borderRadius: BorderRadius.circular(6),
+            border: Border.all(color: ec.withValues(alpha: 0.2)),
+          ),
+          child: Row(children: [
+            CircularPercentIndicator(
+              radius: 28,
+              lineWidth: 4,
+              percent: (score / 100).clamp(0.0, 1.0),
+              center: Text('${score.toInt()}',
+                  style: GoogleFonts.lora(fontSize: 11, fontWeight: FontWeight.w900, color: ec)),
+              progressColor: ec,
+              backgroundColor: ec.withValues(alpha: 0.15),
+              circularStrokeCap: CircularStrokeCap.round,
+            ),
+            const SizedBox(width: 16),
+            Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                decoration: BoxDecoration(
+                  color: ec.withValues(alpha: 0.12),
+                  borderRadius: BorderRadius.circular(4),
+                ),
+                child: Text(label,
+                    style: GoogleFonts.lora(
+                        fontSize: 10, fontWeight: FontWeight.w800, color: ec, letterSpacing: 0.5)),
+              ),
+              const SizedBox(height: 6),
+              Text('Controversy Level: $controversy/5',
+                  style: GoogleFonts.lora(fontSize: 11, color: dim)),
+            ]),
+          ]),
+        ),
+      ],
+    );
+  }
+
   Widget _buildSectorPeers(BuildContext context, List peers,
       bool isDark, Color dividerColor) {
     final dim = isDark ? AppTheme.white38 : AppTheme.lightTextMuted;
     final txt = isDark ? AppTheme.white.withValues(alpha: 0.87) : AppTheme.lightTextPrimary;
-
     Color verdictColor(String v) {
       final up = v.toUpperCase();
       if (up.contains('STRONG BUY') || up.contains('STRONG_BUY') || up.contains('SURPERFORMANCE')) return AppTheme.successStrong;
@@ -1293,7 +1660,7 @@ class _ReportBody extends StatelessWidget {
               Navigator.push(
                 context,
                 MaterialPageRoute(
-                    builder: (_) => AnalysisScreen(ticker: ticker)),
+                    builder: (_) => InstitutionalNoteLabPanel(initialTicker: ticker)),
               );
             }
           },
@@ -1383,6 +1750,9 @@ class _ReportBody extends StatelessWidget {
     );
   }
 }
+
+
+
 
 
 

@@ -886,6 +886,8 @@ class AnalysisData {
   final Map<String, dynamic>? earningsTrend;
   final Map<String, dynamic>? dividendData;
   final Map<String, dynamic>? fullOwnership;
+  final String? bullCase;
+  final String? bearCase;
 
   // NEW — Raw Institutional Feed for the Research Report
   final String? rawInstitutionalData;
@@ -968,6 +970,8 @@ class AnalysisData {
     this.dividendData,
     this.fullOwnership,
     this.rawInstitutionalData,
+    this.bullCase,
+    this.bearCase,
   });
 
   AnalysisData copyWith({
@@ -1048,6 +1052,8 @@ class AnalysisData {
     Map<String, dynamic>? dividendData,
     Map<String, dynamic>? fullOwnership,
     String? rawInstitutionalData,
+    String? bullCase,
+    String? bearCase,
   }) {
     return AnalysisData(
       ticker: ticker ?? this.ticker,
@@ -1129,6 +1135,8 @@ class AnalysisData {
       dividendData: dividendData ?? this.dividendData,
       fullOwnership: fullOwnership ?? this.fullOwnership,
       rawInstitutionalData: rawInstitutionalData ?? this.rawInstitutionalData,
+      bullCase: bullCase ?? this.bullCase,
+      bearCase: bearCase ?? this.bearCase,
     );
   }
 
@@ -1424,6 +1432,8 @@ class AnalysisData {
       fullOwnership: json['fullOwnership'] is Map
           ? Map<String, dynamic>.from(json['fullOwnership'])
           : null,
+      bullCase: json['bullCase']?.toString(),
+      bearCase: json['bearCase']?.toString(),
     );
   }
 
@@ -1571,6 +1581,8 @@ class AnalysisData {
         'dividendData': dividendData,
         'fullOwnership': fullOwnership,
         'rawInstitutionalData': rawInstitutionalData,
+        'bullCase': bullCase,
+        'bearCase': bearCase,
       };
 }
 

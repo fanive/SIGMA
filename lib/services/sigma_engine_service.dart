@@ -1,27 +1,27 @@
-// ignore_for_file: unused_import, unused_local_variable
+﻿// ignore_for_file: unused_import, unused_local_variable
 import 'dart:async';
 import 'dart:math';
 import '../models/sigma_engines.dart';
 import 'sigma_service.dart';
 
-/// ═══════════════════════════════════════════════════════════════════════════════
+/// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 /// SIGMA ENGINE SERVICE
 /// Multi-agent orchestration for specialized signals & industry reports.
-/// ═══════════════════════════════════════════════════════════════════════════════
+/// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 
 class SigmaEngineService {
   final SigmaService _sigma;
 
-  /// Injecte le SigmaService existant — ne crée JAMAIS sa propre instance.
+  /// Injecte le SigmaService existant â€” ne crÃ©e JAMAIS sa propre instance.
   SigmaEngineService({
     required SigmaService sigmaService,
   }) : _sigma = sigmaService;
 
-  /// 1. DAILY CREAM REPORT™
+  /// 1. DAILY CREAM REPORTâ„¢
   /// Generates the morning newsletter synthesis.
   Future<DailyCreamReport> generateDailyCreamReport() async {
     // 1. Fetch Top Movers
-    final market = await _sigma.fmpService.getMarketMovers();
+    final market = await _sigma.marketDataService.getMarketMovers();
 
     // 2. Filter Top Movers by Quality (Sigma Rated)
     final List<SigmaSignalEntry> movers = [];
@@ -46,10 +46,10 @@ class SigmaEngineService {
     );
   }
 
-  /// 2. EARNINGS BEAT SIGNAL™
+  /// 2. EARNINGS BEAT SIGNALâ„¢
   Future<EarningsBeatSignal> getEarningsBeatSignal(String ticker) async {
     try {
-      final history = await _sigma.fmpService.getEarningsHistorical(ticker);
+      final history = await _sigma.marketDataService.getEarningsHistorical(ticker);
       if (history.isEmpty) {
         return EarningsBeatSignal(
           ticker: ticker,
@@ -111,10 +111,10 @@ class SigmaEngineService {
   Future<TickerIntelligence> getTickerIntelligence(String ticker) async {
     final r = Random();
 
-    // 1. Fetch Real Data from FMP
+    // 1. Fetch real data from Sigma API
     final earnings = await getEarningsBeatSignal(ticker);
-    final metrics = await _sigma.fmpService.getKeyMetricsTTM(ticker);
-    final quote = await _sigma.fmpService.getQuoteMap(ticker);
+    final metrics = await _sigma.marketDataService.getKeyMetricsTTM(ticker);
+    final quote = await _sigma.marketDataService.getQuoteMap(ticker);
 
     // 2. FCF & Valuation Logic
     final fcfYieldRaw =
@@ -167,3 +167,6 @@ class SigmaEngineService {
     );
   }
 }
+
+
+

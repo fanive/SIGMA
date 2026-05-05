@@ -22,31 +22,31 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
 
   static const List<_Slide> _slides = [
     _Slide(
-      tag: 'COVERAGE',
-      title: 'Construisez\nvotre univers',
+      tag: '3 MIN',
+      title: 'Comprendre un\nticker en 3 minutes',
       body:
-          'Regroupez sociétés, secteurs, catalyseurs et priorités de recherche dans un espace structuré.',
+          'Prix, qualite, valorisation, risques et catalyseurs sont resumes dans une note lisible sans noyer l\'utilisateur.',
       kind: _Kind.coverage,
     ),
     _Slide(
-      tag: 'RESEARCH',
-      title: 'Formez une\nconviction solide',
+      tag: 'COMPARE',
+      title: 'Comparer deux\nentreprises proprement',
       body:
-          'Reliez fondamentaux, graphiques, actualités et sentiment dans une lecture claire avant de décider.',
+          'Les differences de croissance, marges, rentabilite, valorisation, momentum et risque apparaissent clairement cote a cote.',
       kind: _Kind.research,
     ),
     _Slide(
-      tag: 'RISK',
-      title: 'Gardez\nle contrôle',
+      tag: 'METHOD',
+      title: 'Decider avec\nmethode, pas avec hype',
       body:
-          'Alertes, expositions et signaux qui modifient la qualité d\'un dossier en temps réel.',
+          'SIGMA aide a trier le bruit, poser des reperes et expliciter les points de vigilance avant toute decision.',
       kind: _Kind.risk,
     ),
     _Slide(
-      tag: 'ALLOCATION',
-      title: 'Décidez avec\ndiscipline',
+      tag: 'HONEST',
+      title: 'Une IA qui\nclarifie sans imposer',
       body:
-          'Transformez l\'information en décisions mesurées, cohérentes avec votre mandat d\'investissement.',
+          'Le produit ne remplace pas votre jugement: il transforme des donnees complexes en analyse lisible, comparable et honnete.',
       kind: _Kind.allocation,
     ),
   ];

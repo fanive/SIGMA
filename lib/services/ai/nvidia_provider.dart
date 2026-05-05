@@ -183,8 +183,11 @@ class NvidiaProvider implements AIProvider {
 
     final client = http.Client();
     try {
+      // Large models (119B+) on NVIDIA NIM can take 50–90s before the first
+      // SSE chunk arrives. 30s was too short and caused all stream calls to
+      // fail silently. Raised to 120s to match generateContent.
       final response =
-          await client.send(request).timeout(const Duration(seconds: 30));
+          await client.send(request).timeout(const Duration(seconds: 120));
 
       if (response.statusCode != 200) {
         final error = await response.stream.bytesToString();
