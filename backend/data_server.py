@@ -12,13 +12,13 @@ from bs4 import BeautifulSoup as _BS
 import pandas as pd
 import yfinance as yf
 from cachetools import TTLCache
-from fastapi import FastAPI, HTTPException, Query
+from fastapi import FastAPI, HTTPException, Query, APIRouter
 from fastapi.middleware.cors import CORSMiddleware
 from dotenv import load_dotenv
 
 load_dotenv()
 
-app = FastAPI(title="SIGMA yfinance Gateway", version="3.1.0")
+app = FastAPI(title="SIGMA yfinance Gateway", version="4.0.0")
 
 app.add_middleware(
     CORSMiddleware,
@@ -26,6 +26,12 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# --- Routers Definition ---
+search_router = APIRouter(prefix="/search", tags=["Search"])
+equities_router = APIRouter(prefix="/equities", tags=["Equities"])
+market_router = APIRouter(prefix="/market", tags=["Market"])
+macro_router = APIRouter(prefix="/macro", tags=["Macro"])
 
 # ---------------------------------------------------------------------------
 # Cache layers — TTL tuned to data change frequency
@@ -203,7 +209,7 @@ async def health():
             "time": datetime.now(timezone.utc).isoformat()}
 
 
-@app.get("/search")
+@search_router.get("")
 async def search_tickers(q: str = Query(..., min_length=1)):
     try:
         results = yf.Search(q).quotes or []
@@ -227,8 +233,8 @@ async def search_tickers(q: str = Query(..., min_length=1)):
 # ---------------------------------------------------------------------------
 # /quote/{symbol} — lightweight: price + profile + valuation only
 # ---------------------------------------------------------------------------
-@app.get("/quote/{symbol}")
-async def quote(symbol: str):
+@equities_router.get("/{symbol}/profile")
+async def get_equity_profile(symbol: str):
     """Lightweight quote: price, market data, profile, valuation metrics."""
     sym = symbol.upper().strip()
 
@@ -382,7 +388,7 @@ async def quote(symbol: str):
         raise HTTPException(status_code=500, detail=f"quote failed for {sym}: {e}")
 
 
-@app.get("/logo/{symbol}")
+@search_router.get("/logo/{symbol}")
 async def logo(symbol: str):
     """Return logo URLs for a symbol. Ticker-based (Parqet/FMP) + domain fallback."""
     sym = symbol.upper().strip()
@@ -427,8 +433,8 @@ async def logo(symbol: str):
 # ---------------------------------------------------------------------------
 # /financials/{symbol} — income statement, balance sheet, cash flow
 # ---------------------------------------------------------------------------
-@app.get("/financials/{symbol}")
-async def financials(symbol: str):
+@equities_router.get("/{symbol}/financials")
+async def get_equity_financials(symbol: str):
     """Quarterly & annual financial statements. Cached 1h."""
     sym = symbol.upper().strip()
 
@@ -454,8 +460,8 @@ async def financials(symbol: str):
 # ---------------------------------------------------------------------------
 # /analysis/{symbol} — analyst targets, recommendations, earnings estimates
 # ---------------------------------------------------------------------------
-@app.get("/analysis/{symbol}")
-async def analysis(symbol: str):
+@equities_router.get("/{symbol}/intelligence")
+async def get_equity_intelligence(symbol: str):
     """Analyst price targets, recommendations, earnings/revenue estimates. Cached 4h."""
     sym = symbol.upper().strip()
 
@@ -483,8 +489,8 @@ async def analysis(symbol: str):
 # ---------------------------------------------------------------------------
 # /ownership/{symbol} — institutional, insider, mutual fund holders
 # ---------------------------------------------------------------------------
-@app.get("/ownership/{symbol}")
-async def ownership(symbol: str):
+@equities_router.get("/{symbol}/ownership")
+async def get_equity_ownership(symbol: str):
     """Institutional holders, insider transactions, mutual fund holders. Cached 4h."""
     sym = symbol.upper().strip()
 
@@ -509,8 +515,8 @@ async def ownership(symbol: str):
 # ---------------------------------------------------------------------------
 # /options/{symbol} — options chain for nearest expiration (or specified)
 # ---------------------------------------------------------------------------
-@app.get("/options/{symbol}")
-async def options(symbol: str, expiration: str | None = Query(default=None)):
+@equities_router.get("/{symbol}/options")
+async def get_equity_options(symbol: str, expiration: str | None = Query(default=None)):
     """Options chain (calls & puts). Cached 5min. Pass ?expiration=YYYY-MM-DD to select."""
     sym = symbol.upper().strip()
     cache_key = f"{sym}:{expiration or '_default'}"
@@ -541,8 +547,8 @@ async def options(symbol: str, expiration: str | None = Query(default=None)):
 # ---------------------------------------------------------------------------
 # /events/{symbol} — earnings calendar, dividends, splits
 # ---------------------------------------------------------------------------
-@app.get("/events/{symbol}")
-async def events(symbol: str):
+@equities_router.get("/{symbol}/events")
+async def get_equity_events(symbol: str):
     """Earnings calendar, dividend history, stock splits. Cached 1h."""
     sym = symbol.upper().strip()
 
@@ -565,8 +571,8 @@ async def events(symbol: str):
 # ---------------------------------------------------------------------------
 # /news/{symbol} — latest news articles
 # ---------------------------------------------------------------------------
-@app.get("/news/{symbol}")
-async def news(symbol: str):
+@equities_router.get("/{symbol}/news")
+async def get_equity_news(symbol: str):
     """Latest news articles for a ticker. Cached 5min."""
     sym = symbol.upper().strip()
 
@@ -597,7 +603,7 @@ async def news(symbol: str):
         raise HTTPException(status_code=500, detail=f"news failed for {sym}: {e}")
 
 
-@app.get("/multi-quote")
+@market_router.get("/quotes")
 async def multi_quote(symbols: str = Query(..., description="Comma separated symbols")):
     """Lightweight price-only snapshot for a list of tickers. Cached 30s per ticker."""
     sym_list = [s.strip().upper() for s in symbols.split(",") if s.strip()][:50]
@@ -619,8 +625,8 @@ async def multi_quote(symbols: str = Query(..., description="Comma separated sym
     return out
 
 
-@app.get("/history/{symbol}")
-async def history(symbol: str, range: str = "1mo", interval: str = "1d", prepost: bool = False):
+@equities_router.get("/{symbol}/history")
+async def get_equity_history(symbol: str, range: str = "1mo", interval: str = "1d", prepost: bool = False):
     """OHLCV history. period/interval follow yfinance conventions. Cached 1min."""
     sym = symbol.upper().strip()
     cache_key = f"{sym}:{range}:{interval}:{prepost}"
@@ -651,14 +657,14 @@ async def history(symbol: str, range: str = "1mo", interval: str = "1d", prepost
         raise HTTPException(status_code=500, detail=f"history failed for {sym}: {e}")
 
 
-@app.get("/intraday/{symbol}")
-async def intraday(symbol: str, interval: str = "5m", range: str = "1d", prepost: bool = True):
+@equities_router.get("/{symbol}/intraday")
+async def get_equity_intraday(symbol: str, interval: str = "5m", range: str = "1d", prepost: bool = True):
     """Intraday bars. Delegates to /history with prepost=True."""
     return await history(symbol=symbol, range=range, interval=interval, prepost=prepost)
 
 
-@app.get("/macro")
-async def macro():
+@market_router.get("/indices")
+async def get_market_indices():
     """Global macro snapshot: bonds, DXY, gold, oil, VIX, major indices, BTC. Cached 30s."""
     symbols = {
         "^TNX": "tnx", "DX-Y.NYB": "dxy", "GC=F": "gold", "CL=F": "oil",
@@ -783,8 +789,8 @@ def _insider_summary(trades: list[dict]) -> dict:
         "sentiment": sentiment,
         "top_insiders": top_insiders,
     }
-@app.get("/insider/{symbol}")
-async def insider(symbol: str, days: int = Query(default=365, ge=1, le=1825)):
+@equities_router.get("/{symbol}/insider")
+async def get_equity_insider(symbol: str, days: int = Query(default=365, ge=1, le=1825)):
     """SEC Form 4 insider buys & sells from OpenInsider. Cached 4h.
     `days` controls the lookback window (default 365, max 1825)."""
     sym = symbol.upper().strip()
@@ -945,8 +951,8 @@ def _compute_sec_derived(extracted: dict[str, list]) -> dict:
     return derived
 
 
-@app.get("/sec/{symbol}")
-async def sec_facts(symbol: str):
+@equities_router.get("/{symbol}/sec")
+async def get_equity_sec_facts(symbol: str):
     """Key financial facts from SEC EDGAR XBRL data. Cached 24h.
     Returns revenue, net income, EPS, assets, equity and more."""
     sym = symbol.upper().strip()
@@ -1010,8 +1016,8 @@ async def sec_facts(symbol: str):
 _cache_snapshot = TTLCache(maxsize=200, ttl=60)   # 1min — follows quote TTL
 
 
-@app.get("/snapshot/{symbol}")
-async def snapshot(symbol: str):
+@equities_router.get("/{symbol}/snapshot")
+async def get_equity_snapshot(symbol: str):
     """Single-call snapshot: live quote + insider sentiment + SEC-derived fundamentals.
     Ideal for a stock detail screen. Cached 1min (driven by price TTL)."""
     sym = symbol.upper().strip()
@@ -1055,8 +1061,8 @@ async def snapshot(symbol: str):
 # ---------------------------------------------------------------------------
 _cache_stooq = TTLCache(maxsize=100, ttl=3600)  # 1h
 
-@app.get("/stooq/{symbol}")
-async def stooq_history(symbol: str, range: str = "1mo"):
+@equities_router.get("/{symbol}/stooq")
+async def get_equity_stooq_history(symbol: str, range: str = "1mo"):
     """
     International historical data from Stooq (CSV).
     Supported suffixes: .US, .JP, .UK, .PL, .DE, .HK, etc.
@@ -1105,8 +1111,8 @@ async def stooq_history(symbol: str, range: str = "1mo"):
 # ---------------------------------------------------------------------------
 _cache_fred = TTLCache(maxsize=100, ttl=86400)  # 24h
 
-@app.get("/fred/{series_id}")
-async def fred_series(series_id: str):
+@macro_router.get("/fred/{series_id}")
+async def get_macro_fred_series(series_id: str):
     """
     Economic indicators from FRED. Requires FRED_API_KEY in .env.
     Common series: UNRATE (Unemployment), GDP, CPIAUCSL (CPI), FEDFUNDS.
@@ -1147,8 +1153,8 @@ async def fred_series(series_id: str):
 # Google Finance Scraper
 # ---------------------------------------------------------------------------
 
-@app.get("/google_finance/{ticker}")
-def google_finance_info(ticker: str):
+@equities_router.get("/{ticker}/google-finance")
+def get_equity_google_finance_info(ticker: str):
     """
     Scrapes Google Finance for price, about description, and key stats.
     """
@@ -1210,6 +1216,12 @@ def _scrape_google_finance_safe(ticker: str, raise_on_error: bool = False):
         raise HTTPException(status_code=404, detail=f"Google Finance data not found for {ticker}. {str(last_err)}")
     return {}
 
+
+# --- Register Routers ---
+app.include_router(search_router)
+app.include_router(equities_router)
+app.include_router(market_router)
+app.include_router(macro_router)
 
 if __name__ == "__main__":
     import uvicorn

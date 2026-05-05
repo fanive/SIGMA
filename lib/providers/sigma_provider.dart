@@ -482,7 +482,10 @@ class SigmaProvider extends ChangeNotifier {
           'changePercent': normalizedQuote['changesPercentage'] ??
               normalizedQuote['changePercent'] ??
               0.0,
-          'longName': normalizedQuote['name'] ?? symbol,
+          'longName': normalizedQuote['longName'] ?? 
+                      normalizedQuote['shortName'] ?? 
+                      normalizedQuote['name'] ?? 
+                      symbol,
         };
       }
     } catch (e) {

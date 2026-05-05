@@ -53,7 +53,7 @@ class SigmaApiService {
     final cached = _getCache<Map<String, dynamic>>(key);
     if (cached != null) return cached;
 
-    final data = await _get('/quote/${ticker.toUpperCase()}');
+    final data = await _get('/equities/${ticker.toUpperCase()}/profile');
     if (data is Map) {
       final m = Map<String, dynamic>.from(data);
       _setCache(key, m, const Duration(seconds: 30));
@@ -72,7 +72,7 @@ class SigmaApiService {
     final cached = _getCache<List<Map<String, dynamic>>>(key);
     if (cached != null) return cached;
 
-    final data = await _get('/multi-quote',
+    final data = await _get('/market/quotes',
         params: {'symbols': tickers.map((t) => t.toUpperCase()).join(',')});
     if (data is List) {
       final list = data.map((e) => Map<String, dynamic>.from(e)).toList();
@@ -91,7 +91,7 @@ class SigmaApiService {
     final cached = _getCache<List<Map<String, dynamic>>>(key);
     if (cached != null) return cached;
 
-    final data = await _get('/history/${ticker.toUpperCase()}',
+    final data = await _get('/equities/${ticker.toUpperCase()}/history',
         params: {'range': range, 'interval': interval});
     if (data is List) {
       final list = data.map((e) => Map<String, dynamic>.from(e)).toList();
@@ -111,7 +111,7 @@ class SigmaApiService {
     final cached = _getCache<List<Map<String, dynamic>>>(key);
     if (cached != null) return cached;
 
-    final data = await _get('/intraday/${ticker.toUpperCase()}', params: {
+    final data = await _get('/equities/${ticker.toUpperCase()}/intraday', params: {
       'range': range,
       'interval': interval,
       'prepost': prepost.toString(),
@@ -142,7 +142,7 @@ class SigmaApiService {
     if (expiration != null && expiration.trim().isNotEmpty) {
       params['expiration'] = expiration.trim();
     }
-    final data = await _get('/options/${ticker.toUpperCase()}', params: params);
+    final data = await _get('/equities/${ticker.toUpperCase()}/options', params: params);
     if (data is Map) {
       final m = Map<String, dynamic>.from(data);
       _setCache(key, m, const Duration(minutes: 5));
@@ -159,7 +159,7 @@ class SigmaApiService {
     final cached = _getCache<Map<String, dynamic>>(key);
     if (cached != null) return cached;
 
-    final data = await _get('/financials/${ticker.toUpperCase()}');
+    final data = await _get('/equities/${ticker.toUpperCase()}/financials');
     if (data is Map) {
       final m = Map<String, dynamic>.from(data);
       _setCache(key, m, const Duration(hours: 1));
@@ -176,7 +176,7 @@ class SigmaApiService {
     final cached = _getCache<Map<String, dynamic>>(key);
     if (cached != null) return cached;
 
-    final data = await _get('/analysis/${ticker.toUpperCase()}');
+    final data = await _get('/equities/${ticker.toUpperCase()}/intelligence');
     if (data is Map) {
       final m = Map<String, dynamic>.from(data);
       _setCache(key, m, const Duration(hours: 4));
@@ -193,7 +193,7 @@ class SigmaApiService {
     final cached = _getCache<Map<String, dynamic>>(key);
     if (cached != null) return cached;
 
-    final data = await _get('/ownership/${ticker.toUpperCase()}');
+    final data = await _get('/equities/${ticker.toUpperCase()}/ownership');
     if (data is Map) {
       final m = Map<String, dynamic>.from(data);
       _setCache(key, m, const Duration(hours: 4));
@@ -210,7 +210,7 @@ class SigmaApiService {
     final cached = _getCache<List<Map<String, dynamic>>>(key);
     if (cached != null) return cached;
 
-    final data = await _get('/news/${ticker.toUpperCase()}');
+    final data = await _get('/equities/${ticker.toUpperCase()}/news');
     if (data is List) {
       final list = data.map((e) => Map<String, dynamic>.from(e)).toList();
       _setCache(key, list, const Duration(minutes: 5));
@@ -234,7 +234,7 @@ class SigmaApiService {
     final cached = _getCache<Map<String, dynamic>>(key);
     if (cached != null) return cached;
 
-    final data = await _get('/events/${ticker.toUpperCase()}');
+    final data = await _get('/equities/${ticker.toUpperCase()}/events');
     if (data is Map) {
       final m = Map<String, dynamic>.from(data);
       _setCache(key, m, const Duration(hours: 1));
@@ -251,7 +251,7 @@ class SigmaApiService {
     final cached = _getCache<Map<String, dynamic>>(key);
     if (cached != null) return cached;
 
-    final data = await _get('/insider/${ticker.toUpperCase()}');
+    final data = await _get('/equities/${ticker.toUpperCase()}/insider');
     if (data is Map) {
       final m = Map<String, dynamic>.from(data);
       _setCache(key, m, const Duration(hours: 4));
@@ -268,7 +268,7 @@ class SigmaApiService {
     final cached = _getCache<Map<String, dynamic>>(key);
     if (cached != null) return cached;
 
-    final data = await _get('/sec/${ticker.toUpperCase()}');
+    final data = await _get('/equities/${ticker.toUpperCase()}/sec');
     if (data is Map) {
       final m = Map<String, dynamic>.from(data);
       _setCache(key, m, const Duration(hours: 24));
@@ -285,7 +285,7 @@ class SigmaApiService {
     final cached = _getCache<Map<String, dynamic>>(key);
     if (cached != null) return cached;
 
-    final data = await _get('/macro');
+    final data = await _get('/market/indices');
     if (data is Map) {
       final m = Map<String, dynamic>.from(data);
       _setCache(key, m, const Duration(minutes: 5));
@@ -320,7 +320,7 @@ class SigmaApiService {
     final cached = _getCache<Map<String, dynamic>>(key);
     if (cached != null) return cached;
 
-    final data = await _get('/snapshot/${ticker.toUpperCase()}');
+    final data = await _get('/equities/${ticker.toUpperCase()}/snapshot');
     if (data is Map) {
       final m = Map<String, dynamic>.from(data);
       _setCache(key, m, const Duration(minutes: 1));
@@ -337,7 +337,7 @@ class SigmaApiService {
     final cached = _getCache<Map<String, dynamic>>(key);
     if (cached != null) return cached;
 
-    final data = await _get('/logo/${ticker.toUpperCase()}');
+    final data = await _get('/search/logo/${ticker.toUpperCase()}');
     if (data is Map) {
       final m = Map<String, dynamic>.from(data);
       _setCache(key, m, const Duration(hours: 24));
@@ -360,7 +360,7 @@ class SigmaApiService {
     final cached = _getCache<Map<String, dynamic>>(key);
     if (cached != null) return cached;
 
-    final data = await _get('/google_finance/${ticker.toUpperCase()}');
+    final data = await _get('/equities/${ticker.toUpperCase()}/google-finance');
     if (data is Map) {
       final m = Map<String, dynamic>.from(data);
       _setCache(key, m, const Duration(minutes: 5));
