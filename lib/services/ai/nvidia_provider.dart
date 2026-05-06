@@ -56,9 +56,9 @@ class NvidiaProvider implements AIProvider {
 
     for (int i = 0; i < chain.length; i++) {
       final model = chain[i];
-      // On donne 150 secondes à chaque modèle. Avec les gros LLM (120B+ et 405B) sans stream, 
-      // le serveur met parfois 60s à 120s entières avant de renvoyer le body JSON final.
-      const timeoutLimit = 150; 
+      // Llama 3.3 70B on NVIDIA NIM normally completes in 3-15s.
+      // 60s is a safe ceiling; if exceeded we fall through to the next model.
+      const timeoutLimit = 60;
 
       dev.log(
         '◆ NVIDIA: trying model "$model" (timeout ${timeoutLimit}s, '
@@ -183,11 +183,10 @@ class NvidiaProvider implements AIProvider {
 
     final client = http.Client();
     try {
-      // Large models (119B+) on NVIDIA NIM can take 50–90s before the first
-      // SSE chunk arrives. 30s was too short and caused all stream calls to
-      // fail silently. Raised to 120s to match generateContent.
+      // Llama 3.3 70B emits its first SSE chunk within ~2-5s on NVIDIA NIM.
+      // 45s gives a wide safety margin while keeping the UI responsive.
       final response =
-          await client.send(request).timeout(const Duration(seconds: 120));
+          await client.send(request).timeout(const Duration(seconds: 45));
 
       if (response.statusCode != 200) {
         final error = await response.stream.bytesToString();

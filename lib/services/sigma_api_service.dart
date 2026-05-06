@@ -12,7 +12,8 @@ import '../utils/logo_resolver.dart';
 /// ═══════════════════════════════════════════════════════════════════════════
 class SigmaApiService {
   static const String _base = 'https://sigma-yfinance-api.onrender.com';
-  static const Duration _timeout = Duration(seconds: 30);
+  // Render free tier cold-start can take 60-90s; we also add one retry below.
+  static const Duration _timeout = Duration(seconds: 90);
 
   // ── In-memory cache ──────────────────────────────────────────────────────
   static final Map<String, _Cache> _cache = {};
@@ -29,18 +30,44 @@ class SigmaApiService {
   }
 
   // ── HTTP helper ──────────────────────────────────────────────────────────
-  static Future<dynamic> _get(String path,
-      {Map<String, String>? params}) async {
+  static Future<dynamic> _get(
+    String path, {
+    Map<String, String>? params,
+    Duration? timeout,
+    int retries = 2,
+  }) async {
     final uri = Uri.parse('$_base$path').replace(queryParameters: params);
-    try {
-      final response = await http.get(uri).timeout(_timeout);
-      if (response.statusCode == 200) {
-        return jsonDecode(utf8.decode(response.bodyBytes));
+    final t = timeout ?? _timeout;
+    for (int attempt = 0; attempt < retries; attempt++) {
+      try {
+        final response = await http.get(uri).timeout(t);
+        final code = response.statusCode;
+        if (code == 200) {
+          return jsonDecode(utf8.decode(response.bodyBytes));
+        }
+        if (code == 429 || code == 503 || code >= 500) {
+          dev.log(
+            'SigmaApi $path → $code (attempt ${attempt + 1}/$retries)',
+            name: 'SigmaApiService',
+          );
+          if (attempt < retries - 1) {
+            await Future.delayed(const Duration(seconds: 2));
+            continue;
+          }
+        } else {
+          dev.log('SigmaApi $path → $code',
+              name: 'SigmaApiService');
+          return null;
+        }
+      } catch (e) {
+        dev.log(
+            'SigmaApi $path error (attempt ${attempt + 1}/$retries): $e',
+            name: 'SigmaApiService');
+        if (attempt < retries - 1) {
+          await Future.delayed(const Duration(seconds: 2));
+          continue;
+        }
       }
-      dev.log('SigmaApi $path → ${response.statusCode}',
-          name: 'SigmaApiService');
-    } catch (e) {
-      dev.log('SigmaApi $path error: $e', name: 'SigmaApiService');
     }
     return null;
   }
@@ -395,7 +422,14 @@ class SigmaApiService {
     final cached = _getCache<List<Map<String, dynamic>>>(key);
     if (cached != null) return cached;
 
-    final data = await _get('/search', params: {'q': query});
+    // Search must feel instant. Short timeout, single attempt; the UI already
+    // falls back to a local universe if the backend is slow or cold.
+    final data = await _get(
+      '/search',
+      params: {'q': query},
+      timeout: const Duration(seconds: 8),
+      retries: 1,
+    );
     if (data is List) {
       final list = data.map((e) => Map<String, dynamic>.from(e)).toList();
       _setCache(key, list, const Duration(minutes: 10));

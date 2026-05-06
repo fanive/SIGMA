@@ -17,6 +17,9 @@ class AIConfig {
   };
 
   static const Map<String, String> nvidiaModels = {
+    // Fast institutional default. Llama 3.3 70B Instruct on NVIDIA NIM
+    // returns full JSON in ~3-8s vs ~60-120s for the previous 119B model.
+    'fast': 'meta/llama-3.3-70b-instruct',
     'mistral': 'mistralai/mistral-small-4-119b-2603',
   };
 
@@ -53,9 +56,9 @@ class AIConfig {
   // ========================================
 
   static const String defaultProvider = providerNvidia;
-  static const String defaultStockModel = 'mistral';
-  static const String defaultMarketModel = 'mistral';
-  static const String defaultNvidiaModel = 'mistral';
+  static const String defaultStockModel = 'fast';
+  static const String defaultMarketModel = 'fast';
+  static const String defaultNvidiaModel = 'fast';
 
   // ========================================
   // ENDPOINTS
