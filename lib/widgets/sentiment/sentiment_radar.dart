@@ -1,4 +1,4 @@
-﻿// ignore_for_file: prefer_const_constructors, unused_import
+// ignore_for_file: prefer_const_constructors, unused_import
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:provider/provider.dart';
@@ -240,46 +240,59 @@ class SentimentRadar extends StatelessWidget {
       BuildContext context, dynamic data, bool isDark) {
     final market =
         (data.market as Map<String, MarketItem>).entries.take(4).toList();
-    return Wrap(
-      spacing: 8,
-      runSpacing: 8,
-      children: market.map((e) {
+    return GridView.builder(
+      shrinkWrap: true,
+      physics: const NeverScrollableScrollPhysics(),
+      gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+        crossAxisCount: 2,
+        mainAxisSpacing: 8,
+        crossAxisSpacing: 8,
+        mainAxisExtent: 68,
+      ),
+      itemCount: market.length,
+      itemBuilder: (context, i) {
+        final e = market[i];
         final item = e.value;
         return Container(
-          width: (MediaQuery.of(context).size.width - 64) / 2,
-          padding: const EdgeInsets.all(12),
+          padding: const EdgeInsets.all(10),
           decoration: BoxDecoration(
               border:
                   Border.all(color: AppTheme.getBorder(context), width: 0.5)),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisAlignment: MainAxisAlignment.center,
             children: [
               Text(e.key,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
                   style: GoogleFonts.lora(
-                      fontSize: 11,
+                      fontSize: 10,
                       fontWeight: FontWeight.w900,
                       color: AppTheme.primary)),
-              const SizedBox(height: 4),
+              const SizedBox(height: 2),
               Row(
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
                   Text('\$${item.price.toStringAsFixed(1)}',
                       style: GoogleFonts.lora(
-                          fontSize: 12, fontWeight: FontWeight.bold)),
-                  Text(
-                      '${item.percent >= 0 ? '+' : ''}${item.percent.toStringAsFixed(1)}%',
-                      style: GoogleFonts.lora(
-                          fontSize: 9,
-                          color: item.percent >= 0
-                              ? AppTheme.positive
-                              : AppTheme.negative,
-                          fontWeight: FontWeight.bold)),
+                          fontSize: 11, fontWeight: FontWeight.bold)),
+                  Flexible(
+                    child: Text(
+                        '${item.percent >= 0 ? '+' : ''}${item.percent.toStringAsFixed(1)}%',
+                        overflow: TextOverflow.ellipsis,
+                        style: GoogleFonts.lora(
+                            fontSize: 8,
+                            color: item.percent >= 0
+                                ? AppTheme.positive
+                                : AppTheme.negative,
+                            fontWeight: FontWeight.bold)),
+                  ),
                 ],
               ),
             ],
           ),
         );
-      }).toList(),
+      },
     );
   }
 
@@ -298,12 +311,16 @@ class SentimentRadar extends StatelessWidget {
       child: Column(
         children: [
           Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              _probItem(context, 'PROBABILITÉ HAUSSIÈRE', bullEdge,
-                  AppTheme.positive),
-              _probItem(context, 'PROBABILITÉ BAISSIÈRE', bearEdge,
-                  AppTheme.negative),
+              Expanded(
+                child: _probItem(context, 'PROBABILITÉ HAUSSIÈRE', bullEdge,
+                    AppTheme.positive),
+              ),
+              const SizedBox(width: 16),
+              Expanded(
+                child: _probItem(context, 'PROBABILITÉ BAISSIÈRE', bearEdge,
+                    AppTheme.negative),
+              ),
             ],
           ),
           const SizedBox(height: 20),

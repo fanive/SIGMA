@@ -1432,6 +1432,7 @@ class AnalysisData {
       fullOwnership: json['fullOwnership'] is Map
           ? Map<String, dynamic>.from(json['fullOwnership'])
           : null,
+      rawInstitutionalData: json['rawInstitutionalData']?.toString(),
       bullCase: json['bullCase']?.toString(),
       bearCase: json['bearCase']?.toString(),
     );

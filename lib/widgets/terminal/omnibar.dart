@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:speech_to_text/speech_to_text.dart' as stt;
+import '../../utils/logo_resolver.dart';
 import '../../providers/sigma_provider.dart';
 import '../../providers/terminal_provider.dart';
 import 'package:quantum_invest/theme/app_theme.dart';
@@ -304,7 +305,7 @@ class _TickerLogo extends StatelessWidget {
       ),
     );
 
-    final url = logoUrl?.trim() ?? '';
+    final url = LogoResolver.resolve(symbol, providedUrl: logoUrl);
     if (url.isEmpty) return fallback;
 
     return ClipRRect(

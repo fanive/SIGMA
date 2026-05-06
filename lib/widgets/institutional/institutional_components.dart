@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:quantum_invest/theme/app_theme.dart';
+import 'package:cached_network_image/cached_network_image.dart';
+import '../../utils/logo_resolver.dart';
 
 class InstitutionalSurface extends StatelessWidget {
   final Widget child;
@@ -336,6 +338,98 @@ class InstitutionalEmptyState extends StatelessWidget {
             ],
           ),
         ),
+      ),
+    );
+  }
+}
+
+class TickerLogoThumb extends StatefulWidget {
+  final String symbol;
+  final String? logoUrl;
+  final double size;
+
+  const TickerLogoThumb({
+    super.key,
+    required this.symbol,
+    required this.logoUrl,
+    this.size = 26,
+  });
+
+  @override
+  State<TickerLogoThumb> createState() => _TickerLogoThumbState();
+}
+
+class _TickerLogoThumbState extends State<TickerLogoThumb> {
+  int _urlIndex = 0;
+
+  @override
+  void didUpdateWidget(covariant TickerLogoThumb oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.symbol != widget.symbol ||
+        oldWidget.logoUrl != widget.logoUrl) {
+      _urlIndex = 0;
+    }
+  }
+
+  List<String> _candidateUrls() {
+    final urls = <String>[
+      if (widget.logoUrl != null && widget.logoUrl!.trim().startsWith('http'))
+        widget.logoUrl!.trim(),
+      LogoResolver.resolve(widget.symbol),
+      ...LogoResolver.getFallbackChain(widget.symbol),
+    ];
+    return urls.where((u) => u.isNotEmpty).toSet().toList();
+  }
+
+  void _tryNextUrl(int count) {
+    if (_urlIndex >= count - 1 || !mounted) return;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) setState(() => _urlIndex += 1);
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final symbol = widget.symbol;
+    final size = widget.size;
+    final fallback = Container(
+      width: size,
+      height: size,
+      decoration: BoxDecoration(
+        color: AppTheme.primary.withValues(alpha: 0.12),
+        border: Border.all(
+          color: AppTheme.primary.withValues(alpha: 0.24),
+          width: 0.6,
+        ),
+        borderRadius: BorderRadius.circular(2),
+      ),
+      alignment: Alignment.center,
+      child: Text(
+        symbol.isEmpty ? '?' : symbol[0],
+        style: GoogleFonts.lora(
+          fontSize: size <= 22 ? 10 : 12,
+          fontWeight: FontWeight.w700,
+          color: AppTheme.primary,
+        ),
+      ),
+    );
+
+    final urls = _candidateUrls();
+    if (urls.isEmpty) return fallback;
+    final url = urls[_urlIndex.clamp(0, urls.length - 1)];
+
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(2),
+      child: CachedNetworkImage(
+        imageUrl: url,
+        width: size,
+        height: size,
+        fit: BoxFit.cover,
+        placeholder: (_, __) => fallback,
+        errorWidget: (_, __, ___) {
+          _tryNextUrl(urls.length);
+          return fallback;
+        },
       ),
     );
   }

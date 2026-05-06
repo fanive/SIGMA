@@ -19,6 +19,7 @@ import '../services/rag_service.dart';
 import '../services/sentiment_service.dart';
 import '../services/sigma_engine_service.dart';
 import '../services/sigma_api_service.dart';
+import '../services/ollama_news_service.dart';
 import '../utils/logo_resolver.dart';
 import '../models/sigma_engines.dart';
 
@@ -29,6 +30,41 @@ class SigmaProvider extends ChangeNotifier {
   SigmaEngineService get engineService => _engineService;
   final SentimentService _sentimentService = SentimentService();
   RAGService? _ragService;
+
+  static const List<Map<String, String>> _quickSearchUniverse = [
+    {'symbol': 'AAPL', 'name': 'Apple Inc.', 'exchange': 'NASDAQ'},
+    {'symbol': 'MSFT', 'name': 'Microsoft Corporation', 'exchange': 'NASDAQ'},
+    {'symbol': 'NVDA', 'name': 'NVIDIA Corporation', 'exchange': 'NASDAQ'},
+    {'symbol': 'AMZN', 'name': 'Amazon.com Inc.', 'exchange': 'NASDAQ'},
+    {'symbol': 'GOOGL', 'name': 'Alphabet Inc.', 'exchange': 'NASDAQ'},
+    {'symbol': 'META', 'name': 'Meta Platforms Inc.', 'exchange': 'NASDAQ'},
+    {'symbol': 'TSLA', 'name': 'Tesla Inc.', 'exchange': 'NASDAQ'},
+    {'symbol': 'AMD', 'name': 'Advanced Micro Devices', 'exchange': 'NASDAQ'},
+    {'symbol': 'AVGO', 'name': 'Broadcom Inc.', 'exchange': 'NASDAQ'},
+    {'symbol': 'NFLX', 'name': 'Netflix Inc.', 'exchange': 'NASDAQ'},
+    {'symbol': 'JPM', 'name': 'JPMorgan Chase & Co.', 'exchange': 'NYSE'},
+    {'symbol': 'BAC', 'name': 'Bank of America Corp.', 'exchange': 'NYSE'},
+    {'symbol': 'GS', 'name': 'Goldman Sachs Group Inc.', 'exchange': 'NYSE'},
+    {'symbol': 'MS', 'name': 'Morgan Stanley', 'exchange': 'NYSE'},
+    {'symbol': 'XOM', 'name': 'Exxon Mobil Corporation', 'exchange': 'NYSE'},
+    {'symbol': 'CVX', 'name': 'Chevron Corporation', 'exchange': 'NYSE'},
+    {'symbol': 'LLY', 'name': 'Eli Lilly and Company', 'exchange': 'NYSE'},
+    {'symbol': 'UNH', 'name': 'UnitedHealth Group Inc.', 'exchange': 'NYSE'},
+    {'symbol': 'V', 'name': 'Visa Inc.', 'exchange': 'NYSE'},
+    {'symbol': 'MA', 'name': 'Mastercard Incorporated', 'exchange': 'NYSE'},
+    {'symbol': 'SPY', 'name': 'SPDR S&P 500 ETF Trust', 'exchange': 'NYSEARCA'},
+    {'symbol': 'QQQ', 'name': 'Invesco QQQ Trust', 'exchange': 'NASDAQ'},
+    {
+      'symbol': 'DIA',
+      'name': 'SPDR Dow Jones Industrial Average ETF',
+      'exchange': 'NYSEARCA'
+    },
+    {
+      'symbol': 'IWM',
+      'name': 'iShares Russell 2000 ETF',
+      'exchange': 'NYSEARCA'
+    },
+  ];
 
   SigmaProvider() {
     // Inject the single SigmaService instance into SigmaEngineService
@@ -203,21 +239,21 @@ class SigmaProvider extends ChangeNotifier {
   // 🐂 BULL VS 🐻 BEAR DEBATE
   Future<void> runBullBearDebate() async {
     if (currentAnalysis == null) return;
-    
+
     isDebateLoading = true;
     notifyListeners();
-    
+
     try {
-      final debate = await _sigmaService.generateBullBearDebate(currentAnalysis!);
+      final debate =
+          await _sigmaService.generateBullBearDebate(currentAnalysis!);
       currentAnalysis = currentAnalysis!.copyWith(
         bullCase: debate['bull'],
         bearCase: debate['bear'],
       );
-      
+
       // Update cache
       _analysisCache[currentAnalysis!.ticker.toUpperCase()] = currentAnalysis!;
-      await _saveAnalysisCache();
-      
+      await _saveAnalysisToCache(currentAnalysis!);
     } catch (e) {
       dev.log('❌ Error in SigmaProvider.runBullBearDebate: $e');
     } finally {
@@ -438,7 +474,6 @@ class SigmaProvider extends ChangeNotifier {
 
     // 4. Reset Engine
     _sigmaService.reset();
-    NewsIntelligenceService.reset();
 
     notifyListeners();
     dev.log('âœ… SYSTEM FULLY RESET - READY FOR FRESH ANALYSIS',
@@ -482,10 +517,10 @@ class SigmaProvider extends ChangeNotifier {
           'changePercent': normalizedQuote['changesPercentage'] ??
               normalizedQuote['changePercent'] ??
               0.0,
-          'longName': normalizedQuote['longName'] ?? 
-                      normalizedQuote['shortName'] ?? 
-                      normalizedQuote['name'] ?? 
-                      symbol,
+          'longName': normalizedQuote['longName'] ??
+              normalizedQuote['shortName'] ??
+              normalizedQuote['name'] ??
+              symbol,
         };
       }
     } catch (e) {
@@ -811,11 +846,27 @@ class SigmaProvider extends ChangeNotifier {
         SigmaApiService.getQuote(ticker),
         SigmaApiService.getAnalysis(ticker),
         SigmaApiService.getFinancials(ticker),
+        _sigmaService.marketDataService
+            .getHoldersBundle(ticker)
+            .catchError((_) => <String, dynamic>{}),
+        SigmaApiService.getNews(ticker).catchError(
+          (_) => <Map<String, dynamic>>[],
+        ),
+        SigmaApiService.getEvents(ticker).catchError(
+          (_) => <String, dynamic>{},
+        ),
+        _sigmaService.marketDataService.getInsiderFull(ticker).catchError(
+              (_) => <String, dynamic>{},
+            ),
       ]);
 
       final quote = results[0] as Map<String, dynamic>;
       final endpointAnalysis = results[1] as Map<String, dynamic>;
       final financials = results[2] as Map<String, dynamic>;
+      final holdersBundle = results[3] as Map<String, dynamic>;
+      final newsRows = results[4] as List<Map<String, dynamic>>;
+      final events = results[5] as Map<String, dynamic>;
+      final insiderFull = results[6] as Map<String, dynamic>;
 
       final keyStats = KeyStatistics.fromJson(
         _normalizeComparisonQuoteToKeyStats(quote),
@@ -830,6 +881,25 @@ class SigmaProvider extends ChangeNotifier {
           recommendations.isNotEmpty && recommendations.first is Map
               ? Map<String, dynamic>.from(recommendations.first as Map)
               : <String, dynamic>{};
+      final eventRows = _buildComparisonEvents(events);
+      final newsArticles = newsRows
+          .map((item) => NewsArticle.fromJson(_normalizeStringMap(item)))
+          .where((item) => item.title.trim().isNotEmpty)
+          .take(8)
+          .toList(growable: false);
+      final insiderSummary =
+          (insiderFull['summary'] as Map?)?.cast<String, dynamic>() ??
+              <String, dynamic>{};
+      final buyCount = insiderSummary['buy_count'];
+      final sellCount = insiderSummary['sell_count'];
+      final insiderBuyRatio = buyCount is num && sellCount is num
+          ? buyCount / math.max(1, buyCount + sellCount)
+          : analysis.insiderBuyRatio;
+      final institutionsList = (holdersBundle['institutionsList'] as List?)
+              ?.whereType<Map>()
+              .map((item) => Map<String, dynamic>.from(item))
+              .toList(growable: false) ??
+          const <Map<String, dynamic>>[];
 
       return analysis.copyWith(
         companyName:
@@ -852,6 +922,31 @@ class SigmaProvider extends ChangeNotifier {
             : analysis.changePercent,
         keyStatistics: keyStats,
         financialMatrix: _enrichComparisonFinancialMatrix(analysis, keyStats),
+        holders: holdersBundle.isNotEmpty
+            ? HoldersData.fromJson(holdersBundle)
+            : analysis.holders,
+        fullOwnership:
+            holdersBundle.isNotEmpty ? holdersBundle : analysis.fullOwnership,
+        institutionalHolders: institutionsList.isNotEmpty
+            ? institutionsList
+            : analysis.institutionalHolders,
+        companyNews:
+            newsArticles.isNotEmpty ? newsArticles : analysis.companyNews,
+        corporateEvents: eventRows.isNotEmpty
+            ? [...analysis.corporateEvents, ...eventRows]
+            : analysis.corporateEvents,
+        earningsCalendar: events['calendar'] is Map
+            ? Map<String, dynamic>.from(events['calendar'] as Map)
+            : analysis.earningsCalendar,
+        insiderBuyRatio: insiderBuyRatio,
+        insiderTransactions: insiderFull['trades'] is List
+            ? (insiderFull['trades'] as List)
+                .whereType<Map>()
+                .map((item) => InsiderTransaction.fromJson(
+                      Map<String, dynamic>.from(item),
+                    ))
+                .toList(growable: false)
+            : analysis.insiderTransactions,
         targetPriceValue:
             (analystTargets['mean'] ?? analystTargets['current']) is num
                 ? ((analystTargets['mean'] ?? analystTargets['current']) as num)
@@ -872,12 +967,65 @@ class SigmaProvider extends ChangeNotifier {
     }
   }
 
+  List<CorporateEvent> _buildComparisonEvents(Map<String, dynamic> events) {
+    final rows = <CorporateEvent>[];
+    final calendar = (events['calendar'] as Map?)?.cast<String, dynamic>() ??
+        <String, dynamic>{};
+    final earningsRaw = calendar['Earnings Date'] ?? calendar['earningsDate'];
+    final earningsDate = earningsRaw is List && earningsRaw.isNotEmpty
+        ? earningsRaw.first?.toString()
+        : earningsRaw?.toString();
+    if (earningsDate != null && earningsDate.trim().isNotEmpty) {
+      rows.add(
+        CorporateEvent(
+          date: earningsDate,
+          event: 'Earnings',
+          description:
+              'Estimate EPS: ${calendar['Earnings Average'] ?? calendar['epsAverage'] ?? 'N/A'}',
+        ),
+      );
+    }
+
+    for (final item in (events['dividends'] as List? ?? []).take(3)) {
+      if (item is! Map) continue;
+      final row = Map<String, dynamic>.from(item);
+      rows.add(
+        CorporateEvent(
+          date: row['date']?.toString() ?? '',
+          event: 'Dividend',
+          description: 'Dividend: ${row['dividend'] ?? row['value'] ?? 'N/A'}',
+        ),
+      );
+    }
+
+    for (final item in (events['splits'] as List? ?? []).take(2)) {
+      if (item is! Map) continue;
+      final row = Map<String, dynamic>.from(item);
+      rows.add(
+        CorporateEvent(
+          date: row['date']?.toString() ?? '',
+          event: 'Split',
+          description: 'Split: ${row['split'] ?? row['value'] ?? 'N/A'}',
+        ),
+      );
+    }
+
+    return rows
+        .where((event) => event.event.trim().isNotEmpty)
+        .toList(growable: false);
+  }
+
   Future<String> resolveTickerInput(
     String rawQuery, {
     bool strict = false,
   }) async {
     final query = rawQuery.trim().toUpperCase();
     if (query.isEmpty) return '';
+
+    String fallbackResult() {
+      if (_looksLikeTickerSymbol(query)) return query;
+      return strict ? '' : query;
+    }
 
     if (searchResults.isNotEmpty) {
       final exactLocal = searchResults.where(
@@ -888,9 +1036,15 @@ class SigmaProvider extends ChangeNotifier {
       }
     }
 
+    final quickMatch = _localSearchResults(query);
+    if (quickMatch.isNotEmpty) {
+      final selected = (quickMatch.first['symbol'] ?? query).toString();
+      return selected.toUpperCase();
+    }
+
     try {
       final remote = await _sigmaService.searchTickerSymbolsUnified(query);
-      if (remote.isEmpty) return strict ? '' : query;
+      if (remote.isEmpty) return fallbackResult();
 
       final upperQuery = query.toUpperCase();
       remote.sort((a, b) {
@@ -922,8 +1076,14 @@ class SigmaProvider extends ChangeNotifier {
 
       return selected;
     } catch (_) {
-      return strict ? '' : query;
+      return fallbackResult();
     }
+  }
+
+  bool _looksLikeTickerSymbol(String value) {
+    final clean = value.trim().toUpperCase();
+    if (clean.isEmpty || clean.contains(' ')) return false;
+    return RegExp(r'^[A-Z0-9]{1,8}([.-][A-Z0-9]{1,5})?$').hasMatch(clean);
   }
 
   Future<List<AnalysisData>> analyzeComparisonResolved(
@@ -1103,6 +1263,13 @@ class SigmaProvider extends ChangeNotifier {
       return;
     }
 
+    final localResults = _localSearchResults(normalized);
+    if (localResults.isNotEmpty) {
+      searchResults = localResults;
+      isSearching = true;
+      notifyListeners();
+    }
+
     // 0. Check local cache for instant results
     if (_searchCache.containsKey(normalized)) {
       searchResults = _searchCache[normalized]!;
@@ -1125,7 +1292,7 @@ class SigmaProvider extends ChangeNotifier {
         searchResultsUnified = await _sigmaService
             .searchTickerSymbolsUnified(normalized)
             .catchError((_) => <Map<String, dynamic>>[]);
-        
+
         // Save to cache
         if (searchResultsUnified.isNotEmpty) {
           _searchCache[normalized] = searchResultsUnified;
@@ -1196,7 +1363,6 @@ class SigmaProvider extends ChangeNotifier {
       final Map<String, Map<String, dynamic>> mergedResults = {};
       final Set<String> seenIdentity = <String>{};
       final List<String> symbolsToQuote = [];
-      final List<String> symbolsToLogo = [];
 
       String canonicalSymbol(String symbol) {
         return symbol
@@ -1217,22 +1383,36 @@ class SigmaProvider extends ChangeNotifier {
           seenIdentity.add(identity);
           mergedResults[symbol] = mapped;
           symbolsToQuote.add(symbol);
-          symbolsToLogo.add(symbol);
         }
       }
 
       if (requestId != _searchRequestId) return;
 
       searchResults = mergedResults.values.toList();
-      _searchCache[normalized] = searchResults; // Update cache with mapped items
+      _searchCache[normalized] =
+          searchResults; // Update cache with mapped items
       isSearching = false;
       notifyListeners();
 
       // 2) Hydrate prices + logos asynchronously (keep UI responsive).
       if (symbolsToQuote.isNotEmpty) {
-        final quotes = await _sigmaService.marketDataService
-            .getQuotes(symbolsToQuote.take(20).toList())
-            .catchError((_) => <dynamic>[]);
+        final hydrateSymbols = symbolsToQuote.take(20).toList();
+        final hydrateResults = await Future.wait([
+          _sigmaService.marketDataService
+              .getQuotes(hydrateSymbols)
+              .catchError((_) => <dynamic>[]),
+          Future.wait(hydrateSymbols.map(
+            (symbol) async {
+              final logo = await _sigmaService.marketDataService
+                  .getLogo(symbol)
+                  .catchError((_) => <String, dynamic>{});
+              return {'symbol': symbol, 'logo': logo};
+            },
+          )),
+        ]);
+
+        final quotes = hydrateResults[0] as List<dynamic>;
+        final logoResults = hydrateResults[1] as List<dynamic>;
 
         if (requestId != _searchRequestId) return;
         for (final quote in quotes) {
@@ -1242,32 +1422,33 @@ class SigmaProvider extends ChangeNotifier {
             mergedResults[s]!['change'] = quote['change'] ?? 0.0;
             mergedResults[s]!['changePercent'] =
                 quote['changesPercentage'] ?? 0.0;
+            final quoteLogo =
+                (quote['logoUrl'] ?? quote['image'] ?? quote['logo'])
+                    ?.toString()
+                    .trim();
+            if (quoteLogo != null && quoteLogo.isNotEmpty) {
+              final logo = LogoResolver.resolve(s, providedUrl: quoteLogo);
+              mergedResults[s]!['logoUrl'] = logo;
+              mergedResults[s]!['logo'] = logo;
+            }
           }
         }
-      }
-
-      if (symbolsToLogo.isNotEmpty) {
-        final logoResults =
-            await Future.wait(symbolsToLogo.take(12).map((s) async {
-          // Optimization: Check if we already have a high-quality logo URL
-          final currentLogo = mergedResults[s]?['logo']?.toString() ?? '';
-          if (currentLogo.isNotEmpty && !currentLogo.contains('financialmodelingprep.com')) {
-            return {'symbol': s, 'logo': null}; // Skip fetch
-          }
-          final logoData = await _sigmaService.marketDataService.getLogo(s);
-          return {'symbol': s, 'logo': logoData};
-        }));
-
-        if (requestId != _searchRequestId) return;
         for (final row in logoResults) {
+          if (row is! Map) continue;
           final s = row['symbol']?.toString().toUpperCase();
-          final logo = row['logo'] as Map<String, dynamic>?;
-          if (s != null && mergedResults.containsKey(s) && logo != null) {
-            final urls = (logo['logoUrls'] as Map?)?.cast<String, dynamic>();
-            mergedResults[s]!['logo'] = logo['logoUrl'] ??
-                urls?['primary'] ??
-                urls?['parqet'] ??
-                mergedResults[s]!['logo'];
+          final logoData = row['logo'];
+          if (s != null &&
+              mergedResults.containsKey(s) &&
+              logoData is Map<String, dynamic>) {
+            final logo = LogoResolver.resolve(
+              s,
+              providedUrl: logoData['logoUrl']?.toString(),
+            );
+            mergedResults[s]!['logoUrl'] = logo;
+            mergedResults[s]!['logo'] = logo;
+            if (logoData['logoUrls'] != null) {
+              mergedResults[s]!['logoUrls'] = logoData['logoUrls'];
+            }
           }
         }
       }
@@ -1289,6 +1470,87 @@ class SigmaProvider extends ChangeNotifier {
     }
   }
 
+  List<Map<String, dynamic>> _localSearchResults(String query) {
+    final q = query.trim().toUpperCase();
+    if (q.isEmpty) return [];
+    final matches = _quickSearchUniverse.where((item) {
+      final symbol = item['symbol'] ?? '';
+      final name = (item['name'] ?? '').toUpperCase();
+      return symbol.startsWith(q) || symbol.contains(q) || name.contains(q);
+    }).toList()
+      ..sort((a, b) {
+        final sa = a['symbol'] ?? '';
+        final sb = b['symbol'] ?? '';
+        final ra = sa == q ? 0 : (sa.startsWith(q) ? 1 : 2);
+        final rb = sb == q ? 0 : (sb.startsWith(q) ? 1 : 2);
+        if (ra != rb) return ra.compareTo(rb);
+        return sa.compareTo(sb);
+      });
+
+    return matches.take(8).map((item) {
+      final symbol = item['symbol']!;
+      return {
+        'symbol': symbol,
+        'description': item['name'],
+        'displaySymbol': symbol,
+        'stockExchange': item['exchange'],
+        'exchangeShortName': item['exchange'],
+        'type': symbol == 'SPY' ||
+                symbol == 'QQQ' ||
+                symbol == 'DIA' ||
+                symbol == 'IWM'
+            ? 'ETF'
+            : 'EQUITY',
+        'logoUrl': LogoResolver.resolve(symbol),
+        'logo': LogoResolver.resolve(symbol),
+        'source': 'LOCAL',
+      };
+    }).toList();
+  }
+
+  List<Map<String, dynamic>> instantSearchResults(String query) {
+    final q = query.trim().toUpperCase();
+    if (q.isEmpty) return const [];
+
+    final merged = <String, Map<String, dynamic>>{};
+    for (final item in _localSearchResults(q)) {
+      final symbol = (item['symbol'] ?? '').toString().toUpperCase();
+      if (symbol.isNotEmpty) merged[symbol] = item;
+    }
+    for (final item in searchResults) {
+      final symbol = (item['symbol'] ?? '').toString().toUpperCase();
+      final name =
+          (item['description'] ?? item['name'] ?? '').toString().toUpperCase();
+      if (symbol.isEmpty) continue;
+      if (symbol.startsWith(q) || symbol.contains(q) || name.contains(q)) {
+        merged[symbol] = item;
+      }
+    }
+
+    final list = merged.values.toList(growable: false)
+      ..sort((a, b) {
+        int rank(Map<String, dynamic> item) {
+          final symbol = (item['symbol'] ?? '').toString().toUpperCase();
+          final name = (item['description'] ?? item['name'] ?? '')
+              .toString()
+              .toUpperCase();
+          if (symbol == q) return 0;
+          if (symbol.startsWith(q)) return 1;
+          if (name.startsWith(q)) return 2;
+          if (symbol.contains(q)) return 3;
+          if (name.contains(q)) return 4;
+          return 5;
+        }
+
+        final cmp = rank(a).compareTo(rank(b));
+        if (cmp != 0) return cmp;
+        return (a['symbol'] ?? '').toString().compareTo(
+              (b['symbol'] ?? '').toString(),
+            );
+      });
+    return list.take(8).toList(growable: false);
+  }
+
   Map<String, dynamic> _mapToSearchItem(
       Map<String, dynamic> item, String symbol) {
     // Search API field names
@@ -1301,14 +1563,16 @@ class SigmaProvider extends ChangeNotifier {
 
     final directLogo =
         (item['logo'] ?? item['logoUrl'] ?? item['image'])?.toString().trim();
-    
+    final logo = LogoResolver.resolve(symbol, providedUrl: directLogo);
+
     return {
       'symbol': symbol,
       'description': name,
       'displaySymbol': symbol,
       'stockExchange': exch,
       'type': item['typeDisp'] ?? item['quoteType'] ?? 'EQUITY',
-      'logo': LogoResolver.resolve(symbol, providedUrl: directLogo),
+      'logoUrl': logo,
+      'logo': logo,
       'source': 'SIGMA',
     };
   }
@@ -1621,6 +1885,7 @@ class SigmaProvider extends ChangeNotifier {
     try {
       final overview = await _sigmaService.getMarketOverview(
         language: language ?? 'EN',
+        favoriteTickers: favoriteTickers,
       );
       final bool isNewDataEmpty =
           overview.sectors.isEmpty && (overview.insiderTrades?.isEmpty ?? true);
@@ -1929,6 +2194,7 @@ class SigmaProvider extends ChangeNotifier {
       case '5D':
         return '15m';
       case '1M':
+      case '3M':
       case '6M':
       case 'YTD':
       case '1Y':
@@ -1988,7 +2254,7 @@ class SigmaProvider extends ChangeNotifier {
 
   /// Pre-calculate common period analyses for instant navigation
   Future<void> _prewarmPeriodAnalyses(AnalysisData contextData) async {
-    final ranges = ['1M', '6M', '1Y', 'YTD'];
+    final ranges = ['1M', '3M', '6M', 'YTD', '1Y'];
     for (final r in ranges) {
       if (_periodAnalysesCache.containsKey('${contextData.ticker}_$r'))
         continue;

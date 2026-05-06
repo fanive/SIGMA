@@ -128,7 +128,7 @@ class NewsFeedPanel extends StatelessWidget {
                 Text('QUANTUM INTELLIGENCE', style: AppTheme.label(context)),
                 const Spacer(),
                 Text(intel.regime.toUpperCase(),
-                    style: GoogleFonts.ibmPlexSans(
+                    style: GoogleFonts.lora(
                         fontSize: 10,
                         color: regimeColor.withValues(alpha: 0.8),
                         fontWeight: FontWeight.w700,
@@ -177,7 +177,7 @@ class NewsFeedPanel extends StatelessWidget {
             width: 0.5),
       ),
       child: Text(text.toUpperCase(),
-          style: GoogleFonts.ibmPlexSans(
+          style: GoogleFonts.lora(
               fontSize: 9,
               color: dark ? AppTheme.white38 : AppTheme.black38,
               fontWeight: FontWeight.w600,
@@ -197,7 +197,7 @@ class NewsFeedPanel extends StatelessWidget {
         const SizedBox(width: 12),
         Text(
           'SYNCHRONIZING...',
-          style: GoogleFonts.ibmPlexSans(
+          style: GoogleFonts.lora(
             fontSize: 9,
             color: AppTheme.gold.withValues(alpha: 0.6),
             fontWeight: FontWeight.w600,
@@ -234,7 +234,7 @@ class NewsFeedPanel extends StatelessWidget {
             Row(
               children: [
                 Text(item.source.toUpperCase(),
-                    style: GoogleFonts.ibmPlexSans(
+                    style: GoogleFonts.lora(
                         color: dim,
                         fontSize: 9,
                         fontWeight: FontWeight.w600,
@@ -248,14 +248,14 @@ class NewsFeedPanel extends StatelessWidget {
                     borderRadius: BorderRadius.circular(2),
                   ),
                   child: Text(item.sentiment,
-                      style: GoogleFonts.ibmPlexSans(
+                      style: GoogleFonts.lora(
                           fontSize: 8,
                           fontWeight: FontWeight.w700,
                           color: sentColor)),
                 ),
                 const Spacer(),
                 Text(_formatDate(item.publishedAt),
-                    style: GoogleFonts.ibmPlexSans(
+                    style: GoogleFonts.lora(
                         color: dim.withValues(alpha: 0.5),
                         fontSize: 8,
                         fontWeight: FontWeight.w600)),
@@ -264,7 +264,7 @@ class NewsFeedPanel extends StatelessWidget {
                   ...item.tickers.take(3).map((t) => Padding(
                         padding: const EdgeInsets.only(left: 6),
                         child: Text(t,
-                            style: GoogleFonts.ibmPlexSans(
+                            style: GoogleFonts.lora(
                                 fontSize: 9,
                                 fontWeight: FontWeight.w700,
                                 color:
@@ -331,14 +331,14 @@ class NewsFeedPanel extends StatelessWidget {
               Row(
                 children: [
                   Text(source.toUpperCase(),
-                      style: GoogleFonts.ibmPlexSans(
+                      style: GoogleFonts.lora(
                           color: dim,
                           fontSize: 9,
                           fontWeight: FontWeight.w600,
                           letterSpacing: 1.4)),
                   const Spacer(),
                   Text(_formatDate(n['publishedAt']),
-                      style: GoogleFonts.ibmPlexSans(
+                      style: GoogleFonts.lora(
                           color: dim.withValues(alpha: 0.5),
                           fontSize: 8,
                           fontWeight: FontWeight.w600)),

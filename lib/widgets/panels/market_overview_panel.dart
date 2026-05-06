@@ -1,4 +1,4 @@
-﻿// ignore_for_file: dead_null_aware_expression, prefer_const_constructors, unnecessary_non_null_assertion, unused_import
+// ignore_for_file: dead_null_aware_expression, prefer_const_constructors, unnecessary_non_null_assertion, unused_import
 import 'dart:developer' as dev;
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
@@ -16,9 +16,9 @@ import '../sentiment/sentiment_history_chart.dart';
 import '../sentiment/sentiment_gauge.dart';
 import 'package:intl/intl.dart';
 
-// ═══════════════════════════════════════════════════════════════════════════════
-// SIGMA BIM MARKET MODULE — Refined architectural data architecture
-// ═══════════════════════════════════════════════════════════════════════════════
+// -------------------------------------------------------------------------------
+// SIGMA BIM MARKET MODULE  Refined architectural data architecture
+// -------------------------------------------------------------------------------
 
 class MarketOverviewPanel extends StatefulWidget {
   const MarketOverviewPanel({super.key});
@@ -62,50 +62,41 @@ class _MarketOverviewPanelState extends State<MarketOverviewPanel> {
             child: ListView(
               padding: EdgeInsets.zero,
               children: [
-                _investmentCommitteeBrief(overview, sp, context),
-                // ── MASTHEAD: VIX + SENTIMENT ────────────────────────
                 _bimVixSentimentStrip(overview, context),
                 _bimSentimentIntelligence(overview, context),
 
-                // ── DAILY CREAM REPORT™ ──────────────────────────────
+                // -- DAILY CREAM REPORT ------------------------------
                 if (sp.dailyCreamReport != null)
                   _bimDailyCreamSection(sp.dailyCreamReport!, context),
 
-                // ── INTELLIGENCE ÉCONOMIQUE ──────────────────────────
+                // -- INTELLIGENCE ECONOMIQUE --------------------------
                 _bimSectionHeader('INTELLIGENCE ÉCONOMIQUE'),
                 _bimIntelligenceSection(overview, sp, context),
 
-                // ── MACRO & OBLIGATIONS ──────────────────────────────
+                // -- MACRO & OBLIGATIONS ------------------------------
                 _bimSectionHeader('MACRO & OBLIGATIONS'),
                 _bimMacroGrid(overview, context),
                 _bimEconomicCalendar(overview, context),
 
-                // ── DYNAMIQUE DES SECTEURS ───────────────────────────
+                // -- DYNAMIQUE DES SECTEURS ---------------------------
                 if (overview.sectors.isNotEmpty) ...[
                   _bimSectionHeader('DYNAMIQUE DES SECTEURS'),
                   _bimSectorGrid(overview, context),
                 ],
 
-                // ── TOP MOVERS ───────────────────────────────────────
+                // -- TOP MOVERS ---------------------------------------
                 if ((overview.topGainers?.isNotEmpty ?? false) ||
                     (overview.topLosers?.isNotEmpty ?? false)) ...[
                   _bimSectionHeader('TOP MOVERS'),
                   _bimTopMovers(overview, context),
                 ],
-
-                // ── CATALYSEURS ACTIFS ───────────────────────────────
-                if (sp.catalystInsights.isNotEmpty) ...[
-                  _bimSectionHeader('CATALYSEURS ACTIFS'),
-                  _bimCatalystList(context, sp),
-                ],
-
-                // ── TRANSACTIONS D'INITIÉS ───────────────────────────
+                // -- TRANSACTIONS D'INITIES ---------------------------
                 if (overview.insiderTrades?.isNotEmpty ?? false) ...[
                   _bimSectionHeader("TRANSACTIONS D'INITIÉS"),
                   _bimInsiderTrades(overview, context),
                 ],
 
-                // ── SENTIMENT ALTERNATIF & RISQUES ───────────────────
+                // -- SENTIMENT ALTERNATIF & RISQUES -------------------
                 if (overview.indicators != null &&
                     overview.indicators!.isNotEmpty) ...[
                   _bimSectionHeader('SENTIMENT ALTERNATIF & RISQUES'),
@@ -136,7 +127,7 @@ class _MarketOverviewPanelState extends State<MarketOverviewPanel> {
           ),
           const SizedBox(height: 16),
           Text('SYNCHRONISATION GLOBALE...',
-              style: GoogleFonts.ibmPlexSans(
+              style: GoogleFonts.lora(
                   fontSize: 9,
                   fontWeight: FontWeight.w600,
                   color: AppTheme.textTertiary,
@@ -146,98 +137,7 @@ class _MarketOverviewPanelState extends State<MarketOverviewPanel> {
     );
   }
 
-  // ─── BIM UI ARCHITECTURE ───────────────────────────────────────────────
-
-  Widget _investmentCommitteeBrief(
-    MarketOverview overview,
-    SigmaProvider sp,
-    BuildContext context,
-  ) {
-    final topGainers = overview.topGainers?.length ?? 0;
-    final topLosers = overview.topLosers?.length ?? 0;
-    final sectorCount = overview.sectors.length;
-    final catalystCount = sp.catalystInsights.length;
-
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(20, 16, 20, 8),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              Expanded(
-                child: Text(
-                  'VUE MACRO & MARCHÉS',
-                  style: GoogleFonts.ibmPlexSans(
-                    fontSize: 9,
-                    fontWeight: FontWeight.w600,
-                    letterSpacing: 1.8,
-                    color: AppTheme.getSecondaryText(context),
-                  ),
-                ),
-              ),
-              GestureDetector(
-                onTap: () => sp.fetchMarketOverview(forceRefresh: true),
-                child: Icon(
-                  Icons.refresh_rounded,
-                  size: 16,
-                  color: AppTheme.getSecondaryText(context),
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 12),
-          LayoutBuilder(
-            builder: (context, constraints) {
-              final isWide = constraints.maxWidth >= 720;
-              final metrics = [
-                InstitutionalMetric(
-                  label: 'Sectors covered',
-                  value: '$sectorCount',
-                  footnote: 'Breadth of current market read',
-                  icon: Icons.layers_rounded,
-                ),
-                InstitutionalMetric(
-                  label: 'Top movers',
-                  value: '${topGainers + topLosers}',
-                  footnote: 'Upside and downside dislocations',
-                  icon: Icons.swap_vert_rounded,
-                ),
-                InstitutionalMetric(
-                  label: 'Catalysts',
-                  value: '$catalystCount',
-                  footnote: 'Events requiring follow-up',
-                  icon: Icons.event_available_rounded,
-                ),
-              ];
-
-              if (!isWide) {
-                return Column(
-                  children: metrics
-                      .map((metric) => Padding(
-                            padding: const EdgeInsets.only(bottom: 10),
-                            child: metric,
-                          ))
-                      .toList(),
-                );
-              }
-
-              return Row(
-                children: metrics
-                    .map((metric) => Expanded(
-                          child: Padding(
-                            padding: const EdgeInsets.only(right: 10),
-                            child: metric,
-                          ),
-                        ))
-                    .toList(),
-              );
-            },
-          ),
-        ],
-      ),
-    );
-  }
+  // --- BIM UI ARCHITECTURE -----------------------------------------------
 
   Widget _bimSectionHeader(String label) {
     return Padding(
@@ -246,7 +146,7 @@ class _MarketOverviewPanelState extends State<MarketOverviewPanel> {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Text(label.toUpperCase(),
-              style: GoogleFonts.ibmPlexSans(
+              style: GoogleFonts.lora(
                   fontSize: 8,
                   fontWeight: FontWeight.w600,
                   color: AppTheme.isDark(context)
@@ -299,7 +199,7 @@ class _MarketOverviewPanelState extends State<MarketOverviewPanel> {
             ),
             const SizedBox(width: 12),
             Text('STATUT DU RÉGIME DE MARCHÉ',
-                style: GoogleFonts.ibmPlexSans(
+                style: GoogleFonts.lora(
                     fontSize: 8,
                     fontWeight: FontWeight.w600,
                     color: isDark ? AppTheme.white38 : AppTheme.black38,
@@ -450,8 +350,8 @@ class _MarketOverviewPanelState extends State<MarketOverviewPanel> {
             children: [
               const Icon(Icons.gpp_bad, size: 14, color: AppTheme.warning),
               const SizedBox(width: 8),
-              Text('ANALYSES STRATÉGIQUES',
-                  style: GoogleFonts.ibmPlexSans(
+              Text('ANALYSES STRATGIQUES',
+                  style: GoogleFonts.lora(
                       fontSize: 8,
                       fontWeight: FontWeight.w600,
                       color: AppTheme.warning,
@@ -509,7 +409,7 @@ class _MarketOverviewPanelState extends State<MarketOverviewPanel> {
           crossAxisCount: 2,
           mainAxisSpacing: 1,
           crossAxisSpacing: 1,
-          childAspectRatio: 2.8,
+          mainAxisExtent: 60,
         ),
         itemCount: items.length,
         itemBuilder: (context, i) {
@@ -530,14 +430,14 @@ class _MarketOverviewPanelState extends State<MarketOverviewPanel> {
                 const SizedBox(width: 10),
                 Expanded(
                   child: Text(item['label'] as String,
-                      style: GoogleFonts.ibmPlexSans(
+                      style: GoogleFonts.lora(
                           fontSize: 8,
                           fontWeight: FontWeight.w600,
                           color: AppTheme.textTertiary,
                           letterSpacing: 1.2)),
                 ),
                 Text(item['value'] as String,
-                    style: GoogleFonts.ibmPlexSans(
+                    style: GoogleFonts.lora(
                         fontSize: 12,
                         fontWeight: FontWeight.w700,
                         color: isDark ? AppTheme.white : AppTheme.black)),
@@ -580,7 +480,7 @@ class _MarketOverviewPanelState extends State<MarketOverviewPanel> {
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         Text(m.ticker,
-                            style: GoogleFonts.ibmPlexSans(
+                            style: GoogleFonts.lora(
                                 fontSize: 11, fontWeight: FontWeight.w700)),
                       ],
                     ),
@@ -590,7 +490,7 @@ class _MarketOverviewPanelState extends State<MarketOverviewPanel> {
                     children: [
                       Text(
                           '${m.change >= 0 ? '+' : ''}${m.change.toStringAsFixed(1)}%',
-                          style: GoogleFonts.ibmPlexSans(
+                          style: GoogleFonts.lora(
                               fontSize: 10,
                               fontWeight: FontWeight.w700,
                               color: color)),
@@ -645,60 +545,6 @@ class _MarketOverviewPanelState extends State<MarketOverviewPanel> {
     );
   }
 
-  Widget _bimCatalystList(BuildContext context, SigmaProvider sp) {
-    final catalysts = sp.catalystInsights;
-    if (catalysts.isEmpty) return const SizedBox.shrink();
-
-    return Column(
-      children: [
-        ...catalysts.take(4).map((c) {
-          final color = c.isNegative ? AppTheme.negative : AppTheme.positive;
-          return Container(
-            decoration: BoxDecoration(
-              border: Border(
-                  bottom: BorderSide(
-                      color: AppTheme.getBorder(context), width: 0.5)),
-            ),
-            child: ListTile(
-              contentPadding:
-                  const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
-              leading: Container(
-                width: 40,
-                height: 40,
-                decoration: BoxDecoration(
-                  border: Border.all(color: color.withValues(alpha: 0.3)),
-                  color: color.withValues(alpha: 0.05),
-                ),
-                child: Center(
-                    child: Text('${(c.impactScore * 100).toInt()}',
-                        style: GoogleFonts.ibmPlexSans(
-                            fontSize: 12,
-                            fontWeight: FontWeight.w700,
-                            color: color))),
-              ),
-              title: Text(c.ticker,
-                  style: GoogleFonts.ibmPlexSans(
-                      fontSize: 13, fontWeight: FontWeight.w700, color: color)),
-              subtitle: Text(c.title,
-                  style: AppTheme.body(context, size: 12)
-                      .copyWith(height: 1.4, fontWeight: FontWeight.w600),
-                  maxLines: 2,
-                  overflow: TextOverflow.ellipsis),
-              trailing: Icon(
-                  c.isNegative ? Icons.trending_down : Icons.trending_up,
-                  size: 16,
-                  color: color),
-              onTap: () {
-                context.read<TerminalProvider>().openAnalysis(c.ticker);
-                context.read<SigmaProvider>().analyzeTicker(c.ticker);
-              },
-            ),
-          );
-        }),
-      ],
-    );
-  }
-
   Widget _bimInsiderTrades(MarketOverview overview, BuildContext context) {
     final trades = overview.insiderTrades ?? [];
     if (trades.isEmpty) return const SizedBox.shrink();
@@ -734,7 +580,7 @@ class _MarketOverviewPanelState extends State<MarketOverviewPanel> {
                     ),
                     child: Center(
                       child: Text(t.symbol.substring(0, 1),
-                          style: GoogleFonts.ibmPlexSans(
+                          style: GoogleFonts.lora(
                               fontSize: 12,
                               fontWeight: FontWeight.w700,
                               color: color)),
@@ -748,7 +594,7 @@ class _MarketOverviewPanelState extends State<MarketOverviewPanel> {
                         Row(
                           children: [
                             Text(t.symbol,
-                                style: GoogleFonts.ibmPlexSans(
+                                style: GoogleFonts.lora(
                                     fontSize: 12, fontWeight: FontWeight.w700)),
                             const SizedBox(width: 8),
                             if (t.labels.isNotEmpty)
@@ -763,7 +609,7 @@ class _MarketOverviewPanelState extends State<MarketOverviewPanel> {
                                               .withValues(alpha: 0.05),
                                     ),
                                     child: Text(l,
-                                        style: GoogleFonts.ibmPlexSans(
+                                        style: GoogleFonts.lora(
                                             fontSize: 7,
                                             fontWeight: FontWeight.w700,
                                             color: l == 'CLUSTER'
@@ -773,7 +619,7 @@ class _MarketOverviewPanelState extends State<MarketOverviewPanel> {
                           ],
                         ),
                         Text(t.name,
-                            style: GoogleFonts.ibmPlexSans(
+                            style: GoogleFonts.lora(
                                 fontSize: 9,
                                 color: isDark
                                     ? AppTheme.white38
@@ -789,11 +635,11 @@ class _MarketOverviewPanelState extends State<MarketOverviewPanel> {
                     children: [
                       Text(
                         '\$${(t.value / 1000000).toStringAsFixed(1)}M',
-                        style: GoogleFonts.ibmPlexSans(
+                        style: GoogleFonts.lora(
                             fontSize: 12, fontWeight: FontWeight.w700),
                       ),
                       Text(_formatDate(t.date),
-                          style: GoogleFonts.ibmPlexSans(
+                          style: GoogleFonts.lora(
                               fontSize: 8,
                               color: AppTheme.textTertiary,
                               fontWeight: FontWeight.w600,
@@ -855,7 +701,7 @@ class _MarketOverviewPanelState extends State<MarketOverviewPanel> {
           const SizedBox(width: 10),
           Expanded(
             child: Text(title,
-                style: GoogleFonts.ibmPlexSans(
+                style: GoogleFonts.lora(
                     fontSize: 7,
                     fontWeight: FontWeight.w600,
                     color: AppTheme.textTertiary,
@@ -864,9 +710,12 @@ class _MarketOverviewPanelState extends State<MarketOverviewPanel> {
                 overflow: TextOverflow.ellipsis),
           ),
           const SizedBox(width: 8),
-          Text(value,
-              style: GoogleFonts.ibmPlexSans(
-                  fontSize: 11, fontWeight: FontWeight.w700, color: color)),
+          Flexible(
+            child: Text(value,
+                style: GoogleFonts.lora(
+                    fontSize: 11, fontWeight: FontWeight.w700, color: color),
+                overflow: TextOverflow.ellipsis),
+          ),
         ],
       ),
     );
@@ -886,7 +735,7 @@ class _MarketOverviewPanelState extends State<MarketOverviewPanel> {
           crossAxisCount: 2,
           mainAxisSpacing: 1,
           crossAxisSpacing: 1,
-          childAspectRatio: 2.6,
+          mainAxisExtent: 64,
         ),
         itemCount: sectors.length,
         itemBuilder: (context, i) {
@@ -911,7 +760,7 @@ class _MarketOverviewPanelState extends State<MarketOverviewPanel> {
                     mainAxisAlignment: MainAxisAlignment.center,
                     children: [
                       Text(s.name.toUpperCase(),
-                          style: GoogleFonts.ibmPlexSans(
+                          style: GoogleFonts.lora(
                               fontSize: 8,
                               fontWeight: FontWeight.w600,
                               color:
@@ -921,7 +770,7 @@ class _MarketOverviewPanelState extends State<MarketOverviewPanel> {
                           overflow: TextOverflow.ellipsis),
                       const SizedBox(height: 4),
                       Text(s.sentiment.toUpperCase(),
-                          style: GoogleFonts.ibmPlexSans(
+                          style: GoogleFonts.lora(
                               fontSize: 7,
                               fontWeight: FontWeight.w600,
                               color: s.sentiment.contains('HAUSS') ||
@@ -936,7 +785,7 @@ class _MarketOverviewPanelState extends State<MarketOverviewPanel> {
                 ),
                 Text(
                     '${s.performance >= 0 ? '+' : ''}${s.performance.toStringAsFixed(1)}%',
-                    style: GoogleFonts.ibmPlexSans(
+                    style: GoogleFonts.lora(
                         fontSize: 11,
                         fontWeight: FontWeight.w700,
                         color: color)),
@@ -957,15 +806,15 @@ class _MarketOverviewPanelState extends State<MarketOverviewPanel> {
             border: Border.all(color: AppTheme.primary, width: 0.5)),
         child: Column(
           children: [
-            Text('PASSER À SIGMA PRO',
-                style: GoogleFonts.ibmPlexSans(
+            Text('PASSER  SIGMA PRO',
+                style: GoogleFonts.lora(
                     fontSize: 10,
                     fontWeight: FontWeight.w700,
                     color: AppTheme.primary,
                     letterSpacing: 2)),
             const SizedBox(height: 12),
             Text(
-                'Débloquez les diagnostics structurels avancés et la corrélation multi-actifs.',
+                'Dbloquez les diagnostics structurels avancs et la corrlation multi-actifs.',
                 textAlign: TextAlign.center,
                 style: AppTheme.body(context, size: 12).copyWith(height: 1.5)),
           ],
@@ -982,7 +831,7 @@ class _MarketOverviewPanelState extends State<MarketOverviewPanel> {
           const Icon(Icons.storage, size: 24, color: AppTheme.primary),
           const SizedBox(height: 16),
           Text('ERREUR DE SYNCHRONISATION',
-              style: GoogleFonts.ibmPlexSans(
+              style: GoogleFonts.lora(
                   fontSize: 10,
                   fontWeight: FontWeight.w600,
                   color: AppTheme.textTertiary,
@@ -990,7 +839,7 @@ class _MarketOverviewPanelState extends State<MarketOverviewPanel> {
           const SizedBox(height: 32),
           TextButton(
               onPressed: () => sp.fetchMarketOverview(forceRefresh: true),
-              child: Text('RÉESSAYER LA SYNCHRONISATION',
+              child: Text('RESSAYER LA SYNCHRONISATION',
                   style: AppTheme.label(context))),
         ],
       ),
@@ -1015,6 +864,9 @@ class _MarketOverviewPanelState extends State<MarketOverviewPanel> {
 
   Widget _bimDailyCreamSection(DailyCreamReport report, BuildContext context) {
     final isDark = AppTheme.isDark(context);
+    final picks = report.alphaPicks.isNotEmpty
+        ? report.alphaPicks
+        : report.topMovers.take(4).toList();
     return Container(
       margin: const EdgeInsets.fromLTRB(24, 24, 24, 0),
       decoration: BoxDecoration(
@@ -1043,8 +895,8 @@ class _MarketOverviewPanelState extends State<MarketOverviewPanel> {
                       color: AppTheme.gold, shape: BoxShape.circle),
                 ),
                 const SizedBox(width: 12),
-                Text('DAILY CREAM REPORT™',
-                    style: GoogleFonts.ibmPlexSans(
+                Text('DAILY CREAM REPORT',
+                    style: GoogleFonts.lora(
                         fontSize: 8,
                         fontWeight: FontWeight.w700,
                         color: AppTheme.gold,
@@ -1054,7 +906,7 @@ class _MarketOverviewPanelState extends State<MarketOverviewPanel> {
                     DateFormat('dd MMM HH:mm')
                         .format(report.date)
                         .toUpperCase(),
-                    style: GoogleFonts.ibmPlexSans(
+                    style: GoogleFonts.lora(
                         fontSize: 8,
                         color: AppTheme.textTertiary,
                         fontWeight: FontWeight.w600,
@@ -1083,8 +935,8 @@ class _MarketOverviewPanelState extends State<MarketOverviewPanel> {
                         bottom: BorderSide(
                             color: AppTheme.getBorder(context), width: 0.5)),
                   ),
-                    child: Text('TICKERS A SURVEILLER',
-                      style: GoogleFonts.ibmPlexSans(
+                  child: Text('TICKERS A SURVEILLER',
+                      style: GoogleFonts.lora(
                           fontSize: 8,
                           fontWeight: FontWeight.w600,
                           color: AppTheme.textTertiary,
@@ -1098,11 +950,10 @@ class _MarketOverviewPanelState extends State<MarketOverviewPanel> {
                     crossAxisCount: 2,
                     mainAxisSpacing: 12,
                     crossAxisSpacing: 12,
-                    childAspectRatio: 2.4,
+                    mainAxisExtent: 58,
                   ),
-                  itemCount: report.alphaPicks.length,
-                  itemBuilder: (context, i) =>
-                      _bimAlphaItem(report.alphaPicks[i], context),
+                  itemCount: picks.length,
+                  itemBuilder: (context, i) => _bimAlphaItem(picks[i], context),
                 ),
               ],
             ),
@@ -1119,29 +970,39 @@ class _MarketOverviewPanelState extends State<MarketOverviewPanel> {
         context.read<SigmaProvider>().analyzeTicker(pick.ticker);
       },
       child: Container(
-        padding: const EdgeInsets.symmetric(vertical: 4, horizontal: 8),
+        padding: const EdgeInsets.symmetric(vertical: 6, horizontal: 10),
         decoration: BoxDecoration(
+          color: AppTheme.isDark(context)
+              ? AppTheme.white.withValues(alpha: 0.02)
+              : AppTheme.black.withValues(alpha: 0.02),
           border: Border.all(color: AppTheme.getBorder(context), width: 0.5),
+          borderRadius: BorderRadius.circular(4),
         ),
         child: Row(
-          mainAxisAlignment: MainAxisAlignment.spaceBetween,
           children: [
-            Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                Text(pick.ticker,
-                    style: GoogleFonts.ibmPlexSans(
-                        fontSize: 11, fontWeight: FontWeight.w700)),
-                Text(pick.signal,
-                    style: GoogleFonts.ibmPlexSans(
-                        fontSize: 7,
-                        fontWeight: FontWeight.w600,
-                    color: AppTheme.primary)),
-              ],
+            TickerLogoThumb(symbol: pick.ticker, logoUrl: null, size: 24),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Text(pick.ticker,
+                      style: GoogleFonts.lora(
+                          fontSize: 11, fontWeight: FontWeight.w700)),
+                  Text(pick.signal,
+                      style: GoogleFonts.lora(
+                          fontSize: 7,
+                          fontWeight: FontWeight.w600,
+                          color: AppTheme.primary),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis),
+                ],
+              ),
             ),
+            const SizedBox(width: 8),
             Text('${pick.score.toInt()}',
-                style: GoogleFonts.ibmPlexSans(
+                style: GoogleFonts.lora(
                     fontSize: 12,
                     fontWeight: FontWeight.w700,
                     color: AppTheme.gold)),
@@ -1213,14 +1074,16 @@ class _MarketOverviewPanelState extends State<MarketOverviewPanel> {
             mainAxisSize: MainAxisSize.min,
             children: [
               Text(label,
-                  style: GoogleFonts.ibmPlexSans(
+                  style: GoogleFonts.lora(
                       fontSize: 7,
                       fontWeight: FontWeight.w600,
                       color: AppTheme.textTertiary,
-                      letterSpacing: 0.8)),
+                      letterSpacing: 0.8),
+                  overflow: TextOverflow.ellipsis),
               Text(value,
-                  style: GoogleFonts.ibmPlexSans(
-                      fontSize: 12, fontWeight: FontWeight.w700, color: color)),
+                  style: GoogleFonts.lora(
+                      fontSize: 12, fontWeight: FontWeight.w700, color: color),
+                  overflow: TextOverflow.ellipsis),
             ],
           ),
         ],
@@ -1231,14 +1094,14 @@ class _MarketOverviewPanelState extends State<MarketOverviewPanel> {
   Widget _bimSentimentIntelligence(
       MarketOverview overview, BuildContext context) {
     print(
-        '🎨 Rendering SentimentIntelligence: backtest=${overview.backtest != null}, sectors=${overview.sectorSentiment != null}');
+        '?? Rendering SentimentIntelligence: backtest=${overview.backtest != null}, sectors=${overview.sectorSentiment != null}');
     if (overview.backtest == null && overview.sectorSentiment == null) {
       return const SizedBox.shrink();
     }
 
     return Column(
       children: [
-        _bimSectionHeader('SENTIMENT INTELLIGENCE™'),
+        _bimSectionHeader('SENTIMENT INTELLIGENCE'),
         if (overview.backtest != null)
           _bimStatisticalEdge(overview.backtest!, context),
         const SizedBox(height: 24),
@@ -1260,7 +1123,7 @@ class _MarketOverviewPanelState extends State<MarketOverviewPanel> {
               Icon(Icons.data_object, size: 12, color: AppTheme.gold),
               const SizedBox(width: 8),
               Text('PROBABILISTIC HISTORICAL RETURNS (STATISTICAL EDGE)',
-                  style: GoogleFonts.ibmPlexSans(
+                  style: GoogleFonts.lora(
                       fontSize: 8,
                       fontWeight: FontWeight.w600,
                       color: AppTheme.gold,
@@ -1330,7 +1193,7 @@ class _MarketOverviewPanelState extends State<MarketOverviewPanel> {
                 padding:
                     const EdgeInsets.symmetric(vertical: 8, horizontal: 12),
                 child: Text(l,
-                    style: GoogleFonts.ibmPlexSans(
+                    style: GoogleFonts.lora(
                         fontSize: 7,
                         fontWeight: FontWeight.w600,
                         color: AppTheme.textTertiary)),
@@ -1347,7 +1210,7 @@ class _MarketOverviewPanelState extends State<MarketOverviewPanel> {
         return Padding(
           padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 12),
           child: Text(v,
-              style: GoogleFonts.ibmPlexSans(
+              style: GoogleFonts.lora(
                 fontSize: 10,
                 fontWeight: i == 0 ? FontWeight.w600 : FontWeight.w400,
                 color: i == 0
@@ -1379,7 +1242,7 @@ class _MarketOverviewPanelState extends State<MarketOverviewPanel> {
         children: [
           const SizedBox(height: 16),
           Text('ÉVÉNEMENTS ÉCONOMIQUES',
-              style: GoogleFonts.ibmPlexSans(
+              style: GoogleFonts.lora(
                   fontSize: 8,
                   fontWeight: FontWeight.w600,
                   color: dimText,
@@ -1406,12 +1269,12 @@ class _MarketOverviewPanelState extends State<MarketOverviewPanel> {
                               e.date.split(' ').length > 1
                                   ? e.date.split(' ')[1]
                                   : e.date,
-                              style: GoogleFonts.ibmPlexSans(
+                              style: GoogleFonts.lora(
                                   fontSize: 9,
                                   fontWeight: FontWeight.w700,
                                   color: AppTheme.primary)),
                           Text(e.country,
-                              style: GoogleFonts.ibmPlexSans(
+                              style: GoogleFonts.lora(
                                   fontSize: 7,
                                   fontWeight: FontWeight.w600,
                                   color: dimText)),
@@ -1419,7 +1282,7 @@ class _MarketOverviewPanelState extends State<MarketOverviewPanel> {
                 const SizedBox(width: 12),
                 Expanded(
                     child: Text(e.event.toUpperCase(),
-                        style: GoogleFonts.ibmPlexSans(
+                        style: GoogleFonts.lora(
                             fontSize: 9,
                             fontWeight: FontWeight.w600,
                             color: isHigh ? color : mainText,
@@ -1427,8 +1290,8 @@ class _MarketOverviewPanelState extends State<MarketOverviewPanel> {
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis)),
                 const SizedBox(width: 8),
-                Text(e.actual != null && e.actual!.isNotEmpty ? e.actual! : '—',
-                    style: GoogleFonts.ibmPlexSans(
+                Text(e.actual != null && e.actual!.isNotEmpty ? e.actual! : '',
+                    style: GoogleFonts.lora(
                         fontSize: 10,
                         fontWeight: FontWeight.w700,
                         color: isHigh ? AppTheme.gold : mainText)),

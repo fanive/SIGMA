@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:provider/provider.dart';
-import '../../models/sigma_models.dart';
 
 import '../../providers/sigma_provider.dart';
 import '../../providers/terminal_provider.dart';
@@ -211,7 +210,7 @@ class _SidebarItemState extends State<_SidebarItem> {
                 const SizedBox(height: 2),
                 Text(
                   widget.panel.getLabel(lang),
-                  style: GoogleFonts.ibmPlexSans(
+                  style: GoogleFonts.lora(
                     color: widget.isActive
                         ? activeColor
                         : _isHovered

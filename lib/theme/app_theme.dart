@@ -1,4 +1,4 @@
-﻿import 'package:flutter/material.dart';
+import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -14,14 +14,13 @@ class AppTheme {
   static const Color accent = Color(0xFFBD9354); // Soft Gold/Champagne
   static const Color gold = Color(0xFFC5A059);
 
-  static const Color bgPrimary =
-      Color(0xFF0B0E14); // Midnight Navy (Deep & Premium)
-  static const Color bgSecondary = Color(0xFF151B23); // Dark Surface
-  static const Color bgTertiary = Color(0xFF21262D);
-  static const Color bgElevated = Color(0xFF30363D);
+  static const Color bgPrimary = Color(0xFF111418); // Koyfin Obsidian
+  static const Color bgSecondary = Color(0xFF1B1E24); // Koyfin Surface
+  static const Color bgTertiary = Color(0xFF242830);
+  static const Color bgElevated = Color(0xFF323844);
 
-  static const Color borderDark = Color(0xFF30363D);
-  static const Color borderLight = Color(0xFFE1E4E8);
+  static const Color borderDark = Color(0xFF2E333C);
+  static const Color borderLight = Color(0xFFE5E7EB);
 
   // ─── Extended Surface Colors ──────────────────────────────────────────
   static const Color surfaceUltraDark = Color(0xFF05070A);
@@ -175,12 +174,12 @@ class AppTheme {
 
   static const Duration animNormal = Duration(milliseconds: 300);
 
-  // ─── Typography — police unique : Lora ────────────────────────────────────
+  // ─── Typography — police unique : Inter (Koyfin style) ────────────────────────────────────
   static TextStyle serif(BuildContext context,
           {double? size, FontWeight? weight, Color? color}) =>
       GoogleFonts.lora(
         fontSize: size ?? 24,
-        fontWeight: weight ?? FontWeight.w800,
+        fontWeight: weight ?? FontWeight.w700,
         color: color ?? getPrimaryText(context),
         letterSpacing: -0.5,
       );
@@ -189,7 +188,7 @@ class AppTheme {
           {double? size, FontWeight? weight, Color? color}) =>
       GoogleFonts.lora(
         fontSize: size ?? 14,
-        fontWeight: weight ?? FontWeight.w500,
+        fontWeight: weight ?? FontWeight.w400,
         color: color ?? getPrimaryText(context),
       );
 
@@ -200,38 +199,38 @@ class AppTheme {
     return TextTheme(
       displayLarge: GoogleFonts.lora(
         fontSize: 32,
-        fontWeight: FontWeight.w800,
+        fontWeight: FontWeight.w700,
         color: titleColor,
         letterSpacing: -0.8,
       ),
       headlineMedium: GoogleFonts.lora(
         fontSize: 24,
-        fontWeight: FontWeight.w700,
+        fontWeight: FontWeight.w600,
         color: titleColor,
         letterSpacing: -0.5,
       ),
       headlineSmall: GoogleFonts.lora(
         fontSize: 18,
-        fontWeight: FontWeight.w700,
+        fontWeight: FontWeight.w600,
         color: titleColor,
       ),
       bodyLarge: GoogleFonts.lora(
-        fontSize: 16,
+        fontSize: 14,
         fontWeight: FontWeight.w400,
         color: bodyColor,
-        height: 1.6,
+        height: 1.5,
       ),
       bodyMedium: GoogleFonts.lora(
-        fontSize: 14,
+        fontSize: 13,
         fontWeight: FontWeight.w400,
         color: bodyColor,
         height: 1.5,
       ),
       labelSmall: GoogleFonts.lora(
         fontSize: 11,
-        fontWeight: FontWeight.w900,
+        fontWeight: FontWeight.w600,
         color: isDark ? accent : primary,
-        letterSpacing: 1.5,
+        letterSpacing: 0.5,
       ),
     );
   }
@@ -268,7 +267,7 @@ class AppTheme {
       const EdgeInsets.all(panelPadding);
 
   static TextStyle overline(BuildContext context, {Color? color}) =>
-      GoogleFonts.ibmPlexSans(
+      GoogleFonts.lora(
         fontSize: 9,
         fontWeight: FontWeight.w600,
         color: color ?? getSecondaryText(context),
@@ -281,7 +280,7 @@ class AppTheme {
           FontWeight weight = FontWeight.w600,
           double spacing = 1.8,
           Color? color}) =>
-      GoogleFonts.ibmPlexSans(
+      GoogleFonts.lora(
         fontSize: size,
         fontWeight: weight,
         letterSpacing: spacing,
@@ -293,7 +292,7 @@ class AppTheme {
           {double size = 12,
           FontWeight weight = FontWeight.w500,
           Color? color}) =>
-      GoogleFonts.ibmPlexSans(
+      GoogleFonts.lora(
         fontSize: size,
         fontWeight: weight,
         color: color ?? getPrimaryText(context),
@@ -301,7 +300,7 @@ class AppTheme {
 
   static TextStyle compactTitle(BuildContext context,
           {double size = 18, Color? color}) =>
-      GoogleFonts.ibmPlexSans(
+      GoogleFonts.lora(
         fontSize: size,
         fontWeight: FontWeight.w700,
         color: color ?? getPrimaryText(context),
@@ -312,7 +311,7 @@ class AppTheme {
           {double size = 12, Color? color}) =>
       GoogleFonts.lora(
         fontSize: size,
-        fontWeight: FontWeight.w500,
+        fontWeight: FontWeight.w400,
         color: color ?? getSecondaryText(context),
         height: 1.35,
       );
@@ -394,7 +393,7 @@ class AppTheme {
         elevation: 0,
         scrolledUnderElevation: 0,
         centerTitle: false,
-        titleTextStyle: GoogleFonts.ibmPlexSans(
+        titleTextStyle: GoogleFonts.lora(
           fontSize: 10,
           fontWeight: FontWeight.w600,
           color: textSec,
@@ -452,10 +451,10 @@ class AppTheme {
           side: BorderSide(color: border, width: 0.5),
         ),
         titleTextStyle: GoogleFonts.lora(
-          fontSize: 13,
-          fontWeight: FontWeight.w800,
+          fontSize: 14,
+          fontWeight: FontWeight.w600,
           color: textPri,
-          letterSpacing: 1.2,
+          letterSpacing: 0.5,
         ),
         contentTextStyle: GoogleFonts.lora(
           fontSize: 13,
@@ -531,7 +530,7 @@ class AppTheme {
       chipTheme: ChipThemeData(
         backgroundColor: isDark ? bgTertiary : const Color(0xFFF1F5F9),
         selectedColor: primary.withValues(alpha: 0.15),
-        labelStyle: GoogleFonts.lora(fontSize: 11, fontWeight: FontWeight.w600),
+        labelStyle: GoogleFonts.lora(fontSize: 11, fontWeight: FontWeight.w500),
         side: BorderSide(color: border, width: 0.5),
         shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(radiusSm)),
@@ -545,7 +544,7 @@ class AppTheme {
           foregroundColor: Colors.white,
           elevation: 0,
           textStyle: GoogleFonts.lora(
-              fontSize: 13, fontWeight: FontWeight.w700, letterSpacing: 0.8),
+              fontSize: 13, fontWeight: FontWeight.w600, letterSpacing: 0.5),
           shape: RoundedRectangleBorder(
               borderRadius: BorderRadius.circular(radiusSm)),
           padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
@@ -557,7 +556,7 @@ class AppTheme {
         style: TextButton.styleFrom(
           foregroundColor: primary,
           textStyle:
-              GoogleFonts.lora(fontSize: 13, fontWeight: FontWeight.w600),
+              GoogleFonts.lora(fontSize: 13, fontWeight: FontWeight.w500),
         ),
       ),
 
@@ -594,7 +593,7 @@ class AppTheme {
           color: muted ? getSecondaryText(context) : getPrimaryText(context));
 
   static TextStyle label(BuildContext context) =>
-      GoogleFonts.ibmPlexSans(
+      GoogleFonts.lora(
         fontSize: 9,
         fontWeight: FontWeight.w600,
         letterSpacing: 1.8,
@@ -605,7 +604,7 @@ class AppTheme {
           {Color? color,
           double size = 14.0,
           FontWeight weight = FontWeight.w600}) =>
-      GoogleFonts.ibmPlexSans(
+      GoogleFonts.lora(
         fontSize: size,
         fontWeight: weight,
         color: color ?? getPrimaryText(context),
@@ -653,7 +652,7 @@ class _SectionWidget extends StatelessWidget {
             children: [
               Text(
                 title.toUpperCase(),
-                style: GoogleFonts.ibmPlexSans(
+                style: GoogleFonts.lora(
                   fontSize: 9,
                   fontWeight: FontWeight.w600,
                   color: AppTheme.getSecondaryText(context),

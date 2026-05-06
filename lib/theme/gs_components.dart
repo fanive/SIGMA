@@ -55,7 +55,7 @@ class GSBackButton extends StatelessWidget {
               const SizedBox(width: 4),
               Text(
                 label!,
-                style: GoogleFonts.ibmPlexSans(
+                style: GoogleFonts.lora(
                   fontSize: 14,
                   fontWeight: FontWeight.w500,
                   color: effectiveColor,
@@ -178,7 +178,7 @@ class _GSPageHeader extends StatelessWidget {
             const SizedBox(height: 6),
             Text(
               subtitle!,
-              style: GoogleFonts.ibmPlexSans(
+              style: GoogleFonts.lora(
                 fontSize: 9,
                 fontWeight: FontWeight.w600,
                 color: AppTheme.getSecondaryText(context),
@@ -213,7 +213,7 @@ class GSSectionHeader extends StatelessWidget {
         children: [
           Text(
             label,
-            style: GoogleFonts.ibmPlexSans(
+            style: GoogleFonts.lora(
               fontSize: 9,
               fontWeight: FontWeight.w600,
               color: AppTheme.accent,
@@ -363,7 +363,7 @@ class GSListTile extends StatelessWidget {
             if (value != null)
               Text(
                 value!,
-                style: GoogleFonts.ibmPlexSans(
+                style: GoogleFonts.lora(
                   fontSize: 10,
                   fontWeight: FontWeight.w600,
                   color: AppTheme.getSecondaryText(context),
@@ -415,7 +415,7 @@ class GSBadge extends StatelessWidget {
       ),
       child: Text(
         label,
-        style: GoogleFonts.ibmPlexSans(
+        style: GoogleFonts.lora(
           fontSize: 8,
           fontWeight: FontWeight.w700,
           color: fg,

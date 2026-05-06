@@ -172,6 +172,34 @@ class ChartOverlayEngine {
     return events;
   }
 
+  // ── RSI (14) ─────────────────────────────────────────────────────────
+  /// Compute Relative Strength Index (Wilder smoothing, period=14).
+  static List<double?> rsi(List<double> closes, {int period = 14}) {
+    final result = List<double?>.filled(closes.length, null);
+    if (closes.length <= period) return result;
+
+    double avgGain = 0, avgLoss = 0;
+    for (int i = 1; i <= period; i++) {
+      final change = closes[i] - closes[i - 1];
+      if (change >= 0) avgGain += change;
+      else avgLoss -= change;
+    }
+    avgGain /= period;
+    avgLoss /= period;
+
+    result[period] = avgLoss == 0 ? 100 : 100 - 100 / (1 + avgGain / avgLoss);
+
+    for (int i = period + 1; i < closes.length; i++) {
+      final change = closes[i] - closes[i - 1];
+      final gain = change > 0 ? change : 0.0;
+      final loss = change < 0 ? -change : 0.0;
+      avgGain = (avgGain * (period - 1) + gain) / period;
+      avgLoss = (avgLoss * (period - 1) + loss) / period;
+      result[i] = avgLoss == 0 ? 100 : 100 - 100 / (1 + avgGain / avgLoss);
+    }
+    return result;
+  }
+
   // ── FULL OVERLAY COMPUTATION ────────────────────────────────────────
   /// One-shot computation of all overlays from raw OHLCV data.
   /// This is the main entry point called by the chart widget.
@@ -203,6 +231,7 @@ class ChartOverlayEngine {
     final obvValues = obv(closes, volumes);
     final obvSma21 = sma(obvValues, 21);
     final crossEvents = detectCrosses(closes, volumes, smaMidPeriod: midPeriod, smaLongPeriod: longPeriod);
+    final rsi14 = rsi(closes);
 
     // Determine current regime
     String regime = 'NEUTRAL';
@@ -224,6 +253,7 @@ class ChartOverlayEngine {
       obvSma: obvSma21,
       crossEvents: crossEvents,
       regime: regime,
+      rsi: rsi14,
     );
   }
 }
@@ -277,6 +307,7 @@ class ChartOverlays {
   final List<double?> obvSma;
   final List<CrossEvent> crossEvents;
   final String regime;
+  final List<double?> rsi;
 
   const ChartOverlays({
     required this.fastPeriod,
@@ -288,6 +319,7 @@ class ChartOverlays {
     required this.obvSma,
     required this.crossEvents,
     required this.regime,
+    this.rsi = const [],
   });
 
   factory ChartOverlays.empty() => const ChartOverlays(
@@ -300,6 +332,7 @@ class ChartOverlays {
     obvSma: [],
     crossEvents: [],
     regime: 'NEUTRAL',
+    rsi: [],
   );
 
   bool get isEmpty => sma50.isEmpty;

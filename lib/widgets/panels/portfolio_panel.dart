@@ -32,7 +32,7 @@ class PortfolioPanel extends StatelessWidget {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text('NET ASSET VALUE',
-                        style: GoogleFonts.ibmPlexSans(
+                        style: GoogleFonts.lora(
                             fontSize: 8,
                             fontWeight: FontWeight.w600,
                             color: dim,
@@ -86,7 +86,7 @@ class PortfolioPanel extends StatelessWidget {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text('ALLOCATION',
-                        style: GoogleFonts.ibmPlexSans(
+                        style: GoogleFonts.lora(
                             fontSize: 8,
                             fontWeight: FontWeight.w600,
                             color: dim,
@@ -132,7 +132,7 @@ class PortfolioPanel extends StatelessWidget {
               Padding(
                 padding: const EdgeInsets.fromLTRB(24, 16, 24, 8),
                 child: Text('POSITIONS',
-                    style: GoogleFonts.ibmPlexSans(
+                    style: GoogleFonts.lora(
                         fontSize: 8,
                         fontWeight: FontWeight.w600,
                         color: dim,
@@ -152,7 +152,7 @@ class PortfolioPanel extends StatelessWidget {
                         color: isDark ? AppTheme.white.withValues(alpha: 0.06) : AppTheme.black.withValues(alpha: 0.06)),
                     const SizedBox(height: 12),
                     Text('BROKERAGE SYNC COMING SOON',
-                        style: GoogleFonts.ibmPlexSans(
+                        style: GoogleFonts.lora(
                             fontSize: 9,
                             fontWeight: FontWeight.w600,
                             color: dim,

@@ -2,6 +2,7 @@
 import 'dart:convert';
 import 'dart:developer' as dev;
 import 'package:http/http.dart' as http;
+import '../utils/logo_resolver.dart';
 
 /// ═══════════════════════════════════════════════════════════════════════════
 /// SIGMA API Service — Single source of truth for all financial data
@@ -30,15 +31,14 @@ class SigmaApiService {
   // ── HTTP helper ──────────────────────────────────────────────────────────
   static Future<dynamic> _get(String path,
       {Map<String, String>? params}) async {
-    final uri =
-        Uri.parse('$_base$path').replace(queryParameters: params);
+    final uri = Uri.parse('$_base$path').replace(queryParameters: params);
     try {
-      final response =
-          await http.get(uri).timeout(_timeout);
+      final response = await http.get(uri).timeout(_timeout);
       if (response.statusCode == 200) {
-        return jsonDecode(response.body);
+        return jsonDecode(utf8.decode(response.bodyBytes));
       }
-      dev.log('SigmaApi $path → ${response.statusCode}', name: 'SigmaApiService');
+      dev.log('SigmaApi $path → ${response.statusCode}',
+          name: 'SigmaApiService');
     } catch (e) {
       dev.log('SigmaApi $path error: $e', name: 'SigmaApiService');
     }
@@ -111,7 +111,8 @@ class SigmaApiService {
     final cached = _getCache<List<Map<String, dynamic>>>(key);
     if (cached != null) return cached;
 
-    final data = await _get('/equities/${ticker.toUpperCase()}/intraday', params: {
+    final data =
+        await _get('/equities/${ticker.toUpperCase()}/intraday', params: {
       'range': range,
       'interval': interval,
       'prepost': prepost.toString(),
@@ -128,12 +129,11 @@ class SigmaApiService {
   // OPTIONS  /options/{symbol}?expiration=YYYY-MM-DD
   // ═══════════════════════════════════════════════════════════════════════
   static Future<Map<String, dynamic>> getOptions(
-      String ticker, {
-      String? expiration,
+    String ticker, {
+    String? expiration,
   }) async {
-    final cacheSuffix = expiration?.trim().isNotEmpty == true
-        ? expiration!.trim()
-        : '_default';
+    final cacheSuffix =
+        expiration?.trim().isNotEmpty == true ? expiration!.trim() : '_default';
     final key = 'options:${ticker.toUpperCase()}:$cacheSuffix';
     final cached = _getCache<Map<String, dynamic>>(key);
     if (cached != null) return cached;
@@ -142,7 +142,8 @@ class SigmaApiService {
     if (expiration != null && expiration.trim().isNotEmpty) {
       params['expiration'] = expiration.trim();
     }
-    final data = await _get('/equities/${ticker.toUpperCase()}/options', params: params);
+    final data =
+        await _get('/equities/${ticker.toUpperCase()}/options', params: params);
     if (data is Map) {
       final m = Map<String, dynamic>.from(data);
       _setCache(key, m, const Duration(minutes: 5));
@@ -197,6 +198,24 @@ class SigmaApiService {
     if (data is Map) {
       final m = Map<String, dynamic>.from(data);
       _setCache(key, m, const Duration(hours: 4));
+      return m;
+    }
+    return {};
+  }
+
+  // ═══════════════════════════════════════════════════════════════════════
+  // YFINANCE COVERAGE  /yfinance-coverage/{symbol}
+  // ═══════════════════════════════════════════════════════════════════════
+  static Future<Map<String, dynamic>> getYFinanceCoverage(String ticker) async {
+    final key = 'yf_coverage:${ticker.toUpperCase()}';
+    final cached = _getCache<Map<String, dynamic>>(key);
+    if (cached != null) return cached;
+
+    final data =
+        await _get('/equities/${ticker.toUpperCase()}/yfinance-coverage');
+    if (data is Map) {
+      final m = Map<String, dynamic>.from(data);
+      _setCache(key, m, const Duration(minutes: 30));
       return m;
     }
     return {};
@@ -295,6 +314,79 @@ class SigmaApiService {
   }
 
   // ═══════════════════════════════════════════════════════════════════════
+  // MOVERS  /market/gainers, /market/losers, /market/most-active
+  // ═══════════════════════════════════════════════════════════════════════
+  static Future<List<Map<String, dynamic>>> getGainers() async {
+    const key = 'market_gainers';
+    final cached = _getCache<List<Map<String, dynamic>>>(key);
+    if (cached != null) return cached;
+
+    final data = await _get('/market/gainers');
+    if (data is List) {
+      final list = data.map((e) => Map<String, dynamic>.from(e)).toList();
+      _setCache(key, list, const Duration(minutes: 5));
+      return list;
+    }
+    return [];
+  }
+
+  static Future<List<Map<String, dynamic>>> getLosers() async {
+    const key = 'market_losers';
+    final cached = _getCache<List<Map<String, dynamic>>>(key);
+    if (cached != null) return cached;
+
+    final data = await _get('/market/losers');
+    if (data is List) {
+      final list = data.map((e) => Map<String, dynamic>.from(e)).toList();
+      _setCache(key, list, const Duration(minutes: 5));
+      return list;
+    }
+    return [];
+  }
+
+  static Future<List<Map<String, dynamic>>> getMostActive() async {
+    const key = 'market_active';
+    final cached = _getCache<List<Map<String, dynamic>>>(key);
+    if (cached != null) return cached;
+
+    final data = await _get('/market/most-active');
+    if (data is List) {
+      final list = data.map((e) => Map<String, dynamic>.from(e)).toList();
+      _setCache(key, list, const Duration(minutes: 5));
+      return list;
+    }
+    return [];
+  }
+
+  // ═══════════════════════════════════════════════════════════════════════
+  // MARKET NEWS  /market/news
+  // ═══════════════════════════════════════════════════════════════════════
+  static Future<List<Map<String, dynamic>>> getMarketNews(
+      {int limit = 30}) async {
+    final key = 'market_news:$limit';
+    final cached = _getCache<List<Map<String, dynamic>>>(key);
+    if (cached != null) return cached;
+
+    final symbols = ['SPY', 'QQQ', 'DIA', 'IWM'];
+    final results = await Future.wait(symbols.map(getNews));
+    final seen = <String>{};
+    final list = <Map<String, dynamic>>[];
+    for (final articles in results) {
+      for (final article in articles) {
+        final title = article['title']?.toString().trim() ?? '';
+        if (title.isEmpty || !seen.add(title.toLowerCase())) continue;
+        list.add(article);
+      }
+    }
+    list.sort((a, b) => (b['publishedAt'] ?? b['publishedDate'] ?? '')
+        .toString()
+        .compareTo((a['publishedAt'] ?? a['publishedDate'] ?? '').toString()));
+    final trimmed = list.take(limit).toList();
+    _setCache(key, trimmed, const Duration(minutes: 5));
+    return trimmed;
+  }
+
+  // ═══════════════════════════════════════════════════════════════════════
   // SEARCH  /search?q=query
   // ═══════════════════════════════════════════════════════════════════════
   static Future<List<Map<String, dynamic>>> search(String query) async {
@@ -330,16 +422,46 @@ class SigmaApiService {
   }
 
   // ═══════════════════════════════════════════════════════════════════════
-  // LOGO  /logo/{symbol}
+  // LOGO  /search/logo/{symbol}?json=true
   // ═══════════════════════════════════════════════════════════════════════
   static Future<Map<String, dynamic>> getLogo(String ticker) async {
-    final key = 'logo:${ticker.toUpperCase()}';
+    final symbol = ticker.toUpperCase().trim();
+    if (symbol.isEmpty) return {};
+    final key = 'logo:$symbol';
     final cached = _getCache<Map<String, dynamic>>(key);
     if (cached != null) return cached;
 
-    final data = await _get('/search/logo/${ticker.toUpperCase()}');
+    final encodedSymbol = Uri.encodeComponent(symbol);
+    final data =
+        await _get('/search/logo/$encodedSymbol', params: {'json': 'true'});
     if (data is Map) {
       final m = Map<String, dynamic>.from(data);
+      if (m['logoUrls'] is Map) {
+        final urls = (m['logoUrls'] as Map).cast<String, dynamic>();
+        final candidate = m['logoUrl'] ??
+            urls['fmp'] ??
+            urls['parqet'] ??
+            urls['clearbit'] ??
+            urls['primary'];
+        m['logoUrl'] =
+            LogoResolver.resolve(symbol, providedUrl: candidate?.toString());
+      } else {
+        m['logoUrl'] =
+            LogoResolver.resolve(symbol, providedUrl: m['logoUrl']?.toString());
+      }
+      _setCache(key, m, const Duration(hours: 24));
+      return m;
+    }
+
+    final profile = await _get('/equities/$symbol/profile');
+    if (profile is Map) {
+      final logoUrl = profile['logoUrl'] ?? profile['image'];
+      final m = <String, dynamic>{
+        'symbol': symbol,
+        'logoUrl':
+            LogoResolver.resolve(symbol, providedUrl: logoUrl?.toString()),
+        if (profile['website'] != null) 'website': profile['website'],
+      };
       _setCache(key, m, const Duration(hours: 24));
       return m;
     }

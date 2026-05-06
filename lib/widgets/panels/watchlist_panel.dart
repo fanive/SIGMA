@@ -1,4 +1,4 @@
-﻿// ignore_for_file: unnecessary_brace_in_string_interps
+// ignore_for_file: unnecessary_brace_in_string_interps
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
@@ -6,9 +6,7 @@ import 'package:provider/provider.dart';
 import '../../providers/sigma_provider.dart';
 import '../../providers/terminal_provider.dart';
 import 'package:quantum_invest/theme/app_theme.dart';
-import '../terminal/research_panel.dart';
 import '../institutional/institutional_components.dart';
-import '../../utils/sigma_localization.dart';
 
 class WatchlistPanel extends StatelessWidget {
   const WatchlistPanel({super.key});
@@ -17,9 +15,8 @@ class WatchlistPanel extends StatelessWidget {
   Widget build(BuildContext context) {
     final isDark = AppTheme.isDark(context);
 
-    return ResearchPanelContainer(
-      title: 'Watchlist',
-      icon: Icons.bookmark_added_rounded,
+    return Container(
+      color: isDark ? AppTheme.bgPrimary : AppTheme.lightBg,
       child: Consumer<SigmaProvider>(
         builder: (context, sp, _) {
           final tickers = sp.favoriteTickers;
@@ -66,7 +63,7 @@ class WatchlistPanel extends StatelessWidget {
                       final change = _dbl(data?['changePercent'] ??
                           data?['regularMarketChangePercent']);
 
-                      return _WatchlistTileFlat(
+                      return _WatchlistTableRow(
                         ticker: ticker,
                         price: price,
                         change: change,
@@ -80,6 +77,7 @@ class WatchlistPanel extends StatelessWidget {
                         },
                         onDelete: () =>
                             _showDeleteConfirmation(context, ticker, sp),
+                        onSwipeDelete: () => sp.toggleFavorite(ticker),
                       );
                     },
                   ),
@@ -93,33 +91,29 @@ class WatchlistPanel extends StatelessWidget {
   }
 
   Widget _buildHeaderRow(BuildContext context, bool isDark) {
-    final txtStyle = GoogleFonts.ibmPlexSans(
-      color: isDark ? AppTheme.white24 : AppTheme.black26,
-      fontSize: 8,
+    final txtStyle = GoogleFonts.lora(
+      color: isDark ? AppTheme.white38 : AppTheme.black38,
+      fontSize: 9,
       fontWeight: FontWeight.w600,
-      letterSpacing: 1.8,
+      letterSpacing: 1.0,
     );
 
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 10),
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
       decoration: BoxDecoration(
+        color: isDark ? AppTheme.nearBlack0C : AppTheme.lightSurface,
         border: Border(
             bottom: BorderSide(
-                color: isDark
-                    ? AppTheme.white.withValues(alpha: 0.05)
-                    : AppTheme.black.withValues(alpha: 0.05),
-                width: 0.5)),
+                color: isDark ? AppTheme.white12 : AppTheme.black12,
+                width: 1.0)),
       ),
       child: Row(
         children: [
-          Text(context.t('symbol').toUpperCase(), style: txtStyle),
-          const Spacer(),
-          Text('DATA', style: txtStyle),
-          const SizedBox(width: 48),
-          Text(context.t('price').toUpperCase(), style: txtStyle),
-          const SizedBox(width: 48),
-          Text(context.t('change').toUpperCase(), style: txtStyle),
-          const SizedBox(width: 44),
+          const SizedBox(width: 40), // Alignment for logo
+          Expanded(flex: 3, child: Text('SYMBOL', style: txtStyle)),
+          Expanded(flex: 3, child: Align(alignment: Alignment.centerRight, child: Text('MKT CAP', style: txtStyle))),
+          Expanded(flex: 2, child: Align(alignment: Alignment.centerRight, child: Text('PRICE', style: txtStyle))),
+          Expanded(flex: 2, child: Align(alignment: Alignment.centerRight, child: Text('CHG %', style: txtStyle))),
         ],
       ),
     );
@@ -200,7 +194,7 @@ class WatchlistPanel extends StatelessWidget {
   }
 }
 
-class _WatchlistTileFlat extends StatelessWidget {
+class _WatchlistTableRow extends StatelessWidget {
   final String ticker;
   final double price;
   final double change;
@@ -209,8 +203,9 @@ class _WatchlistTileFlat extends StatelessWidget {
   final Map<String, dynamic>? data;
   final VoidCallback onTap;
   final VoidCallback onDelete;
+  final VoidCallback onSwipeDelete;
 
-  const _WatchlistTileFlat({
+  const _WatchlistTableRow({
     required this.ticker,
     required this.price,
     required this.change,
@@ -219,99 +214,82 @@ class _WatchlistTileFlat extends StatelessWidget {
     this.data,
     required this.onTap,
     required this.onDelete,
+    required this.onSwipeDelete,
   });
+
+  String _formatMarketCap(dynamic val) {
+    double num = 0;
+    if (val is double) num = val;
+    else if (val is int) num = val.toDouble();
+    else num = double.tryParse(val.toString()) ?? 0;
+    
+    if (num == 0) return '—';
+    if (num >= 1e12) return '${(num / 1e12).toStringAsFixed(2)}T';
+    if (num >= 1e9) return '${(num / 1e9).toStringAsFixed(2)}B';
+    if (num >= 1e6) return '${(num / 1e6).toStringAsFixed(2)}M';
+    return num.toStringAsFixed(0);
+  }
 
   @override
   Widget build(BuildContext context) {
     final dim = isDark ? AppTheme.white38 : AppTheme.black38;
     final color = change >= 0 ? AppTheme.positive : AppTheme.negative;
+    final name = (data?['companyName'] ?? data?['name'] ?? 'EQUITY').toString().toUpperCase();
+    final mktCap = data?['marketCap'];
+    final mktCapStr = mktCap != null ? _formatMarketCap(mktCap) : '—';
 
-    return InkWell(
-      onTap: onTap,
-      onLongPress: onDelete,
+    return Dismissible(
+      key: Key('watchlist_$ticker'),
+      direction: DismissDirection.endToStart,
+      onDismissed: (_) => onSwipeDelete(),
+      background: Container(
+        alignment: Alignment.centerRight,
+        padding: const EdgeInsets.only(right: 24.0),
+        color: AppTheme.negative.withValues(alpha: 0.8),
+        child: const Icon(Icons.delete_sweep_rounded, color: Colors.white, size: 24),
+      ),
+      child: InkWell(
+        onTap: onTap,
+        onLongPress: onDelete,
       child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
         decoration: BoxDecoration(
           border: Border(
-              bottom:
-                  BorderSide(color: AppTheme.getBorder(context), width: 0.5)),
+              bottom: BorderSide(
+                  color: isDark ? AppTheme.white.withValues(alpha: 0.03) : AppTheme.black.withValues(alpha: 0.03),
+                  width: 1.0)),
         ),
         child: Row(
           children: [
-            // Square Logo Container (Bloomberg Style)
-            Container(
-              width: 32,
-              height: 32,
-              decoration: BoxDecoration(
-                color: isDark
-                    ? AppTheme.nearBlack0C
-                    : AppTheme.black.withValues(alpha: 0.02),
-                border:
-                    Border.all(color: AppTheme.getBorder(context), width: 0.5),
-              ),
-              child: ClipRRect(
-                child: Padding(
-                  padding: const EdgeInsets.all(4.0),
-                  child: Image.network(
-                    'https://financialmodelingprep.com/image-stock/${ticker.toUpperCase()}.png',
-                    fit: BoxFit.contain,
-                    errorBuilder: (_, __, ___) => Center(
-                      child: Text(
-                        ticker.substring(0, 1),
-                        style: GoogleFonts.lora(
-                          fontSize: 12,
-                          fontWeight: FontWeight.w900,
-                          color: isDark ? AppTheme.white10 : AppTheme.black12,
-                        ),
-                      ),
-                    ),
-                  ),
-                ),
-              ),
+            // LOGO
+            TickerLogoThumb(
+              symbol: ticker,
+              logoUrl: data?['image'] ?? data?['logo'],
+              size: 28,
             ),
-            const SizedBox(width: 14),
+            const SizedBox(width: 12),
+            // SYMBOL & NAME
             Expanded(
+              flex: 3,
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  Row(
-                    children: [
-                      Text(
-                        ticker,
-                        style: GoogleFonts.lora(
-                          fontSize: 13,
-                          fontWeight: FontWeight.w900,
-                          color: isDark ? AppTheme.white : AppTheme.black,
-                        ),
-                      ),
-                      const SizedBox(width: 8),
-                      if (data?['marketState'] != null)
-                        Container(
-                          width: 4,
-                          height: 4,
-                          decoration: BoxDecoration(
-                            shape: BoxShape.circle,
-                            color: data!['marketState'] == 'REGULAR'
-                                ? AppTheme.positive
-                                : AppTheme.amberAccent,
-                          ),
-                        ),
-                    ],
-                  ),
                   Text(
-                    (data?['longName'] ??
-                            data?['shortName'] ??
-                            data?['longname'] ??
-                            data?['shortname'] ??
-                            'EQUITY')
-                        .toString()
-                        .toUpperCase(),
+                    ticker,
                     style: GoogleFonts.lora(
-                      fontSize: 8,
-                      fontWeight: FontWeight.w800,
+                      fontSize: 12,
+                      fontWeight: FontWeight.w700,
+                      color: isDark ? AppTheme.white : AppTheme.black,
+                    ),
+                  ),
+                  const SizedBox(height: 2),
+                  Text(
+                    name,
+                    style: GoogleFonts.lora(
+                      fontSize: 9,
+                      fontWeight: FontWeight.w500,
                       color: dim,
-                      letterSpacing: 0.5,
                     ),
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
@@ -319,41 +297,62 @@ class _WatchlistTileFlat extends StatelessWidget {
                 ],
               ),
             ),
-            Column(
-              crossAxisAlignment: CrossAxisAlignment.end,
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Text(
-                  price > 0 ? '\$${price.toStringAsFixed(2)}' : '—',
+            // MARKET CAP
+            Expanded(
+              flex: 3,
+              child: Align(
+                alignment: Alignment.centerRight,
+                child: Text(
+                  mktCapStr,
                   style: GoogleFonts.lora(
-                    fontSize: 13,
-                    fontWeight: FontWeight.w900,
+                    fontSize: 11,
+                    fontWeight: FontWeight.w500,
+                    color: dim,
+                  ),
+                ),
+              ),
+            ),
+            // PRICE
+            Expanded(
+              flex: 2,
+              child: Align(
+                alignment: Alignment.centerRight,
+                child: Text(
+                  price > 0 ? price.toStringAsFixed(2) : '—',
+                  style: GoogleFonts.lora(
+                    fontSize: 11,
+                    fontWeight: FontWeight.w600,
                     color: isDark ? AppTheme.white : AppTheme.black,
                   ),
                 ),
-                Text(
-                  '${change >= 0 ? '+' : ''}${change.toStringAsFixed(2)}%',
-                  style: GoogleFonts.lora(
-                    fontSize: 10,
-                    fontWeight: FontWeight.w900,
-                    color: color,
+              ),
+            ),
+            // CHG %
+            Expanded(
+              flex: 2,
+              child: Align(
+                alignment: Alignment.centerRight,
+                child: Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
+                  decoration: BoxDecoration(
+                    color: color.withValues(alpha: 0.1),
+                    borderRadius: BorderRadius.circular(2),
+                  ),
+                  child: Text(
+                    '${change >= 0 ? '+' : ''}${change.toStringAsFixed(2)}%',
+                    style: GoogleFonts.lora(
+                      fontSize: 11,
+                      fontWeight: FontWeight.w600,
+                      color: color,
+                    ),
                   ),
                 ),
-              ],
-            ),
-            const SizedBox(width: 16),
-            IconButton(
-              icon: const Icon(Icons.close, size: 12),
-              onPressed: onDelete,
-              color: isDark
-                  ? AppTheme.white.withValues(alpha: 0.15)
-                  : AppTheme.black.withValues(alpha: 0.15),
-              padding: EdgeInsets.zero,
-              constraints: const BoxConstraints(minWidth: 28, minHeight: 28),
+              ),
             ),
           ],
         ),
       ),
+    ),
     );
   }
 }

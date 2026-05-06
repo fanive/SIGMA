@@ -1,4 +1,4 @@
-// ignore_for_file: prefer_const_declarations, unnecessary_import, unused_import
+// ignore_for_file: prefer_const_declarations, unnecessary_import, unused_import, unreachable_switch_default
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
@@ -16,6 +16,7 @@ import '../widgets/institutional/institutional_components.dart';
 import '../widgets/panels/market_overview_panel.dart';
 import '../widgets/panels/watchlist_panel.dart';
 import '../widgets/panels/news_feed_panel.dart';
+import '../widgets/panels/screeners_panel.dart';
 import '../widgets/panels/intelligence_hub_panel.dart';
 import '../widgets/panels/portfolio_panel.dart';
 import '../widgets/panels/chart_panel.dart';
@@ -55,6 +56,8 @@ class _TerminalShellState extends State<TerminalShell> {
         return const WatchlistPanel();
       case TerminalPanel.newsFeed:
         return const NewsFeedPanel();
+      case TerminalPanel.screeners:
+        return const ScreenersPanel();
       case TerminalPanel.settings:
         return const SettingsScreen();
       case TerminalPanel.intelligence:
@@ -363,23 +366,27 @@ class _InvestmentBriefingRail extends StatelessWidget {
               InstitutionalHeader(
                 eyebrow: 'Product promise',
                 title: '3 promesses',
-                thesis: 'Comprendre vite, comparer proprement, decider avec methode.',
+                thesis:
+                    'Comprendre vite, comparer proprement, decider avec methode.',
                 icon: Icons.insights_rounded,
               ),
               const SizedBox(height: 12),
               const _PromiseCard(
                 title: 'Comprendre un ticker en 3 minutes',
-                body: 'Une lecture courte pour voir prix, these, valorisation, risques et catalyseurs.',
+                body:
+                    'Une lecture courte pour voir prix, these, valorisation, risques et catalyseurs.',
               ),
               const SizedBox(height: 10),
               const _PromiseCard(
                 title: 'Comparer deux entreprises proprement',
-                body: 'Un cadre simple pour opposer croissance, marges, qualite, valorisation et risque.',
+                body:
+                    'Un cadre simple pour opposer croissance, marges, qualite, valorisation et risque.',
               ),
               const SizedBox(height: 10),
               const _PromiseCard(
                 title: 'Decider avec methode, pas avec hype',
-                body: 'Des reperes explicites, des donnees fraiches et un ton honnete pour garder votre discipline.',
+                body:
+                    'Des reperes explicites, des donnees fraiches et un ton honnete pour garder votre discipline.',
               ),
               const SizedBox(height: 14),
               _BriefRow('Workspace', activePanel.getLabel(sp.language ?? 'EN')),
@@ -517,7 +524,7 @@ class _AgendaItem extends StatelessWidget {
               children: [
                 Text(
                   title,
-                  style: GoogleFonts.ibmPlexSans(
+                  style: GoogleFonts.lora(
                     fontSize: 12,
                     fontWeight: FontWeight.w600,
                     color: AppTheme.getPrimaryText(context),
@@ -558,11 +565,11 @@ class _SigmaBottomNav extends StatelessWidget {
   });
 
   static const _items = [
-    _NavItem(TerminalPanel.marketOverview, Icons.account_balance, 'Macro'),
-    _NavItem(TerminalPanel.watchlist, Icons.bookmark_added, 'Ideas'),
-    _NavItem(TerminalPanel.newsFeed, Icons.article, 'Brief'),
-    _NavItem(TerminalPanel.noteLab, Icons.menu_book_rounded, 'Note'),
-    _NavItem(TerminalPanel.settings, Icons.person_outline, 'Profile'),
+    _NavItem(TerminalPanel.marketOverview, Icons.account_balance, 'Marchés'),
+    _NavItem(TerminalPanel.watchlist, Icons.bookmark_added, 'Watch'),
+    _NavItem(TerminalPanel.screeners, Icons.filter_alt, 'Screen'),
+    _NavItem(TerminalPanel.noteLab, Icons.menu_book_rounded, 'Analyse'),
+    _NavItem(TerminalPanel.settings, Icons.person_outline, 'Compte'),
   ];
 
   @override
@@ -614,7 +621,7 @@ class _SigmaBottomNav extends StatelessWidget {
                       const SizedBox(height: 4),
                       Text(
                         item.label.toUpperCase(),
-                        style: GoogleFonts.ibmPlexSans(
+                        style: GoogleFonts.lora(
                           fontSize: 9,
                           fontWeight: FontWeight.w600,
                           color: isActive ? activeColor : inactiveColor,

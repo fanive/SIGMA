@@ -11,12 +11,13 @@ import 'ai_provider_factory.dart';
 import 'sigma_market_data_service.dart';
 import 'web_search_service.dart';
 import 'sentiment_service.dart';
-import 'ai/fallback_provider.dart';
 import 'ollama_news_service.dart';
 import 'openinsider_service.dart';
 import 'finnhub_service.dart';
 import 'sigma_api_service.dart';
+import '../utils/financial_decision_engine.dart';
 import '../utils/logo_resolver.dart';
+import '../utils/chart_overlay_engine.dart';
 
 class SigmaService {
   late AIProvider _stockProvider;
@@ -95,9 +96,9 @@ class SigmaService {
       }
 
       // --- DEBUG LOGGING ---
-      final sigmaApi = dotenv.env['YF_BACKEND_URL'] ?? 'https://sigma-yfinance-api.onrender.com';
-        dev.log(
-          '🔑 [SigmaService] Sigma backend: $sigmaApi',
+      final sigmaApi = dotenv.env['YF_BACKEND_URL'] ??
+          'https://sigma-yfinance-api.onrender.com';
+      dev.log('🔑 [SigmaService] Sigma backend: $sigmaApi',
           name: 'SigmaService');
       dev.log('ðŸ“Š [SigmaService] Initialization Complete',
           name: 'SigmaService');
@@ -107,6 +108,9 @@ class SigmaService {
   }
 
   SigmaService._();
+
+  /// Public accessor used by SigmaEngineService
+  AIProvider get marketProvider => _marketProvider;
 
   static const String _systemInstructionChat = '''
 Tu es l'Intelligence Artificielle SIGMA â€” expert analyste financier et assistant omniscient de haute-prÃ©cision.
@@ -210,25 +214,60 @@ CRITICAL RULES:
         _webSearch.search('$symbol stock latest news catalysts $currentDate');
 
     // ── 2. ACQUISITION DE DONNÉES EN PARALLÈLE (OPTIMISÉ) ──────────────────────
+    // Note: timeouts genereux pour le cold-start Render (30-50s)
     final results = await Future.wait([
-      _safeCall(() => _marketData.getSigmaContext(symbol), "", timeout: const Duration(seconds: 10)),
+      _safeCall(() => _marketData.getSigmaContext(symbol), "",
+          timeout: const Duration(seconds: 35)),
       _safeCall(() => webSearchTask, "", timeout: const Duration(seconds: 12)),
-      _safeCall(() => _marketData.getPeers(symbol).then((list) => _marketData.getFullQuotes(list.take(5).toList())), [], timeout: const Duration(seconds: 10)),
-      _safeCall(() => _marketData.getStockNews(symbol, limit: 12), [], timeout: const Duration(seconds: 8)),
-      _safeCall(() => _marketData.getCompanyProfileStable(symbol), <String, dynamic>{}, timeout: const Duration(seconds: 8)),
-      _safeCall(() => _marketData.getKeyMetricsTTM(symbol), <String, dynamic>{}, timeout: const Duration(seconds: 8)),
-      _safeCall(() => _marketData.getRatiosTTM(symbol), <String, dynamic>{}, timeout: const Duration(seconds: 8)),
-      _safeCall(() => _marketData.getInstitutionalHolders(symbol), <dynamic>[], timeout: const Duration(seconds: 8)),
-      _safeCall(() => _marketData.getInsiderTrading(symbol), <dynamic>[], timeout: const Duration(seconds: 8)),
-      _safeCall(() => _marketData.getIncomeStatement(symbol, limit: 5), <dynamic>[], timeout: const Duration(seconds: 8)),
-      _safeCall(() => _marketData.getQuoteMap(symbol), <String, dynamic>{}, timeout: const Duration(seconds: 8)),
+      _safeCall(
+          () => _marketData
+              .getPeers(symbol)
+              .then((list) => _marketData.getFullQuotes(list.take(5).toList())),
+          [],
+          timeout: const Duration(seconds: 35)),
+      _safeCall(() => _marketData.getStockNews(symbol, limit: 20), [],
+          timeout: const Duration(seconds: 35)),
+      _safeCall(() => _marketData.getCompanyProfileStable(symbol),
+          <String, dynamic>{},
+          timeout: const Duration(seconds: 35)),
+      _safeCall(() => _marketData.getKeyMetricsTTM(symbol), <String, dynamic>{},
+          timeout: const Duration(seconds: 40)),
+      _safeCall(() => _marketData.getRatiosTTM(symbol), <String, dynamic>{},
+          timeout: const Duration(seconds: 35)),
+      _safeCall(() => _marketData.getHoldersBundle(symbol), <String, dynamic>{},
+          timeout: const Duration(seconds: 35)),
+      _safeCall(() => _marketData.getInsiderFull(symbol), <String, dynamic>{},
+          timeout: const Duration(seconds: 35)),
+      _safeCall(
+          () => SigmaApiService.getFinancials(symbol), <String, dynamic>{},
+          timeout: const Duration(seconds: 40)),
+      _safeCall(() => _marketData.getQuoteMap(symbol), <String, dynamic>{},
+          timeout: const Duration(seconds: 35)),
       _getMultiSourcePrice(symbol),
-      _safeCall(() => _finnhub.basicFinancials(symbol), <String, dynamic>{}, timeout: const Duration(seconds: 8)),
-      _safeCall(() => _finnhub.recommendationTrends(symbol), <dynamic>[], timeout: const Duration(seconds: 8)),
-      _safeCall(() => _finnhub.earningsSurprises(symbol, limit: 4), <dynamic>[], timeout: const Duration(seconds: 8)),
-      _safeCall(() => _sentiment.fetchFearGreed(), null, timeout: const Duration(seconds: 6)),
-      _safeCall(() => _sentiment.fetchNews(), [], timeout: const Duration(seconds: 6)),
-      _safeCall(() => _marketData.getGoogleFinanceInfo(symbol), <String, dynamic>{}, timeout: const Duration(seconds: 8)),
+      _safeCall(() => _finnhub.basicFinancials(symbol), <String, dynamic>{},
+          timeout: const Duration(seconds: 12)),
+      _safeCall(() => _finnhub.recommendationTrends(symbol), <dynamic>[],
+          timeout: const Duration(seconds: 12)),
+      _safeCall(() => _finnhub.earningsSurprises(symbol, limit: 4), <dynamic>[],
+          timeout: const Duration(seconds: 12)),
+      _safeCall(() => _sentiment.fetchFearGreed(), null,
+          timeout: const Duration(seconds: 8)),
+      _safeCall(() => _sentiment.fetchNews(), [],
+          timeout: const Duration(seconds: 8)),
+      _safeCall(
+          () => _marketData.getGoogleFinanceInfo(symbol), <String, dynamic>{},
+          timeout: const Duration(seconds: 35)),
+      _safeCall(() => SigmaApiService.getAnalysis(symbol), <String, dynamic>{},
+          timeout: const Duration(seconds: 40)),
+      _safeCall(() => _marketData.getOptionsChain(symbol), <String, dynamic>{},
+          timeout: const Duration(seconds: 35)),
+      _safeCall(() => _marketData.getEvents(symbol), <String, dynamic>{},
+          timeout: const Duration(seconds: 35)),
+      _safeCall(() => _marketData.getSecFacts(symbol), <String, dynamic>{},
+          timeout: const Duration(seconds: 40)),
+      _safeCall(() => _marketData.getHistoricalOHLCV(symbol, '6M'),
+          <Map<String, dynamic>>[],
+          timeout: const Duration(seconds: 35)),
     ]);
 
     final sigmaContext = results[0] as String;
@@ -238,9 +277,25 @@ CRITICAL RULES:
     final sigmaProfile = results[4] as Map<String, dynamic>;
     final sigmaMetrics = results[5] as Map<String, dynamic>;
     final sigmaRatios = results[6] as Map<String, dynamic>;
-    final sigmaHolders = results[7] as List<dynamic>;
-    final sigmaInsiderTrading = results[8] as List<dynamic>;
-    final sigmaIncome = results[9] as List<dynamic>;
+    final _holdersBundle = results[7] as Map<String, dynamic>;
+    final sigmaHolders =
+        (_holdersBundle['institutionsList'] as List?) ?? <dynamic>[];
+    final insiderFull = results[8] as Map<String, dynamic>;
+    final sigmaInsiderTrading = (insiderFull['trades'] as List?) ?? <dynamic>[];
+    final insiderSummary =
+        (insiderFull['summary'] as Map?)?.cast<String, dynamic>() ??
+            <String, dynamic>{};
+    final financialsRaw = results[9] as Map<String, dynamic>;
+    final sigmaIncome =
+        (financialsRaw['quarterlyIncomeStatement'] as List?) ?? <dynamic>[];
+    final sigmaAnnualIncome =
+        (financialsRaw['annualIncomeStatement'] as List?) ?? <dynamic>[];
+    final sigmaBalance =
+        (financialsRaw['quarterlyBalanceSheet'] as List?) ?? <dynamic>[];
+    final sigmaCashFlow =
+        (financialsRaw['quarterlyCashFlow'] as List?) ?? <dynamic>[];
+    final sigmaAnnualCashFlow =
+        (financialsRaw['annualCashFlow'] as List?) ?? <dynamic>[];
     final sigmaQuote = results[10] as Map<String, dynamic>;
     final realTimePrice = results[11] as Map<String, dynamic>;
     final finnhubBasic = results[12] as Map<String, dynamic>;
@@ -249,19 +304,30 @@ CRITICAL RULES:
     final fgData = results[15] as FearGreedData?;
     final fgNews = results[16] as List<SentimentNews>;
     final googleFinance = results[17] as Map<String, dynamic>;
+    final intelligenceData = results[18] as Map<String, dynamic>;
+    final optionsData = results[19] as Map<String, dynamic>;
+    final eventsData = results[20] as Map<String, dynamic>;
+    final secData = results[21] as Map<String, dynamic>;
+    final secDerived =
+        (secData['derived'] as Map?)?.cast<String, dynamic>() ?? {};
+    final secFacts = (secData['facts'] as Map?)?.cast<String, dynamic>() ?? {};
+    final priceHistory = results[22] as List<Map<String, dynamic>>;
 
     final peerContext = peersDataList
-        .map((p) => "- ${p['symbol']}: ${p['name']}, MCAP: ${p['marketCap']}, PE: ${p['pe']}")
+        .map((p) =>
+            "- ${p['symbol']}: ${p['name']}, MCAP: ${p['marketCap']}, PE: ${p['pe']}")
         .join('\n');
 
     final allNewsContext = [
-      ...sigmaNews.map((n) => "SIGMA: ${n['title']} | ${n['text']}"),
+      ...sigmaNews.map((n) =>
+          "[${n['site'] ?? n['publisher'] ?? 'SIGMA'}] ${n['title']}\nSummary: ${n['text']}\nDate: ${n['publishedDate'] ?? n['publishedAt'] ?? ''}"),
     ].take(30).join('\n---\n');
 
     String macroAwareness = "";
     if (_lastOverview != null || fgData != null) {
       final fgRating = fgData?.rating ?? "NEUTRAL";
-      final fgNewsContext = fgNews.map((n) => "- ${n.title} (${n.publisher})").join('\n');
+      final fgNewsContext =
+          fgNews.map((n) => "- ${n.title} (${n.publisher})").join('\n');
 
       macroAwareness = '''
 Sentiment : ${_lastOverview?.sentiment ?? fgRating}
@@ -282,15 +348,19 @@ $fgNewsContext
 Date : $currentDate | Langue : $language
 
 ### DONNÉES BRUTES (SIGMA & Institutional Feed)
-- PROFIL: ${_limitTokens(jsonEncode(sigmaProfile), 3000)}
+- PROFIL: ${_limitTokens(_buildProfileContext(sigmaProfile), 2000)}
 - CORPORATE CONTEXT: $sigmaContext
 - PEERS (COMPETITORS):
 $peerContext
-- INSIDERS: ${_limitTokens(jsonEncode(sigmaInsiderTrading.take(10).toList()), 2000)}
+- INSIDERS: ${_buildInsiderContext(insiderSummary, sigmaInsiderTrading)}
 - KEY METRICS & RATIOS: ${jsonEncode(sigmaMetrics)} | ${jsonEncode(sigmaRatios)}
+- FINANCIALS (FULL): ${_limitTokens(_buildFinancialsContext(sigmaIncome, sigmaAnnualIncome, sigmaBalance, sigmaCashFlow), 2500)}
 - INSTITUTIONAL HOLDERS: ${_limitTokens(jsonEncode(sigmaHolders), 2000)}
 - FINNHUB ENRICHMENT: ${jsonEncode(finnhubBasic)} | Recommendations: ${jsonEncode(finnhubRecommendations)}
-- GOOGLE FINANCE INSIGHTS: ${jsonEncode(googleFinance)}
+- GOOGLE FINANCE INSIGHTS: ${_limitTokens(jsonEncode(googleFinance), 3500)}
+- OPTIONS FLOW: ${_limitTokens(_buildOptionsContext(optionsData), 1500)}
+- SEC/EDGAR FINANCIALS: ${_limitTokens(_buildSecContext(secDerived, secFacts), 1500)}
+- TECHNICAL ANALYSIS (6M): ${_limitTokens(_buildTechnicalContext(priceHistory), 1200)}
 - MACRO: $macroAwareness
 - NEWS SOURCES:
 $allNewsContext
@@ -400,7 +470,12 @@ STRUCTURE JSON (STRICTE) :
       'catalysts': [],
       'volatility': {
         'ivRank': 'N/A',
-        'beta': (sigmaMetrics['beta'] ?? 'N/A').toString(),
+        'yearlyLow':
+            (sigmaProfile['fiftyTwoWeekLow'] as num?)?.toDouble() ?? 0.0,
+        'yearlyHigh':
+            (sigmaProfile['fiftyTwoWeekHigh'] as num?)?.toDouble() ?? 0.0,
+        'beta':
+            (sigmaProfile['beta'] ?? sigmaMetrics['beta'] ?? 'N/A').toString(),
         'interpretation': 'API',
       },
       'fearAndGreed': {
@@ -429,7 +504,7 @@ STRUCTURE JSON (STRICTE) :
         {
           'label': isFr ? 'CAPITALISATION BOURS.' : 'MARKET CAP.',
           'value': _formatLargeNumber(
-            sigmaProfile['mktCap'] ??
+            sigmaProfile['marketCap'] ??
                 finnhubBasic['marketCapitalization'] ??
                 0,
           ),
@@ -437,17 +512,13 @@ STRUCTURE JSON (STRICTE) :
         },
         {
           'label': 'P/E RATIO',
-          'value': (sigmaProfile['pe'] ??
-              finnhubBasic['peTTM'] ??
-                  'N/A')
-              .toString(),
+          'value':
+              (sigmaProfile['pe'] ?? finnhubBasic['peTTM'] ?? 'N/A').toString(),
           'assessment': 'API',
         },
         {
           'label': 'ROE',
-          'value': (finnhubBasic['roeTTM'] ??
-                  'N/A')
-              .toString(),
+          'value': (finnhubBasic['roeTTM'] ?? 'N/A').toString(),
           'assessment': 'API',
         },
       ],
@@ -469,15 +540,12 @@ STRUCTURE JSON (STRICTE) :
       'companyNews': [
         ...sigmaNews.take(8).map((n) => {
               'title': (n['title'] ?? '').toString(),
-              'source': 'SIGMA',
-              'url': (n['url'] ?? '').toString(),
-              'publishedAt': (n['publishedDate'] ?? '').toString(),
-              'summary': (n['text'] ?? '').toString(),
-            }),
-      ],
-              'url': (n['link'] ?? n['url'] ?? '').toString(),
-              'publishedAt': (n['providerPublishTime'] ?? '').toString(),
-              'summary': (n['summary'] ?? '').toString(),
+              'source': (n['site'] ?? n['publisher'] ?? 'SIGMA').toString(),
+              'url': (n['url'] ?? n['link'] ?? '').toString(),
+              'publishedAt':
+                  (n['publishedDate'] ?? n['publishedAt'] ?? '').toString(),
+              'summary': (n['text'] ?? n['summary'] ?? '').toString(),
+              'imageUrl': (n['image'] ?? n['thumbnail'] ?? '').toString(),
             }),
       ],
       'sector': (sigmaProfile['sector'] ?? '').toString(),
@@ -485,6 +553,17 @@ STRUCTURE JSON (STRICTE) :
       'website': (sigmaProfile['website'] ?? '').toString(),
       'ceo': (sigmaProfile['ceo'] ?? '').toString(),
       'image': (sigmaProfile['image'] ?? '').toString(),
+      'exchange': (sigmaProfile['exchange'] ?? '').toString(),
+      'keyStatistics': {
+        'trailingPE': sigmaProfile['pe'],
+        'eps': sigmaProfile['eps'],
+        'beta': sigmaProfile['beta'],
+        'dividendYield': sigmaProfile['dividendYield'],
+        'marketCap': sigmaProfile['marketCap'],
+        'fiftyTwoWeekHigh': sigmaProfile['fiftyTwoWeekHigh'],
+        'fiftyTwoWeekLow': sigmaProfile['fiftyTwoWeekLow'],
+        'volume': sigmaProfile['volume'],
+      },
     });
 
     final resilientFallback = apiBackedFallback.ticker.isNotEmpty
@@ -536,6 +615,85 @@ STRUCTURE JSON (STRICTE) :
       data2 = {};
     }
 
+    // ── Intelligence data from /equities/{symbol}/intelligence ─────────────
+    final sigmaProfileRaw = sigmaProfile;
+    // analystPriceTargets → replaces yTargets
+    final yTargets = (intelligenceData['analystPriceTargets'] as Map?)
+            ?.cast<String, dynamic>() ??
+        <String, dynamic>{};
+    // upgradesDowngrades → replaces yUpgrades / yahooUpgradesEnriched
+    final yUpgrades =
+        (intelligenceData['upgradesDowngrades'] as List?) ?? <dynamic>[];
+    final yahooUpgradesEnriched = {'upgradesDowngrades': yUpgrades};
+    // recommendations → replaces yRecs / finnhubRecommendations fallback
+    final yRecs = (intelligenceData['recommendations'] as List?) ?? <dynamic>[];
+    // earningsHistory → replaces yahooEarningsHistory
+    final yahooEarningsHistory =
+        (intelligenceData['earningsHistory'] as List?) ?? <dynamic>[];
+    // earningsEstimate / revenueEstimate
+    final yahooEarningsEnriched = {
+      'earningsEstimate': intelligenceData['earningsEstimate'] ?? [],
+      'revenueEstimate': intelligenceData['revenueEstimate'] ?? [],
+    };
+    // Remaining legacy stubs (no source available)
+    const Map<String, dynamic> ySummary = {};
+    const List<dynamic> finnhubEarningsCalendar = [];
+    // yInsiders: insider transactions from /ownership (fallback to sigmaInsiderTrading)
+    final yInsiders =
+        (_holdersBundle['insiderTransactions'] as List?)?.isNotEmpty == true
+            ? _holdersBundle['insiderTransactions'] as List<dynamic>
+            : sigmaInsiderTrading;
+    // SEC annual revenue/net_income series → historicalEarnings
+    final _secRevAnnual = (secFacts['revenue']?['annual'] as List?) ?? [];
+    final _secNiAnnual = (secFacts['net_income']?['annual'] as List?) ?? [];
+    // sigmaApiHistoricalFinancials: prefer /financials annual data (richer), fallback to /sec
+    final sigmaApiHistoricalFinancials = sigmaAnnualIncome.isNotEmpty
+        ? sigmaAnnualIncome
+            .whereType<Map>()
+            .map((e) => {
+                  'date': (e['index'] as String?)?.substring(0, 10) ?? '',
+                  'revenue': e['Total Revenue'],
+                  'netIncome': e['Net Income'],
+                  'ebitda': e['EBITDA'],
+                  'operatingIncome': e['Operating Income'],
+                  'grossProfit': e['Gross Profit'],
+                  'eps': e['Diluted EPS'],
+                  'rd': e['Research And Development'],
+                  'sga': e['Selling General And Administration'],
+                })
+            .toList()
+        : _secRevAnnual.isNotEmpty
+            ? List<dynamic>.generate(_secRevAnnual.length, (i) {
+                final r = _secRevAnnual[i] as Map;
+                final ni = i < _secNiAnnual.length
+                    ? (_secNiAnnual[i] as Map)['value']
+                    : null;
+                return {
+                  'date': r['end'],
+                  'revenue': r['value'],
+                  'netIncome': ni,
+                  'form': r['form']
+                };
+              })
+            : <dynamic>[];
+    const List<dynamic> yHistoricalFinancials = [];
+    const Map<String, dynamic> yEsg = {};
+    // yahooHolders: structured for HoldersData.fromJson (institutions + funds from /ownership)
+    final yahooHolders =
+        _holdersBundle.isNotEmpty ? _holdersBundle : <String, dynamic>{};
+    const Map<String, dynamic> yahooStatsEnriched = {};
+    const Map<String, dynamic> saRatings = {};
+    const Map<String, dynamic> saMetrics = {};
+    const Map<String, dynamic> alphaOverview = {};
+    const List<dynamic> yahooConversations = [];
+    const Map<String, dynamic> yahooProfile = {};
+    const Map<String, dynamic> yahooTickerInfo = {};
+    const Map<String, dynamic> yahooEsg = {};
+    const Map<String, dynamic> yahooFinancialData = {};
+    const Map<String, dynamic> yahooTechnical = {};
+    const Map<String, dynamic> yahooYfinanceBundle = {};
+    const Map<String, dynamic> yahooActions = {};
+
     // --- MERGE DES RÉSULTATS ---
     AnalysisData analysisData = data1.copyWith(
       historicalEarnings: sigmaIncome.cast<Map<String, dynamic>>(),
@@ -543,11 +701,8 @@ STRUCTURE JSON (STRICTE) :
       isWebEnhanced: webContext.length > 20,
       webIntelligence: data1.webIntelligence,
       // Inject Corporate Identity (SIGMA primary, AI final fallback)
-      companyName: _getValidString([
-        data1.companyName,
-        sigmaProfile['companyName'],
-        symbol
-      ]),
+      companyName: _getValidString(
+          [data1.companyName, sigmaProfile['companyName'], symbol]),
       image: _getValidString([sigmaProfileRaw['image'], data1.image]),
       sector: _getValidString([sigmaProfile['sector'], data1.sector]),
       industry: _getValidString([sigmaProfile['industry'], data1.industry]),
@@ -569,28 +724,44 @@ STRUCTURE JSON (STRICTE) :
     }
 
     // --- ENRICH DES DONNÃ‰ES BRUTES (YAHOO DIRECT - BATCH MODE) ---
+    // yCalendar: from /events calendar (replaces empty ySummary stub)
     final yCalendar =
-        (ySummary['calendarEvents'] as Map?)?.cast<String, dynamic>() ?? {};
+        (eventsData['calendar'] as Map?)?.cast<String, dynamic>() ?? {};
     final yEarningsTrend =
         (ySummary['earningsTrend'] as Map?)?.cast<String, dynamic>() ?? {};
+    // yActions: dividends + splits from /events (replaces empty stubs)
+    final _eventsDiv = (eventsData['dividends'] as List?) ?? [];
+    final _eventsSplits = (eventsData['splits'] as List?) ?? [];
+    final yActions = <String, dynamic>{
+      if (_eventsDiv.isNotEmpty)
+        'dividends': {
+          for (final d in _eventsDiv.whereType<Map>())
+            (d['date'] ?? d['exDate'] ?? '').toString(): d,
+        },
+      if (_eventsSplits.isNotEmpty) 'splits': _eventsSplits,
+    };
     final yInstitutionalHolders =
         (ySummary['institutionHolders']?['holders'] as List?) ?? [];
     final yFullOwnership =
         (ySummary['insiderHolders'] as Map?)?.cast<String, dynamic>() ?? {};
-    final finnhubRecLatest = finnhubRecommendations.isNotEmpty &&
-        finnhubRecommendations.first is Map
-      ? Map<String, dynamic>.from(finnhubRecommendations.first as Map)
-      : <String, dynamic>{};
-    final finnhubEarningsCalendarMap =
-      finnhubEarningsCalendar.isNotEmpty &&
-          finnhubEarningsCalendar.first is Map
+    final finnhubRecLatest =
+        finnhubRecommendations.isNotEmpty && finnhubRecommendations.first is Map
+            ? Map<String, dynamic>.from(finnhubRecommendations.first as Map)
+            : <String, dynamic>{};
+    final finnhubEarningsCalendarMap = finnhubEarningsCalendar.isNotEmpty &&
+            finnhubEarningsCalendar.first is Map
         ? <String, dynamic>{
-          'Earnings Date':
-            (finnhubEarningsCalendar.first as Map)['date']?.toString() ?? '',
-          'Earnings Average':
-            (finnhubEarningsCalendar.first as Map)['epsEstimate']?.toString() ?? '',
-          'Revenue Estimate':
-            (finnhubEarningsCalendar.first as Map)['revenueEstimate']?.toString() ?? '',
+            'Earnings Date':
+                (finnhubEarningsCalendar.first as Map)['date']?.toString() ??
+                    '',
+            'Earnings Average':
+                (finnhubEarningsCalendar.first as Map)['epsEstimate']
+                        ?.toString() ??
+                    '',
+            'Revenue Estimate':
+                (finnhubEarningsCalendar.first as Map)['revenueEstimate']
+                        ?.toString() ??
+                    '',
           }
         : <String, dynamic>{};
 
@@ -613,14 +784,13 @@ STRUCTURE JSON (STRICTE) :
           : (finnhubRecLatest.isNotEmpty
               ? AnalystRecommendation.fromJson(finnhubRecLatest)
               : analysisData.analystRecommendations),
-      historicalEarnings:
-          sigmaApiHistoricalFinancials.isNotEmpty
-            ? sigmaApiHistoricalFinancials
-            : yHistoricalFinancials.isNotEmpty
-            ? yHistoricalFinancials
-            : (finnhubEarningsSurprises.isNotEmpty
-              ? finnhubEarningsSurprises
-              : sigmaIncome),
+      historicalEarnings: sigmaApiHistoricalFinancials.isNotEmpty
+          ? sigmaApiHistoricalFinancials
+          : yHistoricalFinancials.isNotEmpty
+              ? yHistoricalFinancials
+              : (finnhubEarningsSurprises.isNotEmpty
+                  ? finnhubEarningsSurprises
+                  : sigmaIncome),
       esgScore: (yEsg['totalEsg'] as num?)?.toDouble() ?? analysisData.esgScore,
       targetPriceValue:
           (yTargets['targetMeanPrice']?['raw'] as num?)?.toDouble() ??
@@ -638,11 +808,11 @@ STRUCTURE JSON (STRICTE) :
             []),
       ],
       // NEW â€” yfinance Intelligence Pipeline
-        earningsCalendar: yCalendar.isNotEmpty
+      earningsCalendar: yCalendar.isNotEmpty
           ? yCalendar
           : (finnhubEarningsCalendarMap.isNotEmpty
-            ? finnhubEarningsCalendarMap
-            : null),
+              ? finnhubEarningsCalendarMap
+              : null),
       earningsTrend: yEarningsTrend.isNotEmpty ? yEarningsTrend : null,
       institutionalHolders: yInstitutionalHolders.isNotEmpty
           ? yInstitutionalHolders
@@ -661,6 +831,50 @@ STRUCTURE JSON (STRICTE) :
         "finnhubBasic": finnhubBasic,
         "finnhubRecommendations": finnhubRecommendations,
         "finnhubEarningsSurprises": finnhubEarningsSurprises,
+        "optionsChain": {
+          "expiration": optionsData['selectedExpiration'],
+          "expirations": optionsData['expirations'],
+          "calls": (optionsData['calls'] as List?)?.take(10).toList(),
+          "puts": (optionsData['puts'] as List?)?.take(10).toList(),
+        },
+        "financials": {
+          "latestQuarterIncome":
+              sigmaIncome.isNotEmpty && sigmaIncome.first is Map
+                  ? _pickFinancialFields(sigmaIncome.first as Map)
+                  : null,
+          "latestQuarterBalance":
+              sigmaBalance.isNotEmpty && sigmaBalance.first is Map
+                  ? _pickBalanceFields(sigmaBalance.first as Map)
+                  : null,
+          "latestQuarterCashFlow":
+              sigmaCashFlow.isNotEmpty && sigmaCashFlow.first is Map
+                  ? _pickCashFlowFields(sigmaCashFlow.first as Map)
+                  : null,
+          "annualIncomeLast3": sigmaAnnualIncome
+              .take(3)
+              .where((e) => e is Map)
+              .map((e) => _pickFinancialFields(e as Map))
+              .toList(),
+          "annualCashFlowLast3": sigmaAnnualCashFlow
+              .take(3)
+              .where((e) => e is Map)
+              .map((e) => _pickCashFlowFields(e as Map))
+              .toList(),
+        },
+        "secEdgar": {
+          "cik": secData['cik'],
+          "entityName": secData['entityName'],
+          "derived": secDerived,
+          "revenueAnnual":
+              (secFacts['revenue']?['annual'] as List?)?.take(5).toList(),
+          "netIncomeAnnual":
+              (secFacts['net_income']?['annual'] as List?)?.take(5).toList(),
+          "assetsAnnual":
+              (secFacts['total_assets']?['annual'] as List?)?.take(3).toList(),
+          "equityAnnual": (secFacts['stockholders_equity']?['annual'] as List?)
+              ?.take(3)
+              .toList(),
+        },
       }),
     );
 
@@ -725,136 +939,155 @@ STRUCTURE JSON (STRICTE) :
       }
     }
 
-    if (yahooTickerInfo.isNotEmpty) {
-      updateMetric(
-        'P/E Ratio',
-        _extractRaw(yahooTickerInfo['trailingPE'])?.toStringAsFixed(2),
-      );
-      updateMetric(
-        'Forward P/E',
-        _extractRaw(yahooTickerInfo['forwardPE'])?.toStringAsFixed(2),
-      );
-      updateMetric(
-        'ROE',
-        '${((_extractRaw(yahooTickerInfo['returnOnEquity']) ?? 0) * 100).toStringAsFixed(2)}%',
-      );
-      updateMetric(
-        'D/E Ratio',
-        _extractRaw(yahooTickerInfo['debtToEquity'])?.toStringAsFixed(2),
-      );
+    // Use real sigmaMetrics (FMP/yfinance) for financial matrix enrichment
+    if (sigmaMetrics.isNotEmpty || sigmaProfile.isNotEmpty) {
+      final pe = sigmaMetrics['trailingPE'] ?? sigmaProfile['pe'];
+      if (pe != null) updateMetric('P/E Ratio', (pe as num).toStringAsFixed(2));
+      final fwdPE = sigmaMetrics['forwardPE'];
+      if (fwdPE != null)
+        updateMetric('Forward P/E', (fwdPE as num).toStringAsFixed(2));
+      final roe = sigmaMetrics['returnOnEquity'] ?? sigmaMetrics['roeTTM'];
+      if (roe != null && (roe as num) != 0)
+        updateMetric('ROE', '${((roe as num) * 100).toStringAsFixed(2)}%');
+      final de =
+          sigmaMetrics['debtToEquity'] ?? sigmaMetrics['debtToEquityTTM'];
+      if (de != null) updateMetric('D/E Ratio', (de as num).toStringAsFixed(2));
+      final rev = sigmaMetrics['revenue'];
+      if (rev != null && (rev as num) != 0)
+        updateMetric('Total Revenue', _formatLargeNumber(rev));
+      final fcf = sigmaMetrics['freeCashflow'];
+      if (fcf != null && (fcf as num) != 0)
+        updateMetric('Free Cashflow', _formatLargeNumber(fcf));
+      final pm = sigmaMetrics['profitMargins'];
+      if (pm != null && (pm as num) != 0)
+        updateMetric(
+            'Profit Margins', '${((pm as num) * 100).toStringAsFixed(2)}%');
     }
 
-    if (yahooFinancialData.isNotEmpty) {
-      final fd = yahooFinancialData;
-      updateMetric(
-        'Total Revenue',
-        _formatLargeNumber(_extractRaw(fd['totalRevenue']) ?? 0),
-      );
-      updateMetric(
-        'EBITDA',
-        _formatLargeNumber(_extractRaw(fd['ebitda']) ?? 0),
-      );
-      updateMetric(
-        'Free Cashflow',
-        _formatLargeNumber(_extractRaw(fd['freeCashflow']) ?? 0),
-      );
-      updateMetric(
-        'Profit Margins',
-        '${((_extractRaw(fd['profitMargins']) ?? 0) * 100).toStringAsFixed(2)}%',
-      );
-    }
-
-    // 2.2 Key Stats Enforcement (Beta, Short Ratio, VolatilitÃ©)
-    if (yahooTickerInfo.isNotEmpty) {
-      updateMetric(
-        'Beta (5Y)',
-        _extractRaw(yahooTickerInfo['beta'])?.toStringAsFixed(2),
-      );
-      updateMetric(
-        'Short Ratio',
-        _extractRaw(yahooTickerInfo['shortRatio'])?.toStringAsFixed(2),
-      );
-      updateMetric(
-        'Short % Float',
-        '${((_extractRaw(yahooTickerInfo['shortPercentOfFloat']) ?? 0) * 100).toStringAsFixed(2)}%',
-      );
-    }
-
-    if (yahooFinancialData.isNotEmpty) {
-      final fd = yahooFinancialData;
-      updateMetric(
-        'Implied Vol (IV)',
-        '${((_extractRaw(fd['impliedVolatility']) ?? 0) * 100).toStringAsFixed(2)}%',
-      );
+    // 2.2 Key Stats Enforcement (Beta from sigmaProfile/sigmaMetrics)
+    final betaVal = sigmaProfile['beta'] ?? sigmaMetrics['beta'];
+    if (betaVal != null) {
+      updateMetric('Beta (5Y)', (betaVal as num).toStringAsFixed(2));
     }
 
     analysisData = analysisData.copyWith(financialMatrix: updatedMatrix);
 
-    // 3. Technical Insights Enrichment
-    if (yahooTechnical.isNotEmpty) {
-      final List<TechnicalIndicator> techIndicators = List.from(
-        analysisData.technicalAnalysis,
-      );
+    // 3. Technical Enrichment from real OHLCV data (ChartOverlayEngine)
+    if (priceHistory.length >= 5) {
+      try {
+        final overlays = ChartOverlayEngine.compute(priceHistory);
+        final List<TechnicalIndicator> techIndicators = List.from(
+          analysisData.technicalAnalysis,
+        );
 
-      void addTech(String label, dynamic val, String interp) {
-        if (val != null &&
-            val != "" &&
-            !techIndicators.any((ti) => ti.indicator == label)) {
-          techIndicators.add(
-            TechnicalIndicator(
+        void addTech(String label, String? val, String interp) {
+          if (val != null &&
+              val.isNotEmpty &&
+              !techIndicators.any((ti) => ti.indicator == label)) {
+            techIndicators.add(TechnicalIndicator(
               indicator: label,
-              value: val.toString(),
+              value: val,
               interpretation: interp,
-            ),
-          );
+            ));
+          }
         }
+
+        final rsiLast =
+            overlays.rsi.lastWhere((v) => v != null, orElse: () => null);
+        if (rsiLast != null) {
+          final rsiInterp = rsiLast >= 70
+              ? 'OVERBOUGHT'
+              : rsiLast <= 30
+                  ? 'OVERSOLD'
+                  : 'NEUTRAL';
+          addTech('RSI (14)', rsiLast.toStringAsFixed(1), rsiInterp);
+        }
+
+        final macdHist = overlays.latestMacdHist;
+        if (macdHist != null) {
+          addTech('MACD Histogram', macdHist.toStringAsFixed(4),
+              macdHist > 0 ? 'BULLISH' : 'BEARISH');
+        }
+
+        final sma50 =
+            overlays.sma50.lastWhere((v) => v != null, orElse: () => null);
+        final sma200 =
+            overlays.sma200.lastWhere((v) => v != null, orElse: () => null);
+        final lastClose = (priceHistory.last['close'] as num?)?.toDouble();
+        if (sma50 != null && lastClose != null) {
+          addTech(
+              'SMA 50',
+              '\$${sma50.toStringAsFixed(2)}',
+              lastClose > sma50
+                  ? 'ABOVE SMA50 (BULLISH)'
+                  : 'BELOW SMA50 (BEARISH)');
+        }
+        if (sma200 != null && lastClose != null) {
+          addTech(
+              'SMA 200',
+              '\$${sma200.toStringAsFixed(2)}',
+              lastClose > sma200
+                  ? 'ABOVE SMA200 (BULLISH)'
+                  : 'BELOW SMA200 (BEARISH)');
+        }
+
+        addTech('Market Regime', overlays.regime, overlays.regime);
+
+        if (techIndicators.length > analysisData.technicalAnalysis.length) {
+          analysisData =
+              analysisData.copyWith(technicalAnalysis: techIndicators);
+        }
+      } catch (e) {
+        dev.log('Warning: ChartOverlayEngine enrichment failed: $e');
       }
-
-      addTech(
-        'Short-term Trend',
-        yahooTechnical['shortTermTrend'],
-        'Trend is ${yahooTechnical['shortTermTrend']}',
-      );
-      addTech(
-        'Intermediate Trend',
-        yahooTechnical['intermediateTermTrend'],
-        'Trend is ${yahooTechnical['intermediateTermTrend']}',
-      );
-      addTech(
-        'Long-term Trend',
-        yahooTechnical['longTermTrend'],
-        'Trend is ${yahooTechnical['longTermTrend']}',
-      );
-
-      analysisData = analysisData.copyWith(
-        technicalAnalysis: techIndicators,
-        technicalInsights: yahooTechnical,
-      );
     }
 
-    // STATS & NEWS ENRICHMENT
-    try {
-      // 1. ACTUALITÃ‰S MULTI-SOURCES (SIGMA only)
-      try {
-        List<Map<String, dynamic>> rawNews = [];
-
-        // SIGMA news only
-        final sigmaNewsResult = await _marketData
-            .getStockNews(symbol, limit: 15)
-            .catchError((_) => <dynamic>[]);
-
-        for (var n in sigmaNewsResult) {
-          rawNews.add({
-            'title': n['title'],
-            'source': n['site'] ?? 'SIGMA',
-            'url': n['url'],
-            'publishedAt': n['publishedDate'] ?? '',
-            'summary': n['text'] ?? n['title'],
-            'imageUrl': n['image'],
-          });
+    // ── VOLATILITY ENRICHMENT from /options ──────────────────────────────────
+    if (optionsData.isNotEmpty) {
+      final optCalls = (optionsData['calls'] as List?) ?? [];
+      double ivSum = 0;
+      int ivCount = 0;
+      for (final c in optCalls) {
+        final iv = (c as Map?)?.cast<String, dynamic>()['impliedVolatility'];
+        final ivVal = (iv as num?)?.toDouble() ?? 0;
+        if (ivVal > 0 && ivVal < 50) {
+          ivSum += ivVal;
+          ivCount++;
         }
+      }
+      if (ivCount > 0) {
+        final avgIV = ivSum / ivCount * 100;
+        final interp = avgIV > 60
+            ? 'ELEVATED'
+            : avgIV > 30
+                ? 'NORMAL'
+                : 'LOW';
+        final beta = analysisData.volatility.beta;
+        analysisData = analysisData.copyWith(
+          volatility: VolatilityData(
+            ivRank: '${avgIV.toStringAsFixed(0)}%',
+            beta: beta,
+            interpretation: interp,
+          ),
+        );
+      }
+    }
 
-        // DÃ©duplication par titre
+    try {
+      // 1. ACTUALITÃ‰S MULTI-SOURCES â€" reuse already-fetched sigmaNews (no extra API call)
+      try {
+        List<Map<String, dynamic>> rawNews = sigmaNews
+            .map((n) => <String, dynamic>{
+                  'title': n['title'],
+                  'source': n['site'] ?? n['publisher'] ?? 'SIGMA',
+                  'url': n['url'] ?? n['link'] ?? '',
+                  'publishedAt': n['publishedDate'] ?? n['publishedAt'] ?? '',
+                  'summary': n['text'] ?? n['summary'] ?? n['title'],
+                  'imageUrl': n['image'] ?? n['thumbnail'],
+                })
+            .toList();
+
+        // Déduplication par titre
         final seenTitles = <String>{};
         final newsArticles = <NewsArticle>[];
         for (var n in rawNews) {
@@ -939,7 +1172,8 @@ STRUCTURE JSON (STRICTE) :
 
       // 2. KEY STATISTICS ENRICHMENT (SIGMA only)
       try {
-        var keyStats = KeyStatistics.fromJson(<String, dynamic>{});
+        // Start with ALL real API data from sigmaMetrics (already has right field names)
+        var keyStats = KeyStatistics.fromJson(sigmaMetrics);
 
         // Enrich with SIGMA for better data coverage
         dev.log('Information: Enriching Key Stats and Profile for $symbol...');
@@ -966,16 +1200,20 @@ STRUCTURE JSON (STRICTE) :
             analysisData = analysisData.copyWith(
               employees: analysisData.employees ??
                   AnalysisData.parseNum(
-                    sigmaProfile['fullTimeEmployees'] ?? sigmaProfile['employees'],
+                    sigmaProfile['fullTimeEmployees'] ??
+                        sigmaProfile['employees'],
                   ).toInt(),
-              website: analysisData.website ?? sigmaProfile['website'] as String?,
+              website:
+                  analysisData.website ?? sigmaProfile['website'] as String?,
               sector: analysisData.sector ?? sigmaProfile['sector'] as String?,
               industry:
                   analysisData.industry ?? sigmaProfile['industry'] as String?,
-              address: analysisData.address ?? sigmaProfile['address'] as String?,
+              address:
+                  analysisData.address ?? sigmaProfile['address'] as String?,
               city: analysisData.city ?? sigmaProfile['city'] as String?,
               state: analysisData.state ?? sigmaProfile['state'] as String?,
-              country: analysisData.country ?? sigmaProfile['country'] as String?,
+              country:
+                  analysisData.country ?? sigmaProfile['country'] as String?,
               ipoDate: sigmaProfile['ipoDate'] as String?,
               phone: analysisData.phone ?? sigmaProfile['phone'] as String?,
               exchange: sigmaProfile['exchange'] as String?,
@@ -1176,7 +1414,8 @@ STRUCTURE JSON (STRICTE) :
                       sigmaProfile['mktCap'] ?? sigmaProfile['marketCap']),
                 );
                 changed = true;
-              } else if (label.contains('BETA') && sigmaProfile['beta'] != null) {
+              } else if (label.contains('BETA') &&
+                  sigmaProfile['beta'] != null) {
                 updatedMatrix[i] = item.copyWith(
                   value: (sigmaProfile['beta'] as num).toStringAsFixed(2),
                 );
@@ -1184,7 +1423,8 @@ STRUCTURE JSON (STRICTE) :
               } else if (label.contains('DIVIDENDE') &&
                   sigmaProfile['lastDividend'] != null) {
                 updatedMatrix[i] = item.copyWith(
-                  value: (sigmaProfile['lastDividend'] as num).toStringAsFixed(2),
+                  value:
+                      (sigmaProfile['lastDividend'] as num).toStringAsFixed(2),
                 );
                 changed = true;
               } else if (label.contains('ROE') &&
@@ -1211,7 +1451,9 @@ STRUCTURE JSON (STRICTE) :
                 }
               } else if (label.contains('EPS')) {
                 final eps = sigmaMetrics['netIncomePerShareTTM'] ??
-                    (sigmaIncome.isNotEmpty ? sigmaIncome[0]['eps'] : null);
+                    (sigmaIncome.isNotEmpty
+                        ? sigmaIncome[0]['Diluted EPS']
+                        : null);
                 if (eps != null) {
                   updatedMatrix[i] = item.copyWith(
                     value: (eps as num).toStringAsFixed(2),
@@ -1220,7 +1462,8 @@ STRUCTURE JSON (STRICTE) :
                 }
               } else if (label.contains('EBIT')) {
                 final ebit = (sigmaIncome.isNotEmpty
-                    ? (sigmaIncome[0]['operatingIncome'] ?? sigmaIncome[0]['ebit'])
+                    ? (sigmaIncome[0]['Operating Income'] ??
+                        sigmaIncome[0]['EBIT'])
                     : null);
                 if (ebit != null) {
                   updatedMatrix[i] = item.copyWith(
@@ -1285,7 +1528,8 @@ STRUCTURE JSON (STRICTE) :
 
         // SIGMA Institutional Holders
         try {
-          final sigmaHoldersData = await _marketData.getInstitutionalHolders(symbol);
+          final sigmaHoldersData =
+              await _marketData.getInstitutionalHolders(symbol);
           if (sigmaHoldersData.isNotEmpty) {
             topInstitutions = sigmaHoldersData.take(10).map((h) {
               return MajorHolder(
@@ -1409,11 +1653,21 @@ STRUCTURE JSON (STRICTE) :
 
       analysisData = _ensureEssentialSectionsData(analysisData, targetLanguage);
       final withPeers = await _enrichPeerData(analysisData);
-      return _applyDataDrivenCalibration(withPeers, targetLanguage);
+      final calibrated = _applyDataDrivenCalibration(withPeers, targetLanguage);
+      return calibrated.copyWith(
+        rawInstitutionalData: jsonEncode(
+            _buildPremiumInstitutionalReport(calibrated, targetLanguage)),
+      );
     } catch (e) {
       dev.log('âŒ Enrichment Error: $e');
-      final essential = _ensureEssentialSectionsData(analysisData, targetLanguage);
-      return _applyDataDrivenCalibration(essential, targetLanguage);
+      final essential =
+          _ensureEssentialSectionsData(analysisData, targetLanguage);
+      final calibratedFallback =
+          _applyDataDrivenCalibration(essential, targetLanguage);
+      return calibratedFallback.copyWith(
+        rawInstitutionalData: jsonEncode(_buildPremiumInstitutionalReport(
+            calibratedFallback, targetLanguage)),
+      );
     }
   }
 
@@ -1449,7 +1703,8 @@ STRUCTURE JSON (STRICTE) :
     return data.copyWith(sectorPeers: enrichedPeers);
   }
 
-  AnalysisData _ensureEssentialSectionsData(AnalysisData data, String language) {
+  AnalysisData _ensureEssentialSectionsData(
+      AnalysisData data, String language) {
     final isFr = language.toUpperCase().startsWith('FR');
 
     bool hasMeaningful(String? value) {
@@ -1504,7 +1759,8 @@ STRUCTURE JSON (STRICTE) :
     var technical = filteredTechnical;
     if (technical.isEmpty) {
       final target = data.targetPriceValue;
-      final current = double.tryParse(data.price.replaceAll(RegExp(r'[^\d\.]'), ''));
+      final current =
+          double.tryParse(data.price.replaceAll(RegExp(r'[^\d\.]'), ''));
       if (current != null && current > 0 && target != null && target > 0) {
         final upside = ((target - current) / current) * 100;
         technical.add(
@@ -1539,10 +1795,8 @@ STRUCTURE JSON (STRICTE) :
         );
       }
 
-      final ivRangeParts = data.volatility.ivRank
-          .split('-')
-          .map((s) => s.trim())
-          .toList();
+      final ivRangeParts =
+          data.volatility.ivRank.split('-').map((s) => s.trim()).toList();
       if (ivRangeParts.length == 2 &&
           hasMeaningful(ivRangeParts[0]) &&
           hasMeaningful(ivRangeParts[1])) {
@@ -1564,215 +1818,38 @@ STRUCTURE JSON (STRICTE) :
     );
   }
 
-  AnalysisData _applyDataDrivenCalibration(
-      AnalysisData data, String language) {
-    final bool isFr = language.toUpperCase().startsWith('FR');
-
-    final keyStats = data.keyStatistics;
-    final analyst = data.analystRecommendations;
-
-    double score = data.sigmaScore > 0 ? data.sigmaScore : 50.0;
-    final positives = <String>[];
-    final negatives = <String>[];
-    int evidencePoints = 0;
-
-    void addPositive(String msg, double points) {
-      score += points;
-      evidencePoints += 1;
-      positives.add(msg);
-    }
-
-    void addNegative(String msg, double points) {
-      score -= points;
-      evidencePoints += 1;
-      negatives.add(msg);
-    }
-
-    // 1) Valuation
-    final pe = keyStats?.trailingPE ?? 0;
-    if (pe > 0 && pe <= 22) {
-      addPositive(
-          isFr
-              ? 'Valorisation raisonnable (P/E ${pe.toStringAsFixed(1)}).'
-              : 'Reasonable valuation (P/E ${pe.toStringAsFixed(1)}).',
-          6);
-    } else if (pe >= 45) {
-      addNegative(
-          isFr
-              ? 'Valorisation exigeante (P/E ${pe.toStringAsFixed(1)}).'
-              : 'Stretched valuation (P/E ${pe.toStringAsFixed(1)}).',
-          6);
-    }
-
-    // 2) Profitability / quality
-    final roe = keyStats?.returnOnEquity ?? 0;
-    if (roe >= 0.15) {
-      addPositive(
-          isFr
-              ? 'RentabilitÃ© Ã©levÃ©e (ROE ${(roe * 100).toStringAsFixed(1)}%).'
-              : 'High profitability (ROE ${(roe * 100).toStringAsFixed(1)}%).',
-          8);
-    } else if (roe > 0 && roe < 0.06) {
-      addNegative(
-          isFr
-              ? 'RentabilitÃ© faible (ROE ${(roe * 100).toStringAsFixed(1)}%).'
-              : 'Weak profitability (ROE ${(roe * 100).toStringAsFixed(1)}%).',
-          8);
-    }
-
-    final margin = keyStats?.profitMargins ?? 0;
-    if (margin >= 0.15) {
-      addPositive(
-          isFr
-              ? 'Marge nette solide (${(margin * 100).toStringAsFixed(1)}%).'
-              : 'Strong net margin (${(margin * 100).toStringAsFixed(1)}%).',
-          6);
-    } else if (margin > 0 && margin < 0.05) {
-      addNegative(
-          isFr
-              ? 'Marge nette contrainte (${(margin * 100).toStringAsFixed(1)}%).'
-              : 'Compressed net margin (${(margin * 100).toStringAsFixed(1)}%).',
-          6);
-    }
-
-    final growth = keyStats?.revenueGrowth ?? 0;
-    if (growth >= 0.10) {
-      addPositive(
-          isFr
-              ? 'Croissance du chiffre d\'affaires soutenue (${(growth * 100).toStringAsFixed(1)}%).'
-              : 'Solid revenue growth (${(growth * 100).toStringAsFixed(1)}%).',
-          8);
-    } else if (growth < 0) {
-      addNegative(
-          isFr
-              ? 'Contraction du chiffre d\'affaires (${(growth * 100).toStringAsFixed(1)}%).'
-              : 'Revenue contraction (${(growth * 100).toStringAsFixed(1)}%).',
-          8);
-    }
-
-    // 3) Analyst consensus
-    final totalRec = analyst.strongBuy + analyst.buy + analyst.hold + analyst.sell + analyst.strongSell;
-    if (totalRec > 0) {
-      final bias =
-          (analyst.strongBuy + analyst.buy - analyst.sell - analyst.strongSell) /
-              totalRec;
-      if (bias >= 0.35) {
-        addPositive(
-            isFr
-                ? 'Consensus analyste favorable (${analyst.consensusLabel}).'
-                : 'Supportive analyst consensus (${analyst.consensusLabel}).',
-            10);
-      } else if (bias <= -0.20) {
-        addNegative(
-            isFr
-                ? 'Consensus analyste dÃ©favorable (${analyst.consensusLabel}).'
-                : 'Unfavorable analyst consensus (${analyst.consensusLabel}).',
-            10);
-      }
-    }
-
-    // 4) Price target upside (if available)
-    final current = double.tryParse(data.price.replaceAll(RegExp(r'[^\d\.]'), ''));
-    final target = data.targetPriceValue;
-    if (current != null && current > 0 && target != null && target > 0) {
-      final upside = ((target - current) / current) * 100;
-      if (upside >= 15) {
-        addPositive(
-            isFr
-                ? 'Potentiel haussier implicite Ã©levÃ© (${upside.toStringAsFixed(1)}%).'
-                : 'High implied upside (${upside.toStringAsFixed(1)}%).',
-            10);
-      } else if (upside <= -10) {
-        addNegative(
-            isFr
-                ? 'Potentiel implicite nÃ©gatif (${upside.toStringAsFixed(1)}%).'
-                : 'Negative implied upside (${upside.toStringAsFixed(1)}%).',
-            10);
-      }
-    }
-
-    // 5) Insider sentiment
-    final insiderRatio = data.insiderBuyRatio;
-    if (insiderRatio != null) {
-      if (insiderRatio >= 0.60) {
-        addPositive(
-            isFr
-                ? 'Flux insider orientÃ©s achat.'
-                : 'Insider flow skewed to buys.',
-            6);
-      } else if (insiderRatio <= 0.40) {
-        addNegative(
-            isFr
-                ? 'Flux insider orientÃ©s vente.'
-                : 'Insider flow skewed to sells.',
-            6);
-      }
-    }
-
-    // 6) Event and risk overlays
-    if (data.corporateEvents.isNotEmpty) {
-      evidencePoints += 1;
-      final hasEarnings = data.corporateEvents
-          .any((e) => e.event.toUpperCase().contains('RÃ‰SULTATS') ||
-              e.event.toUpperCase().contains('EARNING'));
-      if (hasEarnings) {
-        addPositive(
-            isFr
-                ? 'Catalyseur court terme identifiÃ© (publication de rÃ©sultats).'
-                : 'Near-term catalyst identified (earnings release).',
-            3);
-      }
-    }
-
-    final beta = double.tryParse(data.volatility.beta) ?? 0;
-    if (beta >= 1.8) {
-      addNegative(
-          isFr
-              ? 'Risque de volatilitÃ© Ã©levÃ© (beta ${beta.toStringAsFixed(2)}).'
-              : 'Elevated volatility risk (beta ${beta.toStringAsFixed(2)}).',
-          4);
-    }
-
-    score = score.clamp(0, 100);
-
-    // Confidence = data coverage + score distance from neutral.
-    final coverage = (evidencePoints / 10).clamp(0.0, 1.0);
-    final conviction = ((score - 50).abs() / 50).clamp(0.0, 1.0);
-    final confidence = (0.45 * coverage + 0.55 * conviction).clamp(0.15, 0.95);
-
-    String verdict;
-    if (score >= 67) {
-      verdict = isFr ? 'ACHAT' : 'BUY';
-    } else if (score <= 42) {
-      verdict = isFr ? 'VENTE' : 'SELL';
-    } else {
-      verdict = isFr ? 'ATTENDRE' : 'HOLD';
-    }
-
-    final riskLevel = beta >= 1.8
-        ? (isFr ? 'Ã‰LEVÃ‰' : 'HIGH')
-        : (beta >= 1.1 ? (isFr ? 'MOYEN' : 'MEDIUM') : (isFr ? 'FAIBLE' : 'LOW'));
-
-    final methodology = isFr
-        ? 'Score recalibrÃ© de faÃ§on dÃ©terministe sur donnÃ©es rÃ©elles: valorisation, qualitÃ© (ROE/marges), croissance, consensus analystes, upside implicite, flux insiders et risque volatilitÃ©.'
-        : 'Score deterministically recalibrated from real data: valuation, quality (ROE/margins), growth, analyst consensus, implied upside, insider flow and volatility risk.';
-
-    final reasonPool = <String>[...positives.take(3), ...negatives.take(3)];
-    final calibratedReasons = reasonPool.isNotEmpty
-        ? reasonPool
-        : [
-            isFr
-                ? 'DÃ©cision maintenue en mode neutre faute de signaux quantitatifs suffisants.'
-                : 'Neutral stance maintained due to insufficient quantitative evidence.'
-          ];
+  AnalysisData _applyDataDrivenCalibration(AnalysisData data, String language) {
+    final decision = FinancialDecisionEngine.evaluate(data, language: language);
+    final calibratedReasons = <String>[
+      ...decision.positives.take(3),
+      ...decision.negatives.take(3),
+    ];
+    final pros = data.pros.isNotEmpty
+        ? data.pros
+        : decision.positives
+            .take(4)
+            .map((text) => ProCon(text: text, period: 'PRESENT'))
+            .toList(growable: false);
+    final cons = data.cons.isNotEmpty
+        ? data.cons
+        : decision.negatives
+            .take(4)
+            .map((text) => ProCon(text: text, period: 'PRESENT'))
+            .toList(growable: false);
 
     return data.copyWith(
-      sigmaScore: score.toDouble(),
-      confidence: confidence.toDouble(),
-      verdict: verdict,
-      riskLevel: riskLevel,
+      sigmaScore: decision.score,
+      confidence: decision.confidence,
+      verdict: decision.verdict,
+      riskLevel: decision.riskLevel,
       verdictReasons: calibratedReasons,
-      scoreMethodology: methodology,
+      pros: pros,
+      cons: cons,
+      summary: decision.summary,
+      targetPriceValue: data.targetPriceValue ?? decision.targetPrice,
+      recommendationSteps: decision.recommendationSteps,
+      alphaRecommendation: decision.alphaRecommendation,
+      scoreMethodology: decision.methodology,
     );
   }
 
@@ -1974,7 +2051,8 @@ STRUCTURE JSON (STRICTE) :
   }
 
   Future<MarketOverview> getMarketOverview({
-    String language = 'FRANÃ‡AIS',
+    String language = 'FRANÇAIS',
+    List<String> favoriteTickers = const [],
   }) async {
     final bool isFr = language.toUpperCase().startsWith('FR');
     final String targetLanguage = isFr ? 'FRANÃ‡AIS' : 'ENGLISH';
@@ -2013,7 +2091,8 @@ STRUCTURE JSON (STRICTE) :
 
       // â”€â”€ 1. RÃ‰CUPÃ‰RATION DES DONNÃ‰ES EN PARALLÃˆLE â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
       final results = await Future.wait([
-        _safeCall(() => _marketData.getGeneralNews(limit: 30), {'data': []}), // 0
+        _safeCall(
+            () => _marketData.getGeneralNews(limit: 30), {'data': []}), // 0
         _safeCall(() => Future.value(null), null), // 1 (treasury â€” disabled)
         _safeCall(() => _marketData.getSectorPerformance(), []), // 2
         _safeCall(() => _marketData.getMergersAndAcquisitions(), []), // 3
@@ -2212,11 +2291,14 @@ STRUCTURE JSON (STRICTE) :
         // Title: yfinance = 'title', Finnhub = 'headline', Marketaux = 'title'
         final title = (m['title'] ?? m['headline'] ?? '').toString();
         // Source: yfinance = 'publisher', Finnhub = 'source', SIGMA = 'site'
-        final source = (m['publisher'] ?? m['source'] ?? m['site'] ?? defaultSource).toString();
+        final source =
+            (m['publisher'] ?? m['source'] ?? m['site'] ?? defaultSource)
+                .toString();
         // URL: yfinance = 'link', others = 'url'
         final url = (m['url'] ?? m['link'] ?? '').toString();
         // Ticker: yfinance may have 'symbols' list or 'relatedTickers'
-        final relatedRaw = m['relatedTickers'] ?? m['symbols'] ?? m['related'] ?? '';
+        final relatedRaw =
+            m['relatedTickers'] ?? m['symbols'] ?? m['related'] ?? '';
         String ticker = '';
         if (relatedRaw is List && relatedRaw.isNotEmpty) {
           ticker = relatedRaw[0]?.toString() ?? '';
@@ -2225,10 +2307,19 @@ STRUCTURE JSON (STRICTE) :
         }
         ticker = m['symbol']?.toString() ?? ticker;
         // PublishedAt: yfinance = 'publishedAt', Finnhub = 'datetime', Marketaux = 'published_at'
-        final publishedAt = (m['publishedAt'] ?? m['publishedDate'] ?? m['datetime']?.toString() ?? m['published_at'] ?? '').toString();
+        final publishedAt = (m['publishedAt'] ??
+                m['publishedDate'] ??
+                m['datetime']?.toString() ??
+                m['published_at'] ??
+                '')
+            .toString();
         if (title.isEmpty) return {};
         return {
-          'title': title, 'source': source, 'url': url, 'ticker': ticker, 'publishedAt': publishedAt,
+          'title': title,
+          'source': source,
+          'url': url,
+          'ticker': ticker,
+          'publishedAt': publishedAt,
         };
       }
 
@@ -2731,7 +2822,8 @@ STRUCTURE JSON (STRICTE, PAS DE TEXTE SUPERFLU) :
         limit: 100,
       );
       if (oiTrades.isNotEmpty) {
-        dev.log('âœ… OpenInsider: SUCCESS - Retrieved ${oiTrades.length} trades',
+        dev.log(
+            'âœ… OpenInsider: SUCCESS - Retrieved ${oiTrades.length} trades',
             name: 'SigmaService');
         return oiTrades;
       }
@@ -2739,7 +2831,8 @@ STRUCTURE JSON (STRICTE, PAS DE TEXTE SUPERFLU) :
       // 2. FALLBACK: SIGMA Bulk Feed
       dev.log('âš ï¸ OpenInsider unavailable, falling back to Sigma API...',
           name: 'SigmaService');
-      final List<dynamic> raw = await _marketData.getBulkInsiderTrading(limit: 100);
+      final List<dynamic> raw =
+          await _marketData.getBulkInsiderTrading(limit: 100);
 
       if (raw.isEmpty) {
         // 3. FALLBACK: FearGreed API
@@ -2833,7 +2926,8 @@ STRUCTURE JSON (STRICTE, PAS DE TEXTE SUPERFLU) :
 
         // Enregistrer l'Ã©chec
         if (sourceName != null && attempt > maxRetries) {
-          dev.log('âŒ Source failed: $sourceName â€” $e', name: 'SigmaService');
+          dev.log('âŒ Source failed: $sourceName â€” $e',
+              name: 'SigmaService');
         }
 
         if (attempt <= maxRetries) {
@@ -3416,8 +3510,9 @@ JSON STRUCTURE:
       final List<String> tickersToScan = tickers.take(8).toList();
 
       // Multi-threading data discovery via SIGMA
-      final newsResults = await Future.wait(tickersToScan.map((t) =>
-          _marketData.getStockNews(t, limit: 3).catchError((_) => <dynamic>[])));
+      final newsResults = await Future.wait(tickersToScan.map((t) => _marketData
+          .getStockNews(t, limit: 3)
+          .catchError((_) => <dynamic>[])));
 
       final webSearchTask = _webSearch
           .search(
@@ -3499,7 +3594,8 @@ JSON STRUCTURE:
 
   /// Search symbols using a single-source-of-truth approach.
   /// Prioritizes the SIGMA backend and only uses Finnhub as a sequential fallback if no results are found.
-  Future<List<Map<String, dynamic>>> searchTickerSymbolsUnified(String query) async {
+  Future<List<Map<String, dynamic>>> searchTickerSymbolsUnified(
+      String query) async {
     final q = query.trim().toLowerCase();
     if (q.isEmpty) return [];
 
@@ -3509,7 +3605,8 @@ JSON STRUCTURE:
 
     try {
       // 1. Primary: SIGMA backend
-      List<Map<String, dynamic>> results = await _marketData.searchTickerSymbols(q).catchError((e) {
+      List<Map<String, dynamic>> results =
+          await _marketData.searchTickerSymbols(q).catchError((e) {
         dev.log('Sigma search error: $e', name: 'SigmaService');
         return <Map<String, dynamic>>[];
       });
@@ -3523,16 +3620,24 @@ JSON STRUCTURE:
       }
 
       // Map and sort results consistently
-      final isPrimary = results.isNotEmpty && results.any((r) => r['source'] == 'SIGMA' || r['source'] == null);
-      
+      final isPrimary = results.isNotEmpty &&
+          results.any((r) => r['source'] == 'SIGMA' || r['source'] == null);
+
       final out = results.map((raw) {
-        final symbol = (raw['symbol'] ?? raw['displaySymbol'] ?? '').toString().toUpperCase();
+        final symbol = (raw['symbol'] ?? raw['displaySymbol'] ?? '')
+            .toString()
+            .toUpperCase();
+        final directLogo =
+            (raw['logoUrl'] ?? raw['logo'] ?? raw['image'])?.toString().trim();
+        final logo = LogoResolver.resolve(symbol, providedUrl: directLogo);
         return {
           ...raw,
           'symbol': symbol,
           'name': raw['name'] ?? raw['description'] ?? symbol,
           'description': raw['description'] ?? raw['name'] ?? symbol,
-          'source': raw['source'] ?? (isPrimary ? 'SIGMA' : 'FINNHUB'), 
+          'logoUrl': logo,
+          'logo': logo,
+          'source': raw['source'] ?? (isPrimary ? 'SIGMA' : 'FINNHUB'),
         };
       }).toList();
 
@@ -3540,12 +3645,16 @@ JSON STRUCTURE:
       out.sort((a, b) {
         final sa = (a['symbol'] ?? '').toString().toUpperCase();
         final sb = (b['symbol'] ?? '').toString().toUpperCase();
-        final qa = sa == q.toUpperCase() ? 0 : (sa.startsWith(q.toUpperCase()) ? 1 : 2);
-        final qb = sb == q.toUpperCase() ? 0 : (sb.startsWith(q.toUpperCase()) ? 1 : 2);
+        final qa = sa == q.toUpperCase()
+            ? 0
+            : (sa.startsWith(q.toUpperCase()) ? 1 : 2);
+        final qb = sb == q.toUpperCase()
+            ? 0
+            : (sb.startsWith(q.toUpperCase()) ? 1 : 2);
         if (qa != qb) return qa.compareTo(qb);
         return sa.compareTo(sb);
       });
-      
+
       _searchCache[q] = out;
       return out;
     } catch (e) {
@@ -3553,8 +3662,6 @@ JSON STRUCTURE:
       return [];
     }
   }
-
-
 
   Future<String> analyzeHistoricalPoint(
       String ticker, Map<String, dynamic> point,
@@ -3586,37 +3693,134 @@ JSON STRUCTURE:
 
   Future<String> analyzeHistoricalRange(AnalysisData contextData,
       List<Map<String, dynamic>> history, String range,
-      {String language = 'FRANÃ‡AIS'}) async {
-    if (history.isEmpty) return "DonnÃ©es insuffisantes.";
+      {String language = 'FRANÇAIS'}) async {
+    if (history.isEmpty) return "Données insuffisantes.";
     try {
-      final first = history.first['close'];
-      final last = history.last['close'];
-      final high =
-          history.map((e) => e['high'] as num).reduce((a, b) => a > b ? a : b);
-      final low =
-          history.map((e) => e['low'] as num).reduce((a, b) => a < b ? a : b);
-      final newsStr =
-          contextData.companyNews.take(3).map((n) => n.title).join(' | ');
+      // ── Compute full technical overlays ──────────────────────────────────
+      final overlays = ChartOverlayEngine.compute(history);
+      final closes =
+          history.map((e) => (e['close'] as num?)?.toDouble() ?? 0.0).toList();
+      final volumes =
+          history.map((e) => (e['volume'] as num?)?.toDouble() ?? 0.0).toList();
 
-      final prompt = '''
-      Analyze the $range price action for ${contextData.ticker} (${contextData.companyName} - ${contextData.sector}):
-      - PRICE DATA: Start: $first | End: $last | Range High: $high | Range Low: $low
-      - RISK METRICS: Beta: ${contextData.keyStatistics?.beta ?? 'N/A'} | Short Ratio: ${contextData.keyStatistics?.shortRatio ?? 'N/A'} | IV: ${contextData.volatility.ivRank}
-      - RECENT CATALYSTS & NEWS: $newsStr
-      
-      Provide a 2-sentence institutional summary for this period. 
-      PLAIN TEXT ONLY. NO JSON. NO MARKDOWN. 
-      Respond in $language.
-      ''';
+      final firstClose = closes.first;
+      final lastClose = closes.last;
+      final high = history
+          .map((e) => (e['high'] as num?)?.toDouble() ?? 0.0)
+          .reduce((a, b) => a > b ? a : b);
+      final low = history
+          .map((e) => (e['low'] as num?)?.toDouble() ?? 0.0)
+          .reduce((a, b) => a < b ? a : b);
+      final pctChange =
+          firstClose > 0 ? ((lastClose - firstClose) / firstClose * 100) : 0.0;
+
+      // Volume trend
+      final recentVolAvg = volumes.length >= 10
+          ? volumes.sublist(volumes.length - 10).reduce((a, b) => a + b) / 10
+          : volumes.last;
+      final prevVolAvg = volumes.length >= 20
+          ? volumes
+                  .sublist(volumes.length - 20, volumes.length - 10)
+                  .reduce((a, b) => a + b) /
+              10
+          : recentVolAvg;
+      final volTrend = prevVolAvg > 0
+          ? (recentVolAvg / prevVolAvg >= 1.15
+              ? 'Expanding'
+              : recentVolAvg / prevVolAvg <= 0.85
+                  ? 'Contracting'
+                  : 'Stable')
+          : 'N/A';
+
+      // SMA positions
+      final sma50Last =
+          overlays.sma50.lastWhere((v) => v != null, orElse: () => null);
+      final sma200Last =
+          overlays.sma200.lastWhere((v) => v != null, orElse: () => null);
+      final smaContext = [
+        if (sma50Last != null)
+          'SMA${overlays.fastPeriod}: \$${sma50Last.toStringAsFixed(2)} (${lastClose > sma50Last ? "above" : "below"})',
+        if (sma200Last != null)
+          'SMA${overlays.slowPeriod}: \$${sma200Last.toStringAsFixed(2)} (${lastClose > sma200Last ? "above" : "below"})',
+      ].join(' | ');
+
+      // RSI
+      final rsiVal =
+          overlays.rsi.lastWhere((v) => v != null, orElse: () => null);
+      final rsiStr = rsiVal == null
+          ? 'N/A'
+          : '${rsiVal.toStringAsFixed(1)} (${rsiVal >= 70 ? "Overbought" : rsiVal <= 30 ? "Oversold" : "Neutral"})';
+
+      // MACD
+      final macdHist = overlays.latestMacdHist;
+      final macdStr = macdHist == null
+          ? 'N/A'
+          : '${macdHist > 0 ? "Bullish" : "Bearish"} (hist: ${macdHist.toStringAsFixed(3)})';
+
+      // Cross events
+      final crossStr = overlays.crossEvents.isEmpty
+          ? 'None'
+          : overlays.crossEvents.reversed
+              .take(2)
+              .map((c) =>
+                  '${c.isGolden ? "Golden" : "Death"} Cross @ \$${c.price.toStringAsFixed(2)} [${c.isStrong ? "confirmed" : "weak"}]')
+              .join(', ');
+
+      // OBV
+      final obvStr = overlays.isObvBullish
+          ? 'Bullish (accumulation)'
+          : 'Bearish (distribution)';
+
+      // Price position in range
+      final rangePos = high > low
+          ? ((lastClose - low) / (high - low) * 100).toStringAsFixed(0)
+          : 'N/A';
+
+      // News catalysts
+      final newsStr =
+          contextData.companyNews.take(4).map((n) => '• ${n.title}').join('\n');
+
+      // Fundamental context
+      final mktCap = contextData.keyStatistics?.marketCap ?? 'N/A';
+      final pe = contextData.keyStatistics?.trailingPE ?? 'N/A';
+      final eps = contextData.keyStatistics?.trailingEps ?? 'N/A';
+
+      final prompt =
+          '''Analyze the $range price action for ${contextData.ticker} (${contextData.companyName}, ${contextData.sector}):
+
+PRICE ACTION:
+- Period: $range | Sessions: ${history.length} | Price: \$${firstClose.toStringAsFixed(2)} → \$${lastClose.toStringAsFixed(2)} (${pctChange >= 0 ? '+' : ''}${pctChange.toStringAsFixed(1)}%)
+- High: \$${high.toStringAsFixed(2)} | Low: \$${low.toStringAsFixed(2)} | Position in range: $rangePos%
+- Regime: ${overlays.regime}
+
+TECHNICAL INDICATORS:
+- RSI(14): $rsiStr
+- MACD: $macdStr
+- OBV: $obvStr
+- Moving Averages: ${smaContext.isNotEmpty ? smaContext : 'N/A'}
+- Volume trend: $volTrend
+- Cross events: $crossStr
+
+FUNDAMENTAL CONTEXT:
+- MarketCap: $mktCap | P/E: $pe | EPS: $eps
+- Beta: ${contextData.keyStatistics?.beta ?? 'N/A'} | IV: ${contextData.volatility.ivRank}
+
+RECENT NEWS & CATALYSTS:
+$newsStr
+
+Provide a 3-4 sentence institutional technical summary for this $range timeframe.
+Identify the dominant trend, key technical signal, and one key risk or opportunity.
+PLAIN TEXT ONLY. NO JSON. NO MARKDOWN. NO BULLET POINTS.
+Respond in $language.''';
 
       final res = await _stockProvider.generateContent(
         prompt: prompt,
         systemInstruction:
-            "You are a technical strategist. Deliver analytical plain text.",
+            "You are a senior technical analyst at a prime brokerage. Deliver precise, institutional-grade price action commentary.",
       );
       return _cleanPointResponse(res);
     } catch (e) {
-      return "Analyse de pÃ©riode $range complÃ©tÃ©e.";
+      return "Analyse de période $range complétée.";
     }
   }
 
@@ -3672,8 +3876,9 @@ JSON STRUCTURE:
   // ---------------------------------------------------------------------------
   Future<Map<String, String>> generateBullBearDebate(AnalysisData data) async {
     final ticker = data.ticker.toUpperCase();
-    final bool isFr = data.summary.toLowerCase().contains('le') || data.summary.toLowerCase().contains('est');
-    
+    final bool isFr = data.summary.toLowerCase().contains('le') ||
+        data.summary.toLowerCase().contains('est');
+
     final dataContext = '''
 Ticker: $ticker
 Company: ${data.companyName ?? ticker}
@@ -3714,15 +3919,17 @@ RESPOND IN ${isFr ? 'FRENCH' : 'ENGLISH'}.
 
     try {
       final provider = _deepReasoningProvider ?? _stockProvider;
-      
+
       final results = await Future.wait([
         provider.generateContent(
           prompt: "$bearPrompt\n\nMarket Data:\n$dataContext",
-          systemInstruction: "You are the Bear Analyst. Be critical, data-driven, and persuasive.",
+          systemInstruction:
+              "You are the Bear Analyst. Be critical, data-driven, and persuasive.",
         ),
         provider.generateContent(
           prompt: "$bullPrompt\n\nMarket Data:\n$dataContext",
-          systemInstruction: "You are the Bull Analyst. Be optimistic, growth-oriented, and data-driven.",
+          systemInstruction:
+              "You are the Bull Analyst. Be optimistic, growth-oriented, and data-driven.",
         ),
       ]);
 
@@ -3760,11 +3967,1048 @@ RESPOND IN ${isFr ? 'FRENCH' : 'ENGLISH'}.
     // Fallback
     return DateTime.now();
   }
+
+  /// Builds a narrative-driven, mobile-first institutional report JSON.
+  /// Schema: hook · executive_summary · key_charts · key_tables ·
+  ///         analysis_sections · risks · appendix · ui_hints · quality_flags
+  Map<String, dynamic> _buildPremiumInstitutionalReport(
+    AnalysisData data,
+    String language,
+  ) {
+    final isFr = language.toUpperCase().startsWith('FR');
+    final qualityFlags = <Map<String, dynamic>>[];
+    final qualityFlagKeys = <String>{};
+
+    // ── Helpers ────────────────────────────────────────────────────────────
+
+    void flag(String field, String reason) {
+      if (!qualityFlagKeys.add('$field:$reason')) return;
+      qualityFlags.add({'field': field, 'reason': reason});
+    }
+
+    Map<String, dynamic> num_(
+      String label,
+      dynamic rawValue,
+      String unit, {
+      String trend = 'neutral',
+      dynamic delta,
+    }) {
+      final raw = rawValue == null ? null : AnalysisData.parseNum(rawValue);
+      if (raw == null || raw == 0) flag(label, 'missing_or_zero');
+      return {
+        'label': label,
+        'raw_value': raw == 0 ? null : raw,
+        'formatted_value':
+            (raw == null || raw == 0) ? null : _formatReportValue(raw, unit),
+        'unit': unit,
+        'trend': trend,
+        'delta': delta,
+      };
+    }
+
+    String trend_(num? value) {
+      if (value == null || value == 0) return 'neutral';
+      return value > 0 ? 'positive' : 'negative';
+    }
+
+    String severity_(String riskLevel) {
+      final u = riskLevel.toUpperCase();
+      if (u.contains('HIGH') || u.contains('ELEV') || u.contains('FORT')) {
+        return 'high';
+      }
+      if (u.contains('LOW') || u.contains('FAIB')) return 'low';
+      return 'medium';
+    }
+
+    // ── Source data ────────────────────────────────────────────────────────
+
+    final keyStats = data.keyStatistics;
+    if (keyStats == null) flag('fundamentals.key_statistics', 'missing');
+
+    final currentPrice = () {
+      final v = AnalysisData.parseNum(data.price);
+      if (v == 0) flag('price.current', 'missing_or_zero');
+      return v == 0 ? null : v;
+    }();
+
+    final targetPrice =
+        (data.targetPriceValue != null && data.targetPriceValue! > 0)
+            ? data.targetPriceValue
+            : null;
+    if (targetPrice == null) flag('valuation.target_price', 'missing');
+
+    final upside =
+        (currentPrice != null && targetPrice != null && currentPrice > 0)
+            ? ((targetPrice - currentPrice) / currentPrice) * 100
+            : null;
+    if (upside == null) {
+      flag('valuation.upside', 'requires_price_and_target');
+    }
+
+    final revenue = keyStats?.revenue ?? 0;
+    final revenueGrowth =
+        keyStats == null ? 0.0 : (keyStats.revenueGrowth * 100);
+    final netMargin = keyStats == null ? 0.0 : (keyStats.profitMargins * 100);
+    final roe = keyStats == null ? 0.0 : (keyStats.returnOnEquity * 100);
+    final trailingPE = keyStats?.trailingPE ?? 0.0;
+
+    // ── Hook (strong opening sentence) ─────────────────────────────────────
+
+    final String hook;
+    final name = data.companyName ?? data.ticker;
+    if (upside != null && upside.abs() >= 5) {
+      final direction = upside >= 0
+          ? (isFr ? 'un potentiel haussier de' : 'upside of')
+          : (isFr ? 'un risque baissier de' : 'downside risk of');
+      hook = isFr
+          ? '$name affiche $direction ${upside.abs().toStringAsFixed(1)}% — voici pourquoi ce dossier merite attention.'
+          : '$name presents $direction ${upside.abs().toStringAsFixed(1)}% — here\'s why this name deserves a close read.';
+    } else if (data.sigmaScore >= 75) {
+      hook = isFr
+          ? '$name obtient un score SIGMA de ${data.sigmaScore.toStringAsFixed(0)}/100 — signal de conviction fort.'
+          : '$name scores ${data.sigmaScore.toStringAsFixed(0)}/100 on SIGMA — a high-conviction signal.';
+    } else if (data.verdict == 'ACHAT' || data.verdict == 'BUY') {
+      hook = isFr
+          ? '$name : verdict ACHAT. Trois arguments structurels justifient ce positionnement aujourd\'hui.'
+          : '$name: BUY verdict. Three structural arguments support this positioning today.';
+    } else {
+      hook = isFr
+          ? '$name (${data.ticker}) est au coeur d\'une dynamique sectorielle que nous decryptons ci-dessous.'
+          : '$name (${data.ticker}) sits at the center of a sector dynamic we break down below.';
+    }
+
+    // ── Executive summary — 3 insight-oriented points max ──────────────────
+
+    final execPoints = <Map<String, dynamic>>[];
+
+    // Point 1: Verdict + upside
+    if (upside != null) {
+      final direction = upside >= 0
+          ? (isFr ? 'potentiel' : 'upside')
+          : (isFr ? 'risque' : 'downside');
+      execPoints.add({
+        'rank': 1,
+        'label': isFr ? 'Verdict & objectif' : 'Verdict & target',
+        'text': isFr
+            ? '${data.verdict} — objectif ${targetPrice!.toStringAsFixed(2)} USD, soit ${upside.abs().toStringAsFixed(1)}% de $direction par rapport au cours actuel de ${currentPrice!.toStringAsFixed(2)} USD.'
+            : '${data.verdict} — target \$${targetPrice!.toStringAsFixed(2)}, implying ${upside.abs().toStringAsFixed(1)}% $direction from current \$${currentPrice!.toStringAsFixed(2)}.',
+        'tone': trend_(upside),
+      });
+    } else {
+      execPoints.add({
+        'rank': 1,
+        'label': isFr ? 'Verdict' : 'Verdict',
+        'text':
+            '${data.verdict}. ${data.summary.isNotEmpty ? data.summary.split('.').first + '.' : ''}',
+        'tone': data.verdict == 'ACHAT' || data.verdict == 'BUY'
+            ? 'positive'
+            : data.verdict == 'VENTE' || data.verdict == 'SELL'
+                ? 'negative'
+                : 'neutral',
+      });
+    }
+
+    // Point 2: Financial quality (highest signal)
+    if (revenueGrowth != 0 || netMargin != 0) {
+      execPoints.add({
+        'rank': 2,
+        'label': isFr ? 'Qualite financiere' : 'Financial quality',
+        'text': isFr
+            ? 'Croissance des revenus de ${revenueGrowth.toStringAsFixed(1)}%, marge nette de ${netMargin.toStringAsFixed(1)}% — ${netMargin >= 15 ? 'rentabilite au-dessus de la mediane sectorielle.' : netMargin > 0 ? 'marge positive, a surveiller.' : 'pression persistante sur les marges.'}'
+            : 'Revenue growth ${revenueGrowth.toStringAsFixed(1)}%, net margin ${netMargin.toStringAsFixed(1)}% — ${netMargin >= 15 ? 'profitability above sector median.' : netMargin > 0 ? 'positive margin, watch trend.' : 'persistent margin pressure.'}',
+        'tone': trend_(netMargin),
+      });
+    } else if (data.summary.isNotEmpty) {
+      execPoints.add({
+        'rank': 2,
+        'label': isFr ? 'Contexte' : 'Context',
+        'text': data.summary.split('.').take(2).join('.') + '.',
+        'tone': 'neutral',
+      });
+    }
+
+    // Point 3: Top catalyst or strength
+    if (data.catalysts.isNotEmpty) {
+      final topCat = data.catalysts.first;
+      execPoints.add({
+        'rank': 3,
+        'label': isFr ? 'Catalyseur cle' : 'Key catalyst',
+        'text':
+            '${topCat.headline}. ${topCat.insight.isNotEmpty ? topCat.insight.split('.').first + '.' : ''}',
+        'tone':
+            topCat.type.toUpperCase().contains('RIS') ? 'negative' : 'positive',
+      });
+    } else if (data.pros.isNotEmpty) {
+      execPoints.add({
+        'rank': 3,
+        'label': isFr ? 'Atout principal' : 'Main strength',
+        'text': data.pros.first.text.split('.').first + '.',
+        'tone': 'positive',
+      });
+    }
+
+    // ── Key charts — each answers a specific question ───────────────────────
+
+    final keyCharts = <Map<String, dynamic>>[];
+
+    // Chart 1: Current price vs 52w range vs target
+    if (currentPrice != null) {
+      final hi = keyStats?.fiftyTwoWeekHigh ?? 0.0;
+      final lo = keyStats?.fiftyTwoWeekLow ?? 0.0;
+      keyCharts.add({
+        'id': 'price_range',
+        'question': isFr
+            ? 'Ou se situe le titre dans son corridor 52 semaines?'
+            : 'Where does the stock sit in its 52-week range?',
+        'insight': isFr
+            ? (hi > 0 && lo > 0)
+                ? 'Le titre se negocie a ${((currentPrice - lo) / (hi - lo) * 100).toStringAsFixed(0)}% de son corridor 52 semaines.'
+                : 'Donnees de fourchette 52 semaines indisponibles.'
+            : (hi > 0 && lo > 0)
+                ? 'The stock trades at ${((currentPrice - lo) / (hi - lo) * 100).toStringAsFixed(0)}% of its 52-week range.'
+                : '52-week range data unavailable.',
+        'type': 'range_bar',
+        'unit': 'USD',
+        'data': {
+          'low': num_('52w_low', lo == 0 ? null : lo, 'USD'),
+          'current': num_('current_price', currentPrice, 'USD'),
+          'target':
+              num_('target_price', targetPrice, 'USD', trend: trend_(upside)),
+          'high': num_('52w_high', hi == 0 ? null : hi, 'USD'),
+        },
+      });
+    }
+
+    // Chart 2: Projected price path (if data available)
+    final priceSeries = data.projectedTrend
+        .where((pt) => pt.price > 0)
+        .map((pt) => {
+              'x': pt.date,
+              'y': num_('price', pt.price, 'USD',
+                  trend: pt.signal.toUpperCase().contains('BEAR')
+                      ? 'negative'
+                      : pt.signal.toUpperCase().contains('BULL')
+                          ? 'positive'
+                          : 'neutral'),
+              'signal': pt.signal,
+            })
+        .toList();
+    if (priceSeries.isNotEmpty) {
+      keyCharts.add({
+        'id': 'projected_path',
+        'question': isFr
+            ? 'Quel est le scenario de prix attendu a horizon 12M?'
+            : 'What is the expected 12M price path?',
+        'insight': isFr
+            ? 'Trajectoire projetee issue des signaux techniques et fondamentaux consolides.'
+            : 'Projected path derived from consolidated technical and fundamental signals.',
+        'type': 'line',
+        'unit': 'USD',
+        'series': [
+          {'name': data.ticker, 'data': priceSeries},
+        ],
+        'x_axis': 'date',
+        'y_axis': 'price',
+        'time_range': '12M',
+      });
+    }
+
+    // Chart 3: Revenue trend (if historical income available)
+    if (data.historicalEarnings != null &&
+        (data.historicalEarnings!).isNotEmpty) {
+      final revData = data.historicalEarnings!
+          .take(5)
+          .map((e) {
+            final m =
+                e is Map ? Map<String, dynamic>.from(e) : <String, dynamic>{};
+            final rev =
+                AnalysisData.parseNum(m['totalRevenue'] ?? m['revenue'] ?? 0);
+            final yr = m['fiscalDateEnding']?.toString() ??
+                m['date']?.toString() ??
+                '';
+            return rev > 0 ? {'x': yr, 'y': num_('revenue', rev, 'USD')} : null;
+          })
+          .whereType<Map<String, dynamic>>()
+          .toList()
+          .reversed
+          .toList();
+      if (revData.isNotEmpty) {
+        keyCharts.add({
+          'id': 'revenue_trend',
+          'question': isFr
+              ? 'La croissance du chiffre d\'affaires est-elle durable?'
+              : 'Is revenue growth sustainable?',
+          'insight': revenueGrowth != 0
+              ? (isFr
+                  ? 'Croissance annuelle de ${revenueGrowth.toStringAsFixed(1)}% — ${revenueGrowth >= 10 ? 'dynamique soutenue.' : revenueGrowth >= 0 ? 'progression moderee.' : 'contraction a surveiller.'}'
+                  : 'Annual growth of ${revenueGrowth.toStringAsFixed(1)}% — ${revenueGrowth >= 10 ? 'strong momentum.' : revenueGrowth >= 0 ? 'moderate progression.' : 'contraction to monitor.'}')
+              : (isFr
+                  ? 'Tendance de revenus sur 5 ans.'
+                  : '5-year revenue trend.'),
+          'type': 'bar',
+          'unit': 'USD',
+          'series': [
+            {'name': isFr ? 'Revenus' : 'Revenue', 'data': revData},
+          ],
+          'x_axis': 'year',
+          'y_axis': 'revenue',
+        });
+      }
+    }
+
+    // ── Key tables ──────────────────────────────────────────────────────────
+
+    final keyTables = <Map<String, dynamic>>[];
+
+    // Table 1: Valuation snapshot (compact, 5 rows max)
+    keyTables.add({
+      'id': 'valuation_snapshot',
+      'intro': isFr
+          ? 'La valorisation se lit en un coup d\'oeil — les cases rouges signalent un premium excessif.'
+          : 'Valuation at a glance — red cells flag excessive premium.',
+      'title': isFr ? 'Valorisation rapide' : 'Valuation snapshot',
+      'columns': [
+        isFr ? 'Metrique' : 'Metric',
+        isFr ? 'Valeur' : 'Value',
+        isFr ? 'Signal' : 'Signal',
+      ],
+      'rows': [
+        {
+          'metric': isFr ? 'Capitalisation' : 'Market cap',
+          'value': num_('market_cap', keyStats?.marketCap, 'USD'),
+          'signal': 'neutral',
+        },
+        {
+          'metric': 'P/E (TTM)',
+          'value':
+              num_('trailing_pe', trailingPE == 0 ? null : trailingPE, 'x'),
+          'signal': trailingPE > 35
+              ? 'negative'
+              : trailingPE > 0
+                  ? 'neutral'
+                  : 'na',
+        },
+        {
+          'metric': 'P/S',
+          'value': num_('price_to_sales', keyStats?.priceToSales, 'x'),
+          'signal': 'neutral',
+        },
+        {
+          'metric': 'P/B',
+          'value': num_('price_to_book', keyStats?.priceToBook, 'x'),
+          'signal': 'neutral',
+        },
+        {
+          'metric': isFr ? 'Objectif consensus' : 'Consensus target',
+          'value':
+              num_('target_price', targetPrice, 'USD', trend: trend_(upside)),
+          'signal': trend_(upside),
+        },
+      ],
+      'footnotes': [
+        isFr
+            ? 'Sources: SIGMA API, SEC facts. Valeurs null = donnee indisponible.'
+            : 'Sources: SIGMA API, SEC facts. Null = data unavailable.',
+      ],
+    });
+
+    // Table 2: Peer comparison (if available)
+    if (data.sectorPeers.isNotEmpty) {
+      final peerRows = data.sectorPeers
+          .take(5)
+          .map((peer) => {
+                'ticker': peer.ticker,
+                'name': peer.name,
+                'mkt_cap': peer.marketCap,
+                'pe': num_('${peer.ticker}.pe', peer.peRatio, 'x'),
+                'verdict': peer.verdict,
+              })
+          .toList();
+      keyTables.add({
+        'id': 'peer_comparison',
+        'intro': isFr
+            ? '${data.ticker} face a ses comparables directs — meme secteur, meme cycle.'
+            : '${data.ticker} versus direct comparables — same sector, same cycle.',
+        'title': isFr ? 'Comparatif pairs' : 'Peer comparison',
+        'columns': [
+          'Ticker',
+          isFr ? 'Nom' : 'Name',
+          isFr ? 'Capitalisation' : 'Mkt cap',
+          'P/E',
+          'Verdict'
+        ],
+        'rows': peerRows,
+        'footnotes': [
+          isFr ? 'Source: SIGMA quote feed.' : 'Source: SIGMA quote feed.',
+        ],
+      });
+    }
+
+    // ── Analysis sections ────────────────────────────────────────────────────
+    // Each section has: id, title (insight-oriented), paragraphs (2-3 sentences max), kpis
+
+    final analysisSections = <Map<String, dynamic>>[];
+
+    // Section: Business model / thesis
+    if (data.companyProfile.isNotEmpty || data.businessModel != 'N/A') {
+      final profile = data.companyProfile.isNotEmpty
+          ? data.companyProfile
+          : data.businessModel;
+      final sentences =
+          profile.split('.').where((s) => s.trim().isNotEmpty).toList();
+      analysisSections.add({
+        'id': 'thesis',
+        'title': isFr
+            ? 'Pourquoi ce modele genere-t-il de la valeur?'
+            : 'Why does this business model create value?',
+        'paragraphs': [
+          sentences.take(3).join('.') + '.',
+        ],
+        'kpis': [],
+      });
+    }
+
+    // Section: Fundamentals
+    if (revenue > 0 || revenueGrowth != 0 || netMargin != 0) {
+      final fcfStr = keyStats != null && keyStats.freeCashflow > 0
+          ? _formatLargeNumber(keyStats.freeCashflow)
+          : null;
+      final para1 = isFr
+          ? 'Revenus ${_formatLargeNumber(revenue)}, croissance ${revenueGrowth.toStringAsFixed(1)}%, marge nette ${netMargin.toStringAsFixed(1)}%.'
+          : 'Revenue ${_formatLargeNumber(revenue)}, growth ${revenueGrowth.toStringAsFixed(1)}%, net margin ${netMargin.toStringAsFixed(1)}%.';
+      final para2 = roe != 0
+          ? (isFr
+              ? 'ROE de ${roe.toStringAsFixed(1)}%${fcfStr != null ? ', FCF $fcfStr' : ''} — ${roe >= 15 ? 'rentabilite des capitaux propres solide.' : 'a comparer avec les pairs sectoriels.'}'
+              : 'ROE ${roe.toStringAsFixed(1)}%${fcfStr != null ? ', FCF $fcfStr' : ''} — ${roe >= 15 ? 'solid return on equity.' : 'benchmark against sector peers.'}')
+          : null;
+      analysisSections.add({
+        'id': 'fundamentals',
+        'title': isFr
+            ? 'Les chiffres racontent-ils une histoire de croissance rentable?'
+            : 'Do the numbers tell a story of profitable growth?',
+        'paragraphs': [
+          para1,
+          if (para2 != null) para2,
+        ],
+        'kpis': [
+          num_('revenue', revenue == 0 ? null : revenue, 'USD'),
+          num_('revenue_growth', revenueGrowth == 0 ? null : revenueGrowth, '%',
+              trend: trend_(revenueGrowth)),
+          num_('net_margin', netMargin == 0 ? null : netMargin, '%',
+              trend: trend_(netMargin)),
+          num_('roe', roe == 0 ? null : roe, '%', trend: trend_(roe)),
+          num_('debt_to_equity', keyStats?.debtToEquity, 'x'),
+        ],
+      });
+    }
+
+    // Section: Catalysts (only if present)
+    if (data.catalysts.isNotEmpty) {
+      analysisSections.add({
+        'id': 'catalysts',
+        'title': isFr
+            ? 'Quels declencheurs peuvent repriser le cours dans 12M?'
+            : 'What triggers could re-rate the stock in 12M?',
+        'paragraphs': [
+          isFr
+              ? '${data.catalysts.length} catalyseur(s) identifie(s). Le plus significatif: ${data.catalysts.first.headline.split('.').first}.'
+              : '${data.catalysts.length} catalyst(s) identified. The most significant: ${data.catalysts.first.headline.split('.').first}.',
+        ],
+        'items': data.catalysts
+            .take(5)
+            .map((c) => {
+                  'label': c.headline,
+                  'detail': c.insight,
+                  'tone': c.type.toUpperCase().contains('RIS')
+                      ? 'negative'
+                      : 'positive',
+                  'horizon': '12M',
+                })
+            .toList(),
+        'kpis': [],
+      });
+    }
+
+    // Section: Ownership & flows (if holders data available)
+    if (data.holders != null || data.institutionalHolders != null) {
+      final instHolders = data.institutionalHolders;
+      analysisSections.add({
+        'id': 'ownership',
+        'title': isFr
+            ? 'Qui detient et que font les institutionnels?'
+            : 'Who owns it and what are institutions doing?',
+        'paragraphs': [
+          isFr
+              ? 'La structure actionnariale reflète la conviction institutionnelle autour du dossier.'
+              : 'The ownership structure reflects institutional conviction around this name.',
+        ],
+        'kpis': [
+          if (data.insiderBuyRatio != null)
+            num_('insider_buy_ratio', (data.insiderBuyRatio! * 100), '%',
+                trend: trend_(data.insiderBuyRatio! - 0.5)),
+        ],
+        'top_holders': instHolders
+                ?.take(4)
+                .map((h) => {
+                      'name': h['Holder'] ?? h['name'] ?? '',
+                      'shares': h['Shares'] ?? h['shares'] ?? '',
+                      'pct_held': h['% Out'] ?? h['pct_held'] ?? '',
+                    })
+                .toList() ??
+            [],
+      });
+    }
+
+    // ── Risks ────────────────────────────────────────────────────────────────
+
+    final riskItems = data.cons
+        .take(5)
+        .map((c) => {
+              'label': c.text.split('.').first + '.',
+              'detail': c.text.length > 80
+                  ? c.text.substring(0, 80).trimRight() + '...'
+                  : c.text,
+              'severity': severity_(data.riskLevel),
+              'period': c.period,
+            })
+        .toList();
+
+    if (riskItems.isEmpty) {
+      flag('risks.items', 'no_cons_data');
+    }
+
+    final invalidationTriggers = data.actionPlan.isNotEmpty
+        ? data.actionPlan.take(3).toList()
+        : [
+            isFr
+                ? 'Degradation durable des marges sur deux trimestres consecutifs.'
+                : 'Sustained margin deterioration over two consecutive quarters.',
+            isFr
+                ? 'Perte de parts de marche dans le segment principal.'
+                : 'Market share loss in the core segment.',
+            isFr
+                ? 'Surprise negative majeure lors des prochains resultats trimestriels.'
+                : 'Major negative earnings surprise in the next quarterly results.',
+          ];
+
+    // ── Appendix (secondary, deep-dive data) ────────────────────────────────
+
+    final appendixSections = <Map<String, dynamic>>[];
+
+    // Technical analysis
+    if (data.technicalAnalysis.isNotEmpty) {
+      appendixSections.add({
+        'id': 'technical_analysis',
+        'title': isFr ? 'Analyse technique' : 'Technical analysis',
+        'rows': data.technicalAnalysis
+            .take(8)
+            .map((t) => {
+                  'indicator': t.indicator,
+                  'value': t.value,
+                  'interpretation': t.interpretation,
+                })
+            .toList(),
+        'supports': data.supports.take(3).toList(),
+        'resistances': data.resistances.take(3).toList(),
+      });
+    }
+
+    // Corporate calendar
+    if (data.corporateEvents.isNotEmpty) {
+      appendixSections.add({
+        'id': 'corporate_calendar',
+        'title': isFr ? 'Agenda corporatif' : 'Corporate calendar',
+        'intro': isFr
+            ? 'Prochains evenements susceptibles de creer de la volatilite.'
+            : 'Upcoming events likely to create price volatility.',
+        'rows': data.corporateEvents
+            .take(6)
+            .map((e) => {
+                  'date': e.date,
+                  'event': e.event,
+                  'description': e.description,
+                })
+            .toList(),
+      });
+    }
+
+    // Financial matrix deep dive
+    if (data.financialMatrix.isNotEmpty) {
+      appendixSections.add({
+        'id': 'financial_matrix',
+        'title': isFr
+            ? 'Tableau de bord financier complet'
+            : 'Full financial dashboard',
+        'intro': isFr
+            ? 'Ensemble des indicateurs financiers consolides disponibles via SIGMA API.'
+            : 'All available consolidated financial indicators via SIGMA API.',
+        'rows': data.financialMatrix
+            .take(10)
+            .map((item) => {
+                  'metric': item.label,
+                  'value': item.value,
+                  'assessment': item.assessment,
+                })
+            .toList(),
+      });
+    }
+
+    // Recent news
+    if (data.companyNews.isNotEmpty) {
+      appendixSections.add({
+        'id': 'recent_news',
+        'title': isFr ? 'Actualites recentes' : 'Recent news',
+        'intro': isFr
+            ? 'Dernieres publications selectionnees pour leur pertinence institutionnelle.'
+            : 'Latest publications selected for institutional relevance.',
+        'rows': data.companyNews
+            .take(6)
+            .map((n) => {
+                  'date': n.publishedAt,
+                  'source': n.source,
+                  'headline': n.title,
+                  'url': n.url,
+                })
+            .toList(),
+      });
+    }
+
+    // ── Assemble final payload ───────────────────────────────────────────────
+
+    return {
+      'symbol': data.ticker,
+      'company_name': data.companyName,
+      'generated_at': DateTime.now().toIso8601String(),
+      'language': isFr ? 'fr' : 'en',
+      'schema_version': '2.0',
+
+      // 1. Hook — strong opening sentence
+      'hook': hook,
+
+      // 2. Executive summary — 3 insight-driven points max
+      'executive_summary': {
+        'rating': data.verdict,
+        'sigma_score': num_('sigma_score', data.sigmaScore, 'score'),
+        'confidence': num_('confidence', data.confidence * 100, '%'),
+        'price': num_('current_price', currentPrice, 'USD'),
+        'target':
+            num_('target_price', targetPrice, 'USD', trend: trend_(upside)),
+        'upside': num_('upside', upside, '%', trend: trend_(upside)),
+        'points': execPoints.take(3).toList(),
+      },
+
+      // 3. Key charts — each answers a specific question
+      'key_charts': keyCharts,
+
+      // 4. Key tables — compact, each preceded by intro sentence
+      'key_tables': keyTables,
+
+      // 5. Analysis sections — insight titles, 2-3 sentence paragraphs
+      'analysis_sections': analysisSections,
+
+      // 6. Risks — with severity and invalidation triggers
+      'risks': {
+        'level': data.riskLevel,
+        'level_tone': severity_(data.riskLevel),
+        'items': riskItems,
+        'invalidation_triggers': invalidationTriggers,
+      },
+
+      // 7. Appendix — secondary data moved out of main read
+      'appendix': {
+        'title': isFr ? 'Deep Dive' : 'Deep Dive',
+        'sections': appendixSections,
+      },
+
+      // 8. UI hints for Flutter renderer
+      'ui_hints': {
+        'mobile_scroll_order': [
+          'hook',
+          'executive_summary',
+          'key_charts',
+          'key_tables',
+          'analysis_sections',
+          'risks',
+          'appendix',
+        ],
+        'density': 'premium_editorial',
+        'card_style': 'ghost_border',
+        'chart_style': 'institutional_monochrome',
+        'typography': 'lora_serif',
+        'accent_color': 'gold',
+        'highlight_tone_map': {
+          'positive': 'emerald',
+          'negative': 'crimson',
+          'neutral': 'slate',
+        },
+      },
+
+      'quality_flags': qualityFlags,
+    };
+  }
+
+  String _formatReportValue(double value, String unit) {
+    if (unit == 'USD') return _formatLargeNumber(value);
+    if (unit == '%') return '${value.toStringAsFixed(1)}%';
+    if (unit == 'x') return '${value.toStringAsFixed(2)}x';
+    if (unit == 'score') return value.toStringAsFixed(0);
+    return value.toStringAsFixed(2);
+  }
+
+  /// Builds a compact options-flow summary string for the AI prompt.
+  String _buildOptionsContext(Map<String, dynamic> options) {
+    if (options.isEmpty) return 'N/A';
+
+    final calls = (options['calls'] as List?) ?? [];
+    final puts = (options['puts'] as List?) ?? [];
+    final expiry = options['selectedExpiration']?.toString() ?? '';
+
+    if (calls.isEmpty && puts.isEmpty) return 'N/A';
+
+    // Total open interest
+    double callOI = 0, putOI = 0, callVol = 0, putVol = 0;
+    double ivSum = 0;
+    int ivCount = 0;
+
+    for (final c in calls) {
+      if (c is! Map) continue;
+      callOI += (c['openInterest'] as num? ?? 0).toDouble();
+      callVol += (c['volume'] as num? ?? 0).toDouble();
+      final iv = (c['impliedVolatility'] as num?)?.toDouble() ?? 0;
+      if (iv > 0) {
+        ivSum += iv;
+        ivCount++;
+      }
+    }
+    for (final p in puts) {
+      if (p is! Map) continue;
+      putOI += (p['openInterest'] as num? ?? 0).toDouble();
+      putVol += (p['volume'] as num? ?? 0).toDouble();
+    }
+
+    final pcRatio = callOI > 0 ? (putOI / callOI) : 0.0;
+    final avgIV = ivCount > 0 ? (ivSum / ivCount * 100) : 0.0;
+    final sentiment = pcRatio > 1.2
+        ? 'BEARISH (put/call > 1.2)'
+        : pcRatio < 0.7
+            ? 'BULLISH (put/call < 0.7)'
+            : 'NEUTRAL';
+
+    // Top call strikes by OI
+    final sortedCalls = [...calls];
+    sortedCalls.sort((a, b) => ((b as Map)['openInterest'] as num? ?? 0)
+        .compareTo((a as Map)['openInterest'] as num? ?? 0));
+    final topCalls = sortedCalls
+        .take(3)
+        .map((c) =>
+            '\$${(c as Map)['strike']} (OI:${c['openInterest']}, IV:${((c['impliedVolatility'] as num? ?? 0) * 100).toStringAsFixed(0)}%)')
+        .join(', ');
+
+    final sortedPuts = [...puts];
+    sortedPuts.sort((a, b) => ((b as Map)['openInterest'] as num? ?? 0)
+        .compareTo((a as Map)['openInterest'] as num? ?? 0));
+    final topPuts = sortedPuts
+        .take(3)
+        .map((c) => '\$${(c as Map)['strike']} (OI:${c['openInterest']})')
+        .join(', ');
+
+    return '''Expiry: $expiry | Put/Call OI: ${pcRatio.toStringAsFixed(2)} → $sentiment
+Avg IV: ${avgIV.toStringAsFixed(0)}% | Call Vol: ${callVol.toInt()} | Put Vol: ${putVol.toInt()}
+Top Calls (OI): $topCalls
+Top Puts (OI): $topPuts''';
+  }
+
+  /// Formats SEC/EDGAR derived metrics + top annual facts for the AI prompt.
+  String _buildSecContext(
+      Map<String, dynamic> derived, Map<String, dynamic> facts) {
+    if (derived.isEmpty && facts.isEmpty) return 'N/A';
+
+    final latest =
+        (derived['latest_values'] as Map?)?.cast<String, dynamic>() ?? {};
+    final rev = latest['revenue'];
+    final ni = latest['net_income'];
+    final assets = latest['total_assets'];
+    final equity = latest['stockholders_equity'];
+    final shares = latest['shares_outstanding'];
+
+    final revGrowth = derived['revenue_yoy_growth_pct'];
+    final niGrowth = derived['net_income_yoy_growth_pct'];
+    final opMargin = derived['operating_margin_pct'];
+    final netMargin = derived['net_margin_pct'];
+    final debtEq = derived['debt_to_equity'];
+
+    String fmt(dynamic v) {
+      if (v == null) return 'N/A';
+      final n = (v as num).abs();
+      final sign = (v as num) < 0 ? '-' : '';
+      if (n >= 1e9) return '$sign\$${(n / 1e9).toStringAsFixed(2)}B';
+      if (n >= 1e6) return '$sign\$${(n / 1e6).toStringAsFixed(1)}M';
+      return '$sign\$${n.toStringAsFixed(0)}';
+    }
+
+    // Last 3 annual revenue for trend
+    final revAnnual = (facts['revenue']?['annual'] as List?)
+            ?.take(3)
+            .map((e) =>
+                '${(e as Map)['end']?.toString().substring(0, 4)}: ${fmt(e['value'])}')
+            .join(' | ') ??
+        '';
+
+    return '''SEC EDGAR FUNDAMENTALS:
+Revenue: ${fmt(rev)} (YoY: ${revGrowth?.toStringAsFixed(1) ?? 'N/A'}%) | Net Income: ${fmt(ni)} (YoY: ${niGrowth?.toStringAsFixed(1) ?? 'N/A'}%)
+Operating Margin: ${opMargin?.toStringAsFixed(1) ?? 'N/A'}% | Net Margin: ${netMargin?.toStringAsFixed(1) ?? 'N/A'}%
+Total Assets: ${fmt(assets)} | Equity: ${fmt(equity)} | Debt/Equity: ${debtEq?.toStringAsFixed(3) ?? 'N/A'}
+Shares Outstanding: ${shares != null ? (shares as num) ~/ 1 : 'N/A'}
+Annual Revenue Trend: $revAnnual''';
+  }
+
+  /// Picks key fields from a raw yfinance income statement entry.
+  Map<String, dynamic> _pickFinancialFields(Map e) => {
+        'date': e['index'],
+        'revenue': e['Total Revenue'],
+        'grossProfit': e['Gross Profit'],
+        'operatingIncome': e['Operating Income'],
+        'netIncome': e['Net Income'],
+        'ebitda': e['EBITDA'],
+        'eps': e['Diluted EPS'],
+        'rd': e['Research And Development'],
+        'sga': e['Selling General And Administration'],
+      };
+
+  /// Picks key fields from a raw yfinance balance sheet entry.
+  Map<String, dynamic> _pickBalanceFields(Map e) => {
+        'date': e['index'],
+        'totalAssets': e['Total Assets'],
+        'totalLiabilities': e['Total Liabilities Net Minority Interest'],
+        'equity': e['Stockholders Equity'],
+        'workingCapital': e['Working Capital'],
+        'cash': e['Cash And Cash Equivalents'],
+        'totalDebt': e['Total Debt'],
+        'retainedEarnings': e['Retained Earnings'],
+      };
+
+  /// Picks key fields from a raw yfinance cash flow entry.
+  Map<String, dynamic> _pickCashFlowFields(Map e) => {
+        'date': e['index'],
+        'operatingCashFlow': e['Operating Cash Flow'],
+        'freeCashFlow': e['Free Cash Flow'],
+        'capex': e['Capital Expenditure'],
+        'investingCashFlow': e['Investing Cash Flow'],
+        'financingCashFlow': e['Financing Cash Flow'],
+        'stockBasedComp': e['Stock Based Compensation'],
+      };
+
+  /// Formats full quarterly + annual financials for the AI prompt.
+  String _buildFinancialsContext(
+    List<dynamic> qIncome,
+    List<dynamic> aIncome,
+    List<dynamic> qBalance,
+    List<dynamic> qCashFlow,
+  ) {
+    String fmt(dynamic v) {
+      if (v == null) return 'N/A';
+      final n = (v as num).abs();
+      final sign = (v as num) < 0 ? '-' : '';
+      if (n >= 1e9) return '$sign\$${(n / 1e9).toStringAsFixed(2)}B';
+      if (n >= 1e6) return '$sign\$${(n / 1e6).toStringAsFixed(1)}M';
+      return '$sign\$${n.toStringAsFixed(0)}';
+    }
+
+    final lines = <String>[];
+
+    // Last 4 quarterly income
+    if (qIncome.isNotEmpty) {
+      lines.add('QUARTERLY INCOME (last 4):');
+      for (final e in qIncome.whereType<Map>().take(4)) {
+        final d = (e['index'] as String?)?.substring(0, 10) ?? '?';
+        lines.add(
+            '  $d | Rev: ${fmt(e['Total Revenue'])} | GP: ${fmt(e['Gross Profit'])} | OpInc: ${fmt(e['Operating Income'])} | NI: ${fmt(e['Net Income'])} | EPS: ${e['Diluted EPS'] ?? 'N/A'} | R&D: ${fmt(e['Research And Development'])}');
+      }
+    }
+
+    // Last 3 annual income
+    if (aIncome.isNotEmpty) {
+      lines.add('ANNUAL INCOME (last 3):');
+      for (final e in aIncome.whereType<Map>().take(3)) {
+        final d = (e['index'] as String?)?.substring(0, 10) ?? '?';
+        lines.add(
+            '  $d | Rev: ${fmt(e['Total Revenue'])} | EBITDA: ${fmt(e['EBITDA'])} | NI: ${fmt(e['Net Income'])} | EPS: ${e['Diluted EPS'] ?? 'N/A'}');
+      }
+    }
+
+    // Latest quarterly balance sheet
+    if (qBalance.isNotEmpty && qBalance.first is Map) {
+      final b = qBalance.first as Map;
+      final d = (b['index'] as String?)?.substring(0, 10) ?? '?';
+      lines.add(
+          'BALANCE SHEET ($d): Assets: ${fmt(b['Total Assets'])} | Liabilities: ${fmt(b['Total Liabilities Net Minority Interest'])} | Equity: ${fmt(b['Stockholders Equity'])} | Cash: ${fmt(b['Cash And Cash Equivalents'])} | Debt: ${fmt(b['Total Debt'])} | WC: ${fmt(b['Working Capital'])}');
+    }
+
+    // Latest quarterly cash flow
+    if (qCashFlow.isNotEmpty && qCashFlow.first is Map) {
+      final c = qCashFlow.first as Map;
+      final d = (c['index'] as String?)?.substring(0, 10) ?? '?';
+      lines.add(
+          'CASH FLOW ($d): OCF: ${fmt(c['Operating Cash Flow'])} | FCF: ${fmt(c['Free Cash Flow'])} | Capex: ${fmt(c['Capital Expenditure'])} | SBC: ${fmt(c['Stock Based Compensation'])}');
+    }
+
+    return lines.join('\n');
+  }
+
+  /// Formats /profile data into a concise AI-readable summary.
+
+  String _buildProfileContext(Map<String, dynamic> p) {
+    if (p.isEmpty) return 'N/A';
+    final mcap = p['marketCap'] as num?;
+    final mcapStr = mcap == null
+        ? 'N/A'
+        : mcap >= 1e12
+            ? '\$${(mcap / 1e12).toStringAsFixed(2)}T'
+            : mcap >= 1e9
+                ? '\$${(mcap / 1e9).toStringAsFixed(2)}B'
+                : '\$${(mcap / 1e6).toStringAsFixed(0)}M';
+    return '''Company: ${p['companyName'] ?? 'N/A'} | Exchange: ${p['exchange'] ?? 'N/A'} | Employees: ${p['fullTimeEmployees'] ?? 'N/A'}
+Sector: ${p['sector'] ?? 'N/A'} | Industry: ${p['industry'] ?? 'N/A'} | CEO: ${p['ceo'] ?? 'N/A'}
+Price: \$${p['price'] ?? 'N/A'} | Change: ${p['changePercent'] != null ? '${(p['changePercent'] as num).toStringAsFixed(2)}%' : 'N/A'} | Volume: ${p['volume'] ?? 'N/A'}
+MarketCap: $mcapStr | PE: ${p['pe'] ?? 'N/A'} | EPS: ${p['eps'] ?? 'N/A'} | Beta: ${p['beta'] ?? 'N/A'}
+52W High: \$${p['fiftyTwoWeekHigh'] ?? 'N/A'} | 52W Low: \$${p['fiftyTwoWeekLow'] ?? 'N/A'} | Dividend Yield: ${p['dividendYield'] ?? 'N/A'}
+Website: ${p['website'] ?? 'N/A'}
+Description: ${(p['description'] as String? ?? '').length > 400 ? (p['description'] as String).substring(0, 400) + '...' : p['description'] ?? 'N/A'}''';
+  }
+
+  String _buildInsiderContext(
+      Map<String, dynamic> summary, List<dynamic> trades) {
+    final buf = StringBuffer();
+    if (summary.isNotEmpty) {
+      final sentiment = summary['sentiment'] ?? 'N/A';
+      final buyCount = summary['buy_count'] ?? 0;
+      final sellCount = summary['sell_count'] ?? 0;
+      final netValue = summary['net_value_usd'] as num?;
+      final netStr = netValue == null
+          ? 'N/A'
+          : netValue >= 0
+              ? '+\$${(netValue / 1e6).toStringAsFixed(1)}M'
+              : '-\$${(netValue.abs() / 1e6).toStringAsFixed(1)}M';
+      buf.writeln(
+          'Insider Sentiment: $sentiment | Buys: $buyCount | Sells: $sellCount | Net: $netStr');
+      final topInsiders = (summary['top_insiders'] as List?)?.take(3) ?? [];
+      for (final ti in topInsiders) {
+        if (ti is Map) {
+          buf.writeln(
+              '  Top Insider: ${ti['insider_name']} (${ti['title']}) — \$${((ti['total_value'] as num?)?.abs() ?? 0) ~/ 1000}K over ${ti['trade_count']} trades');
+        }
+      }
+    }
+    for (final t in trades.take(8)) {
+      if (t is! Map) continue;
+      final name =
+          t['insider_name'] ?? t['ownerName'] ?? t['reportingName'] ?? 'N/A';
+      final type = t['transaction_type'] ?? t['transactionType'] ?? 'N/A';
+      final value = (t['value'] as num?)?.abs();
+      final valStr =
+          value == null ? '' : ' \$${(value / 1e3).toStringAsFixed(0)}K';
+      final date = t['trade_date'] ?? t['transactionDate'] ?? '';
+      buf.writeln('  $date | $name | $type$valStr');
+    }
+    return _limitTokens(buf.toString(), 1500);
+  }
+
+  String _buildTechnicalContext(List<Map<String, dynamic>> ohlcv) {
+    if (ohlcv.length < 5) return 'N/A';
+
+    final overlays = ChartOverlayEngine.compute(ohlcv);
+    final closes =
+        ohlcv.map((e) => (e['close'] as num?)?.toDouble() ?? 0.0).toList();
+    final volumes =
+        ohlcv.map((e) => (e['volume'] as num?)?.toDouble() ?? 0.0).toList();
+    final lastClose = closes.last;
+    final firstClose = closes.first;
+    final pctChange =
+        firstClose > 0 ? ((lastClose - firstClose) / firstClose * 100) : 0.0;
+
+    // Price momentum: recent 5d vs previous 5d
+    final last5Avg = closes.length >= 5
+        ? closes.sublist(closes.length - 5).reduce((a, b) => a + b) / 5
+        : lastClose;
+    final prev5Avg = closes.length >= 10
+        ? closes
+                .sublist(closes.length - 10, closes.length - 5)
+                .reduce((a, b) => a + b) /
+            5
+        : lastClose;
+    final shortMomentum =
+        prev5Avg > 0 ? ((last5Avg - prev5Avg) / prev5Avg * 100) : 0.0;
+
+    // Avg volume last 20 bars vs previous 20
+    final recentVolAvg = volumes.length >= 20
+        ? volumes.sublist(volumes.length - 20).reduce((a, b) => a + b) / 20
+        : volumes.last;
+    final prevVolAvg = volumes.length >= 40
+        ? volumes
+                .sublist(volumes.length - 40, volumes.length - 20)
+                .reduce((a, b) => a + b) /
+            20
+        : recentVolAvg;
+    final volRatio = prevVolAvg > 0 ? recentVolAvg / prevVolAvg : 1.0;
+
+    // SMA positions
+    final sma50Last =
+        overlays.sma50.lastWhere((v) => v != null, orElse: () => null);
+    final sma200Last =
+        overlays.sma200.lastWhere((v) => v != null, orElse: () => null);
+
+    // RSI
+    final rsiLast =
+        overlays.rsi.lastWhere((v) => v != null, orElse: () => null);
+    String rsiSignal = 'N/A';
+    if (rsiLast != null) {
+      if (rsiLast >= 70)
+        rsiSignal = 'Overbought (${rsiLast.toStringAsFixed(1)})';
+      else if (rsiLast <= 30)
+        rsiSignal = 'Oversold (${rsiLast.toStringAsFixed(1)})';
+      else
+        rsiSignal = '${rsiLast.toStringAsFixed(1)} (Neutral)';
+    }
+
+    // MACD
+    final macdHist = overlays.latestMacdHist;
+    final macdSignal = macdHist == null
+        ? 'N/A'
+        : macdHist > 0
+            ? 'Bullish (hist: ${macdHist.toStringAsFixed(3)})'
+            : 'Bearish (hist: ${macdHist.toStringAsFixed(3)})';
+
+    // Recent cross events (last 2)
+    final recentCrosses = overlays.crossEvents.reversed.take(2).map((c) {
+      final type = c.isGolden ? 'Golden Cross' : 'Death Cross';
+      final strength = c.isStrong ? 'CONFIRMED' : 'weak';
+      return '$type @ \$${c.price.toStringAsFixed(2)} ($strength${c.macdConfirmed ? ', MACD' : ''}${c.obvConfirmed ? ', OBV' : ''})';
+    }).join('; ');
+
+    final buf = StringBuffer();
+    buf.writeln(
+        'Period: ${ohlcv.length} sessions | Range: \$${firstClose.toStringAsFixed(2)} → \$${lastClose.toStringAsFixed(2)} (${pctChange >= 0 ? '+' : ''}${pctChange.toStringAsFixed(1)}%)');
+    buf.writeln(
+        'Regime: ${overlays.regime} | Short momentum (5d): ${shortMomentum >= 0 ? '+' : ''}${shortMomentum.toStringAsFixed(1)}%');
+    buf.writeln('RSI(14): $rsiSignal | MACD: $macdSignal');
+    buf.writeln(
+        'OBV: ${overlays.isObvBullish ? "Bullish (accumulation)" : "Bearish (distribution)"}');
+    if (sma50Last != null)
+      buf.writeln(
+          'SMA${overlays.fastPeriod}: \$${sma50Last.toStringAsFixed(2)} (price ${lastClose > sma50Last ? "ABOVE ▲" : "BELOW ▼"})');
+    if (sma200Last != null)
+      buf.writeln(
+          'SMA${overlays.slowPeriod}: \$${sma200Last.toStringAsFixed(2)} (price ${lastClose > sma200Last ? "ABOVE ▲" : "BELOW ▼"})');
+    buf.writeln(
+        'Volume trend: ${volRatio >= 1.1 ? "Expanding (${volRatio.toStringAsFixed(1)}x avg)" : volRatio <= 0.9 ? "Contracting (${volRatio.toStringAsFixed(1)}x avg)" : "Normal"}');
+    if (recentCrosses.isNotEmpty) buf.writeln('Cross events: $recentCrosses');
+
+    // High/Low 52w equivalent (full window)
+    final high = closes.reduce(math.max);
+    final low = closes.reduce(math.min);
+    buf.writeln(
+        'Period High: \$${high.toStringAsFixed(2)} | Period Low: \$${low.toStringAsFixed(2)} | Position: ${((lastClose - low) / (high - low) * 100).toStringAsFixed(0)}% of range');
+
+    return buf.toString();
+  }
 }
-
-
-
-
-
-
-

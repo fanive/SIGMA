@@ -1,8 +1,11 @@
-import 'dart:async';
+﻿// ignore_for_file: unused_element, unused_local_variable
 
-import 'package:cached_network_image/cached_network_image.dart';
+import 'dart:async';
+import 'dart:convert';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:flutter_markdown/flutter_markdown.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:provider/provider.dart';
 
@@ -11,6 +14,10 @@ import '../../providers/sigma_provider.dart';
 import '../../providers/terminal_provider.dart';
 import '../../screens/financial_report_screen.dart';
 import '../../theme/app_theme.dart';
+import '../institutional/institutional_components.dart';
+import '../../utils/logo_resolver.dart';
+import '../../utils/financial_decision_engine.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 // ═══════════════════════════════════════════════════════════════════════════
 //  SIGMA · INSTITUTIONAL NOTE LAB
@@ -90,7 +97,15 @@ double _parsePrice(String raw) {
   return double.tryParse(digits) ?? 0.0;
 }
 
-String _cleanText(String v) => v.replaceAll('[AGENTIC OLLAMA]', '').trim();
+String _cleanText(String v) {
+  String clean = v.replaceAll('[AGENTIC OLLAMA]', '').trim();
+  clean = clean.replaceAll(
+      RegExp(
+          r'[\u{1F600}-\u{1F64F}\u{1F300}-\u{1F5FF}\u{1F680}-\u{1F6FF}\u{1F1E6}-\u{1F1FF}\u{2600}-\u{26FF}\u{2700}-\u{27BF}\u{1F900}-\u{1F9FF}\u{1F018}-\u{1F0F5}\u{1F004}\u{1F18E}\u{1F191}-\u{1F19A}\u{1F1E6}-\u{1F1FF}\u{1F201}\u{1F21A}\u{1F22F}\u{1F232}-\u{1F23A}\u{1F250}\u{1F251}\u{1F300}-\u{1F321}\u{1F324}-\u{1F393}\u{1F396}-\u{1F39B}\u{1F39E}-\u{1F3F0}\u{1F3F3}-\u{1F3F5}\u{1F3F7}-\u{1F4FD}\u{1F4FF}-\u{1F53D}\u{1F549}-\u{1F54E}\u{1F550}-\u{1F567}\u{1F56F}\u{1F570}\u{1F573}-\u{1F579}\u{1F57B}-\u{1F5A3}\u{1F5A5}-\u{1F5FA}\u{1F600}-\u{1F64F}\u{1F680}-\u{1F6C5}\u{1F6CB}-\u{1F6D2}\u{1F6E0}-\u{1F6E5}\u{1F6E9}\u{1F6EB}\u{1F6EC}\u{1F6F0}\u{1F6F3}-\u{1F6F6}\u{1F90D}-\u{1F93A}\u{1F93C}-\u{1F945}\u{1F947}-\u{1F970}\u{1F973}-\u{1F976}\u{1F97A}\u{1F97C}-\u{1F9A2}\u{1F9B0}-\u{1F9B9}\u{1F9C0}-\u{1F9C2}\u{1F9D0}-\u{1F9FF}]',
+          unicode: true),
+      '');
+  return clean.trim();
+}
 
 // Builds a truly ticker-specific executive summary from quantitative fields.
 // Falls back to the API summary only if it contains the ticker symbol.
@@ -119,8 +134,7 @@ String _buildExecutiveSummary(AnalysisData a) {
       ? ', actif dans le secteur ${a.sector}'
       : '';
   final verdictLabel = a.verdict.isNotEmpty ? a.verdict : 'NEUTRE';
-  parts.add(
-      '$name ($ticker) se négocie à $priceStr$changeStr$sectorStr. '
+  parts.add('$name ($ticker) se négocie à $priceStr$changeStr$sectorStr. '
       'Notre verdict SIGMA est ${verdictLabel.toUpperCase()}, avec un score de confiance de ${(a.confidence * 100).toStringAsFixed(0)}%.');
 
   // Sentence 2 — key financials
@@ -153,8 +167,8 @@ String _buildExecutiveSummary(AnalysisData a) {
   }
 
   // Sentence 3 — upside + target price
-  final current = double.tryParse(
-      a.price.replaceAll(RegExp(r'[^0-9.]'), '')) ?? 0;
+  final current =
+      double.tryParse(a.price.replaceAll(RegExp(r'[^0-9.]'), '')) ?? 0;
   final target = a.targetPriceValue ?? 0;
   if (current > 0 && target > 0) {
     final upside = ((target - current) / current * 100);
@@ -178,10 +192,196 @@ String _buildExecutiveSummary(AnalysisData a) {
       : score >= 50
           ? 'dossier neutre à positif'
           : 'dossier sous surveillance';
-  parts.add(
-      'Score SIGMA : ${score.toStringAsFixed(0)}/100 — $scoreLabel.');
+  parts.add('Score SIGMA : ${score.toStringAsFixed(0)}/100 — $scoreLabel.');
 
   return parts.join(' ');
+}
+
+bool _isUsefulLine(String value) {
+  final clean = _cleanText(value).trim();
+  if (!_hasText(clean)) return false;
+  final lower = clean.toLowerCase();
+  return !lower.contains('donnees insuffisantes') &&
+      !lower.contains('données insuffisantes') &&
+      !lower.contains('aucun argument') &&
+      !lower.contains('n/a');
+}
+
+List<String> _dedupeLines(Iterable<String> raw, {int limit = 6}) {
+  final seen = <String>{};
+  final out = <String>[];
+  for (final item in raw) {
+    final clean = _cleanText(item).trim();
+    if (!_isUsefulLine(clean)) continue;
+    final key = clean.toLowerCase();
+    if (seen.add(key)) out.add(clean);
+    if (out.length >= limit) break;
+  }
+  return out;
+}
+
+String _ratioText(double value) =>
+    value.abs() <= 1 ? _pct(value) : '${value.toStringAsFixed(1)}x';
+
+List<String> _investmentThesisItems(AnalysisData a) {
+  final ks = a.keyStatistics;
+  final items = <String>[
+    ...a.verdictReasons,
+  ];
+
+  if (ks != null) {
+    if (ks.revenueGrowth != 0) {
+      items.add(
+        'Croissance du chiffre d affaires: ${_pct(ks.revenueGrowth)}, signal cle pour juger la trajectoire fondamentale.',
+      );
+    }
+    if (ks.profitMargins != 0 || ks.operatingMargins != 0) {
+      items.add(
+        'Rentabilite: marge nette ${_pct(ks.profitMargins)} et marge operationnelle ${_pct(ks.operatingMargins)}.',
+      );
+    }
+    if (ks.trailingPE > 0 || ks.priceToSales > 0) {
+      final valuation = ks.trailingPE > 0
+          ? 'P/E TTM ${ks.trailingPE.toStringAsFixed(1)}x'
+          : 'P/S ${ks.priceToSales.toStringAsFixed(1)}x';
+      items.add(
+          'Valorisation actuelle: $valuation, a comparer au profil de croissance et de marge.');
+    }
+    if (ks.freeCashflow != 0) {
+      items.add(
+          'Generation de cash: FCF ${_money(ks.freeCashflow)}, utile pour mesurer la qualite des resultats.');
+    }
+    if (ks.debtToEquity > 0) {
+      items.add(
+          'Structure financiere: dette/fonds propres ${ks.debtToEquity.toStringAsFixed(1)}x.');
+    }
+  }
+
+  final upside = _upsidePercent(a);
+  if (upside != null) {
+    items.add(
+        'Potentiel 12 mois: ${_pct(upside)} par rapport au prix courant et a l objectif disponible.');
+  }
+  if (a.analystRecommendations.consensusScore > 0) {
+    items.add(
+        'Consensus sell-side: ${a.analystRecommendations.consensusLabel} avec score ${a.analystRecommendations.consensusScore.toStringAsFixed(0)}/100.');
+  }
+  if (a.technicalAnalysis.isNotEmpty) {
+    final t = a.technicalAnalysis.first;
+    items.add(
+        'Signal technique dominant: ${t.indicator} ${t.value} (${t.interpretation}).');
+  }
+  if (items.isEmpty && _hasText(a.summary)) items.add(a.summary);
+
+  return _dedupeLines(items, limit: 6);
+}
+
+List<String> _riskFactorItems(AnalysisData a) {
+  final ks = a.keyStatistics;
+  final items = <String>[
+    ...a.cons.map((c) => c.text),
+  ];
+
+  if (ks != null) {
+    if (ks.revenueGrowth < 0) {
+      items.add(
+          'Croissance negative du chiffre d affaires (${_pct(ks.revenueGrowth)}), ce qui peut peser sur la valorisation.');
+    }
+    if (ks.profitMargins < 0) {
+      items.add(
+          'Marge nette negative (${_pct(ks.profitMargins)}), signal de pression sur la rentabilite.');
+    }
+    if (ks.debtToEquity > 2) {
+      items.add(
+          'Levier eleve: dette/fonds propres ${ks.debtToEquity.toStringAsFixed(1)}x.');
+    }
+    if (ks.beta > 1.3) {
+      items.add(
+          'Beta eleve (${ks.beta.toStringAsFixed(2)}), exposition superieure aux mouvements de marche.');
+    }
+    if (ks.freeCashflow < 0) {
+      items.add(
+          'Free cash flow negatif (${_money(ks.freeCashflow)}), a surveiller sur les prochains trimestres.');
+    }
+  }
+
+  if (_hasText(a.riskLevel)) {
+    items.add(
+        'Risque SIGMA classe ${a.riskLevel.toUpperCase()}, a integrer dans la taille de position.');
+  }
+  if (a.volatility.ivRank != 'N/A') {
+    items.add(
+        'Volatilite implicite: ${a.volatility.ivRank}, regime ${a.volatility.interpretation}.');
+  }
+
+  return _dedupeLines(items, limit: 6);
+}
+
+List<String> _catalystItems(AnalysisData a) {
+  final items = <String>[];
+  for (final c in a.catalysts) {
+    items.add(
+        '${c.type}: ${c.headline}${_hasText(c.insight) ? ' - ${c.insight}' : ''}');
+  }
+  final calendar = a.earningsCalendar;
+  if (calendar != null && calendar.isNotEmpty) {
+    final earningsDate = calendar['Earnings Date'] ?? calendar['earningsDate'];
+    if (earningsDate != null) {
+      items.add('Publication resultats a surveiller: $earningsDate.');
+    }
+  }
+  if (a.companyNews.isNotEmpty) {
+    for (final n in a.companyNews.take(3)) {
+      if (_hasText(n.title)) items.add('News flow: ${n.title}');
+    }
+  }
+  final upside = _upsidePercent(a);
+  if (upside != null && upside.abs() > 0.05) {
+    items.add(
+        'Re-rating possible si le marche converge vers l objectif implicite (${_pct(upside)}).');
+  }
+  if (items.isEmpty && a.actionPlan.isNotEmpty) items.addAll(a.actionPlan);
+  return _dedupeLines(items, limit: 6);
+}
+
+List<String> _invalidationItems(AnalysisData a) {
+  final ks = a.keyStatistics;
+  final items = <String>[...a.actionPlan];
+  if (ks != null) {
+    if (ks.operatingMargins != 0) {
+      items.add(
+          'Invalider si la marge operationnelle se degrade nettement sous le niveau actuel (${_pct(ks.operatingMargins)}).');
+    }
+    if (ks.revenueGrowth != 0) {
+      items.add(
+          'Reviser la these si la croissance du CA s eloigne durablement du rythme actuel (${_pct(ks.revenueGrowth)}).');
+    }
+    if (ks.debtToEquity > 0) {
+      items.add(
+          'Surveiller tout durcissement du bilan au-dela du levier actuel (${ks.debtToEquity.toStringAsFixed(1)}x).');
+    }
+  }
+  items.add(
+      'Reevaluer apres resultats trimestriels, guidance ou revision analyste majeure.');
+  return _dedupeLines(items, limit: 5);
+}
+
+List<ProCon> _bullCasePoints(AnalysisData a) {
+  final existing = a.pros.where((p) => _isUsefulLine(p.text)).toList();
+  if (existing.isNotEmpty) return existing;
+  return _investmentThesisItems(a)
+      .take(4)
+      .map((text) => ProCon(text: text, period: 'PRESENT'))
+      .toList();
+}
+
+List<ProCon> _bearCasePoints(AnalysisData a) {
+  final existing = a.cons.where((p) => _isUsefulLine(p.text)).toList();
+  if (existing.isNotEmpty) return existing;
+  return _riskFactorItems(a)
+      .take(4)
+      .map((text) => ProCon(text: text, period: 'PRESENT'))
+      .toList();
 }
 
 bool _hasText(String? v) {
@@ -634,6 +834,10 @@ class _ResearchNoteScroll extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final summary = _buildExecutiveSummary(a);
+    final thesisItems = _investmentThesisItems(a);
+    final catalystItems = _catalystItems(a);
+    final riskItems = _riskFactorItems(a);
+    final invalidationItems = _invalidationItems(a);
     final hasProfile = _hasText(a.companyProfile) ||
         _hasText(a.businessModel) ||
         _hasText(a.revenueStreams) ||
@@ -665,16 +869,22 @@ class _ResearchNoteScroll extends StatelessWidget {
         ),
 
         // 3. Investment Thesis
-        if (a.verdictReasons.isNotEmpty)
-          _Section(
+        _Section(
+          isDark: isDark,
+          label: 'INVESTMENT THESIS',
+          meta: a.verdictReasons.isEmpty
+              ? 'These reconstruite depuis les donnees structurees'
+              : null,
+          child: _BulletList(
+            items: thesisItems.isNotEmpty
+                ? thesisItems
+                : [
+                    'These non concluante: donnees quantitatives encore insuffisantes pour isoler un angle de conviction.'
+                  ],
             isDark: isDark,
-            label: 'INVESTMENT THESIS',
-            child: _BulletList(
-              items: a.verdictReasons.take(5).map(_cleanText).toList(),
-              isDark: isDark,
-              dotColor: AppTheme.primary,
-            ),
+            dotColor: AppTheme.primary,
           ),
+        ),
 
         // 3bis. Institutional committee lens
         _Section(
@@ -692,12 +902,21 @@ class _ResearchNoteScroll extends StatelessWidget {
         ),
 
         // 4. Catalysts
-        if (a.catalysts.isNotEmpty)
-          _Section(
-            isDark: isDark,
-            label: 'CATALYSTS',
-            child: _CatalystList(catalysts: a.catalysts, isDark: isDark),
-          ),
+        _Section(
+          isDark: isDark,
+          label: 'CATALYSTS',
+          child: a.catalysts.isNotEmpty
+              ? _CatalystList(catalysts: a.catalysts, isDark: isDark)
+              : _BulletList(
+                  items: catalystItems.isNotEmpty
+                      ? catalystItems
+                      : [
+                          'Aucun catalyseur date detecte; prochaine mise a jour apres nouvelles donnees, resultats ou revision analyste.'
+                        ],
+                  isDark: isDark,
+                  dotColor: AppTheme.primary,
+                ),
+        ),
 
         // 5. Financial Summary
         _Section(
@@ -711,6 +930,13 @@ class _ResearchNoteScroll extends StatelessWidget {
           isDark: isDark,
           label: 'VALUATION',
           child: _ValuationGrid(a: a, isDark: isDark),
+        ),
+
+        // 6bis. Technical signals from real OHLCV enrichment
+        _Section(
+          isDark: isDark,
+          label: 'TECHNICAL SIGNALS',
+          child: _TechnicalSignalsBlock(a: a, isDark: isDark),
         ),
 
         // 7. Analyst consensus (report-style)
@@ -728,30 +954,29 @@ class _ResearchNoteScroll extends StatelessWidget {
         ),
 
         // 9. Risk Factors
-        if (a.cons.isNotEmpty)
-          _Section(
+        _Section(
+          isDark: isDark,
+          label: 'RISK FACTORS',
+          meta: a.cons.isEmpty
+              ? 'Risques reconstruits depuis ratios, volatilite et bilan'
+              : null,
+          child: _BulletList(
+            items: riskItems.isNotEmpty
+                ? riskItems
+                : [
+                    'Aucun facteur de risque specifique n a ete isole; conserver une taille de position prudente tant que la profondeur de donnees reste limitee.'
+                  ],
             isDark: isDark,
-            label: 'RISK FACTORS',
-            child: _BulletList(
-              items: a.cons.map((c) => _cleanText(c.text)).take(5).toList(),
-              isDark: isDark,
-              dotColor: AppTheme.negative,
-            ),
+            dotColor: AppTheme.negative,
           ),
+        ),
 
         // 8. What Would Change Our View
         _Section(
           isDark: isDark,
           label: 'WHAT WOULD CHANGE OUR VIEW?',
           child: _BulletList(
-            items: a.actionPlan.isNotEmpty
-                ? a.actionPlan.take(4).toList()
-                : [
-                    'Degradation materielle des marges sur deux trimestres consecutifs.',
-                    'Deterioration du bilan ou hausse durable du cout du capital.',
-                    'Perte significative de parts de marche dans le segment principal.',
-                    'Surprise negative majeure sur la prochaine publication trimestrielle.',
-                  ],
+            items: invalidationItems,
             isDark: isDark,
           ),
         ),
@@ -999,7 +1224,7 @@ class _NoteCover extends StatelessWidget {
           Row(
             crossAxisAlignment: CrossAxisAlignment.center,
             children: [
-              _TickerLogoThumb(symbol: a.ticker, logoUrl: logo, size: 34),
+              TickerLogoThumb(symbol: a.ticker, logoUrl: logo, size: 34),
               const SizedBox(width: 8),
               Text(
                 a.ticker,
@@ -1023,7 +1248,9 @@ class _NoteCover extends StatelessWidget {
                     overflow: TextOverflow.ellipsis,
                   ),
                 ),
-              ],
+              ] else
+                const Spacer(),
+              _FavoriteButton(ticker: a.ticker, isDark: isDark),
             ],
           ),
 
@@ -1179,8 +1406,7 @@ class _ComparativeCover extends StatelessWidget {
           Row(
             crossAxisAlignment: CrossAxisAlignment.center,
             children: [
-              _TickerLogoThumb(
-                  symbol: left.ticker, logoUrl: leftLogo, size: 30),
+              TickerLogoThumb(symbol: left.ticker, logoUrl: leftLogo, size: 30),
               const SizedBox(width: 8),
               Text(
                 left.ticker,
@@ -1202,7 +1428,7 @@ class _ComparativeCover extends StatelessWidget {
                   ),
                 ),
               ),
-              _TickerLogoThumb(
+              TickerLogoThumb(
                 symbol: right.ticker,
                 logoUrl: rightLogo,
                 size: 30,
@@ -1224,9 +1450,7 @@ class _ComparativeCover extends StatelessWidget {
             children: [
               Expanded(
                 child: Text(
-                  left.companyName?.isNotEmpty == true
-                      ? left.companyName!
-                      : left.ticker,
+                  _companyDisplayName(left),
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                   style: GoogleFonts.lora(
@@ -1239,9 +1463,7 @@ class _ComparativeCover extends StatelessWidget {
               const SizedBox(width: 16),
               Expanded(
                 child: Text(
-                  right.companyName?.isNotEmpty == true
-                      ? right.companyName!
-                      : right.ticker,
+                  _companyDisplayName(right),
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                   textAlign: TextAlign.right,
@@ -1314,9 +1536,17 @@ class _FinalRecommendationSingleBlock extends StatelessWidget {
   Widget build(BuildContext context) {
     final txt = isDark ? _kDarkText : _kLightText;
     final dim = isDark ? _kDarkDim : _kLightDim;
-    final verdict = a.verdict.isEmpty ? 'N/A' : a.verdict.toUpperCase();
-    final confidence = '${(a.confidence * 100).toStringAsFixed(0)}%';
-    final reasons = a.verdictReasons.take(3).map(_cleanText).toList();
+    final decision = FinancialDecisionEngine.evaluate(a, language: 'FR');
+    final verdict = decision.verdict.toUpperCase();
+    final confidence = '${(decision.confidence * 100).toStringAsFixed(0)}%';
+    final reasons = [
+      ...decision.positives.take(3),
+      ...decision.negatives.take(2),
+    ].map(_cleanText).toList(growable: false);
+    final target = decision.targetPrice == null
+        ? 'N/A'
+        : '\$${decision.targetPrice!.toStringAsFixed(2)}';
+    final upside = decision.upside == null ? 'N/A' : _pct(decision.upside!);
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -1326,12 +1556,12 @@ class _FinalRecommendationSingleBlock extends StatelessWidget {
           style: GoogleFonts.lora(
             fontSize: 16,
             fontWeight: FontWeight.w800,
-            color: _verdictColor(a.verdict),
+            color: _verdictColor(decision.verdict),
           ),
         ),
         const SizedBox(height: 6),
         Text(
-          'Confiance: $confidence · Risque: ${a.riskLevel.isEmpty ? 'N/A' : a.riskLevel.toUpperCase()}',
+          'Confiance: $confidence · Risque: ${decision.riskLevel.toUpperCase()} · Objectif: $target · Potentiel: $upside',
           style: GoogleFonts.lora(
             fontSize: 11,
             fontWeight: FontWeight.w700,
@@ -1339,6 +1569,8 @@ class _FinalRecommendationSingleBlock extends StatelessWidget {
             color: txt,
           ),
         ),
+        const SizedBox(height: 8),
+        Text(decision.summary, style: _bodyStyle(dim)),
         if (reasons.isNotEmpty) ...[
           const SizedBox(height: 10),
           _BulletList(
@@ -1618,18 +1850,37 @@ class _RelativeFactorTable extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final lk = left.keyStatistics;
-    final rk = right.keyStatistics;
     final rows = <_RelativeFactor>[
       _factor('Score SIGMA', left.sigmaScore, right.sigmaScore),
-      _factor('Croissance CA', lk?.revenueGrowth, rk?.revenueGrowth, pct: true),
-      _factor('Marge oper.', lk?.operatingMargins, rk?.operatingMargins,
+      _factor('Croissance CA', _comparisonMetric(left, 'revenueGrowth'),
+          _comparisonMetric(right, 'revenueGrowth'),
           pct: true),
-      _factor('ROE', lk?.returnOnEquity, rk?.returnOnEquity, pct: true),
-      _factor('P/E', lk?.trailingPE, rk?.trailingPE, lowerIsBetter: true),
-      _factor('Dette / EQ', lk?.debtToEquity, rk?.debtToEquity,
+      _factor('Marge oper.', _comparisonMetric(left, 'operatingMargins'),
+          _comparisonMetric(right, 'operatingMargins'),
+          pct: true),
+      _factor('Marge nette', _comparisonMetric(left, 'profitMargins'),
+          _comparisonMetric(right, 'profitMargins'),
+          pct: true),
+      _factor('ROE', _comparisonMetric(left, 'returnOnEquity'),
+          _comparisonMetric(right, 'returnOnEquity'),
+          pct: true),
+      _factor('P/E', _comparisonMetric(left, 'trailingPE'),
+          _comparisonMetric(right, 'trailingPE'),
           lowerIsBetter: true),
-      _factor('FCF', lk?.freeCashflow, rk?.freeCashflow, money: true),
+      _factor('Dette / EQ', _comparisonMetric(left, 'debtToEquity'),
+          _comparisonMetric(right, 'debtToEquity'),
+          lowerIsBetter: true),
+      _factor('FCF', _comparisonMetric(left, 'freeCashflow'),
+          _comparisonMetric(right, 'freeCashflow'),
+          money: true),
+      _factor(
+          'Detention inst.',
+          _comparisonMetric(left, 'institutionalOwnership'),
+          _comparisonMetric(right, 'institutionalOwnership'),
+          pct: true),
+      _factor('Potentiel prix', _comparisonMetric(left, 'targetUpside'),
+          _comparisonMetric(right, 'targetUpside'),
+          pct: true),
     ]
         .where((row) => row.leftValue != 'N/A' || row.rightValue != 'N/A')
         .toList();
@@ -1746,10 +1997,8 @@ class _ComparativeNarrative extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final bullets = <String>[
-      if (left.catalysts.isNotEmpty)
-        '${left.ticker}: ${left.catalysts.first.event}',
-      if (right.catalysts.isNotEmpty)
-        '${right.ticker}: ${right.catalysts.first.event}',
+      ..._comparisonCatalystsFor(left),
+      ..._comparisonCatalystsFor(right),
       if (left.cons.isNotEmpty)
         'Risque ${left.ticker}: ${_cleanText(left.cons.first.text)}',
       if (right.cons.isNotEmpty)
@@ -1893,9 +2142,6 @@ class _InvalidationBlock extends StatelessWidget {
 
 _ComparisonDecision _buildComparisonDecision(
     AnalysisData left, AnalysisData right) {
-  final lk = left.keyStatistics;
-  final rk = right.keyStatistics;
-
   final rows = <_DecisionScoreRow>[];
 
   void addOutcome(
@@ -1935,15 +2181,54 @@ _ComparisonDecision _buildComparisonDecision(
 
   addOutcome('Score SIGMA', left.sigmaScore, right.sigmaScore, 24);
   addOutcome('Confiance', left.confidence * 100, right.confidence * 100, 14);
-  addOutcome('Croissance CA', lk?.revenueGrowth, rk?.revenueGrowth, 14);
+  addOutcome('Croissance CA', _comparisonMetric(left, 'revenueGrowth'),
+      _comparisonMetric(right, 'revenueGrowth'), 14);
   addOutcome(
-      'Marge operationnelle', lk?.operatingMargins, rk?.operatingMargins, 14);
-  addOutcome('ROE', lk?.returnOnEquity, rk?.returnOnEquity, 10);
-  addOutcome('Dette / EQ', lk?.debtToEquity, rk?.debtToEquity, 10,
+      'Marge operationnelle',
+      _comparisonMetric(left, 'operatingMargins'),
+      _comparisonMetric(right, 'operatingMargins'),
+      14);
+  addOutcome('ROE', _comparisonMetric(left, 'returnOnEquity'),
+      _comparisonMetric(right, 'returnOnEquity'), 10);
+  addOutcome('Dette / EQ', _comparisonMetric(left, 'debtToEquity'),
+      _comparisonMetric(right, 'debtToEquity'), 10,
       lowerIsBetter: true);
-  addOutcome('P/E', lk?.trailingPE, rk?.trailingPE, 8, lowerIsBetter: true);
+  addOutcome('P/E', _comparisonMetric(left, 'trailingPE'),
+      _comparisonMetric(right, 'trailingPE'), 8,
+      lowerIsBetter: true);
+  addOutcome('Potentiel de prix', _comparisonMetric(left, 'targetUpside'),
+      _comparisonMetric(right, 'targetUpside'), 6);
+
+  // Technical & flow signals (from analyzeStock enrichment)
+  final lInsiderBuy = _comparisonMetric(left, 'insiderBuyRatio');
+  final rInsiderBuy = _comparisonMetric(right, 'insiderBuyRatio');
+  if (lInsiderBuy != null && rInsiderBuy != null) {
+    addOutcome('Insider buy ratio', lInsiderBuy * 100, rInsiderBuy * 100, 8);
+  }
+  // IV rank: lower IV = less fear = slight edge (for comparable sectors)
+  final lIV = _parseComparisonNumber(left.volatility.ivRank);
+  final rIV = _parseComparisonNumber(right.volatility.ivRank);
+  if (lIV != null && rIV != null && lIV > 0 && rIV > 0) {
+    addOutcome('Volatilite implicite', lIV, rIV, 6, lowerIsBetter: true);
+  }
+  // Beta: lower is less risky (lowerIsBetter for conservative comparison)
+  final lBeta = _comparisonMetric(left, 'beta');
+  final rBeta = _comparisonMetric(right, 'beta');
+  if (lBeta != null && rBeta != null && lBeta > 0 && rBeta > 0) {
+    addOutcome('Beta', lBeta, rBeta, 4, lowerIsBetter: true);
+  }
+  // Analyst target upside
+  addOutcome('FCF', _comparisonMetric(left, 'freeCashflow'),
+      _comparisonMetric(right, 'freeCashflow'), 8);
+  addOutcome('Marge nette', _comparisonMetric(left, 'profitMargins'),
+      _comparisonMetric(right, 'profitMargins'), 8);
+  addOutcome('Croissance EPS YoY', _comparisonMetric(left, 'earningsGrowth'),
+      _comparisonMetric(right, 'earningsGrowth'), 8);
   addOutcome(
-      'Potentiel de prix', _upsidePercent(left), _upsidePercent(right), 6);
+      'Detention institutionnelle',
+      _comparisonMetric(left, 'institutionalOwnership'),
+      _comparisonMetric(right, 'institutionalOwnership'),
+      6);
 
   final totalWeight = rows.fold<double>(0, (acc, e) => acc + e.weight);
   final leftScore = rows.fold<double>(0, (acc, e) => acc + e.leftPoints);
@@ -2025,6 +2310,394 @@ String _smartPct(double raw) {
   if (raw == 0) return 'N/A';
   final value = raw.abs() <= 1 ? raw * 100 : raw;
   return '${value.toStringAsFixed(1)}%';
+}
+
+String _lookupKey(String value) =>
+    value.toLowerCase().replaceAll(RegExp(r'[^a-z0-9]'), '');
+
+bool _isUsableNumber(double? value) => value != null && value != 0;
+
+double? _parseComparisonNumber(dynamic value, {bool percentAsRatio = false}) {
+  if (value == null) return null;
+  if (value is Map) {
+    return _parseComparisonNumber(
+      value['raw'] ?? value['fmt'] ?? value['value'],
+      percentAsRatio: percentAsRatio,
+    );
+  }
+  if (value is num) {
+    final n = value.toDouble();
+    if (percentAsRatio && n.abs() > 1.5) return n / 100;
+    return n;
+  }
+  final raw = value.toString().trim();
+  if (!_hasText(raw)) return null;
+  final hasPercent = raw.contains('%');
+  final match = RegExp(r'-?\d+(?:[,.]\d+)?').firstMatch(raw);
+  if (match == null) return null;
+  var n = double.tryParse(match.group(0)!.replaceAll(',', '.'));
+  if (n == null) return null;
+  final upper = raw.toUpperCase();
+  if (upper.contains('T')) n *= 1e12;
+  if (upper.contains('B')) n *= 1e9;
+  if (upper.contains('M')) n *= 1e6;
+  if (upper.contains('K')) n *= 1e3;
+  if (percentAsRatio && (hasPercent || n.abs() > 1.5)) n /= 100;
+  return n;
+}
+
+Map<String, dynamic> _rawInstitutionalMap(AnalysisData analysis) {
+  final raw = analysis.rawInstitutionalData;
+  if (!_hasText(raw)) return const {};
+  try {
+    final decoded = jsonDecode(raw!);
+    if (decoded is Map) return Map<String, dynamic>.from(decoded);
+  } catch (_) {}
+  return const {};
+}
+
+dynamic _findDeep(dynamic node, Set<String> aliases, [int depth = 0]) {
+  if (node == null || depth > 7) return null;
+  if (node is Map) {
+    for (final entry in node.entries) {
+      if (aliases.contains(_lookupKey(entry.key.toString()))) {
+        return entry.value;
+      }
+    }
+    for (final value in node.values) {
+      final found = _findDeep(value, aliases, depth + 1);
+      if (found != null) return found;
+    }
+  }
+  if (node is List) {
+    for (final value in node.take(80)) {
+      final found = _findDeep(value, aliases, depth + 1);
+      if (found != null) return found;
+    }
+  }
+  return null;
+}
+
+String? _findDeepText(dynamic node, Set<String> aliases, [int depth = 0]) {
+  final found = _findDeep(node, aliases, depth);
+  final text = found?.toString().trim();
+  return _hasText(text) ? text : null;
+}
+
+List<String> _metricAliases(String key) {
+  switch (key) {
+    case 'marketCap':
+      return ['marketCap', 'market capitalization', 'capitalisation bours.'];
+    case 'trailingPE':
+      return ['trailingPE', 'trailing pe', 'pe', 'p/e ratio'];
+    case 'forwardPE':
+      return ['forwardPE', 'forward pe', 'p/e previsionnel'];
+    case 'pegRatio':
+      return ['pegRatio', 'peg'];
+    case 'priceToSales':
+      return ['priceToSales', 'price to sales', 'p/s'];
+    case 'enterpriseToEbitda':
+      return ['enterpriseToEbitda', 'ev ebitda', 'ev/ebitda'];
+    case 'revenueGrowth':
+      return ['revenueGrowth', 'revenue growth', 'croissance ca'];
+    case 'operatingMargins':
+      return ['operatingMargins', 'operating margin', 'marge oper'];
+    case 'profitMargins':
+      return ['profitMargins', 'net margin', 'marge nette'];
+    case 'returnOnEquity':
+      return ['returnOnEquity', 'roe'];
+    case 'debtToEquity':
+      return ['debtToEquity', 'debt equity', 'debt/equity', 'd/e ratio'];
+    case 'freeCashflow':
+      return ['freeCashflow', 'free cash flow', 'fcf'];
+    case 'earningsGrowth':
+      return ['earningsGrowth', 'eps growth', 'earnings growth'];
+    case 'beta':
+      return ['beta'];
+    case 'shortPercentOfFloat':
+      return ['shortPercentOfFloat', 'short percent of float'];
+    case 'dividendYield':
+      return ['dividendYield', 'dividend yield'];
+  }
+  return [key];
+}
+
+bool _metricIsPercent(String key) {
+  return {
+    'revenueGrowth',
+    'operatingMargins',
+    'profitMargins',
+    'returnOnEquity',
+    'earningsGrowth',
+    'shortPercentOfFloat',
+    'dividendYield',
+    'targetUpside',
+  }.contains(key);
+}
+
+double? _matrixMetric(
+  AnalysisData analysis,
+  List<String> aliases, {
+  bool percentAsRatio = false,
+}) {
+  final normalized = aliases.map(_lookupKey).toSet();
+  for (final item in analysis.financialMatrix) {
+    final label = _lookupKey(item.label);
+    final matches = normalized.any(
+      (alias) => label.contains(alias) || alias.contains(label),
+    );
+    if (!matches) continue;
+    final value = _parseComparisonNumber(
+      item.value,
+      percentAsRatio: percentAsRatio,
+    );
+    if (_isUsableNumber(value)) return value;
+  }
+  return null;
+}
+
+double? _deepMetric(
+  AnalysisData analysis,
+  List<String> aliases, {
+  bool percentAsRatio = false,
+}) {
+  final normalized = aliases.map(_lookupKey).toSet();
+  final roots = <dynamic>[
+    analysis.fullOwnership,
+    analysis.earningsCalendar,
+    analysis.earningsTrend,
+    analysis.dividendData,
+    analysis.historicalEarnings,
+    analysis.institutionalHolders,
+    _rawInstitutionalMap(analysis),
+  ];
+  for (final root in roots) {
+    final value = _parseComparisonNumber(
+      _findDeep(root, normalized),
+      percentAsRatio: percentAsRatio,
+    );
+    if (_isUsableNumber(value)) return value;
+  }
+  return null;
+}
+
+double? _majorHolderBreakdownMetric(
+  AnalysisData analysis,
+  String needle, {
+  bool percentAsRatio = true,
+}) {
+  final rows = (analysis.fullOwnership?['majorHolders'] as List?) ??
+      (_rawInstitutionalMap(analysis)['majorHolders'] as List?) ??
+      const [];
+  for (final row in rows) {
+    if (row is! Map) continue;
+    for (final value in row.values) {
+      final text = value?.toString() ?? '';
+      if (text.toLowerCase().contains(needle.toLowerCase())) {
+        return _parseComparisonNumber(text, percentAsRatio: percentAsRatio);
+      }
+    }
+  }
+  return null;
+}
+
+double? _institutionalOwnership(AnalysisData analysis) {
+  final holderValue = analysis.holders?.institutionsPercent;
+  if (_isUsableNumber(holderValue)) return holderValue;
+  return _deepMetric(
+        analysis,
+        ['institutionsPercentHeld', 'institutional ownership'],
+        percentAsRatio: true,
+      ) ??
+      _majorHolderBreakdownMetric(analysis, 'held by institutions');
+}
+
+double? _insiderOwnership(AnalysisData analysis) {
+  final holderValue = analysis.holders?.insidersPercent;
+  if (_isUsableNumber(holderValue)) return holderValue;
+  return _deepMetric(
+        analysis,
+        ['insidersPercentHeld', 'insider ownership'],
+        percentAsRatio: true,
+      ) ??
+      _majorHolderBreakdownMetric(analysis, 'held by insiders');
+}
+
+int? _institutionCount(AnalysisData analysis) {
+  final count = analysis.holders?.institutionsCount;
+  if (count != null && count > 0) return count;
+  final rows = analysis.institutionalHolders ??
+      (analysis.fullOwnership?['institutionsList'] as List?) ??
+      (analysis.fullOwnership?['institutions'] as List?);
+  if (rows != null && rows.isNotEmpty) return rows.length;
+  return null;
+}
+
+String _topHolderName(AnalysisData analysis) {
+  if (analysis.holders?.topInstitutions.isNotEmpty == true) {
+    return analysis.holders!.topInstitutions.first.organization;
+  }
+  final rows = analysis.institutionalHolders ??
+      (analysis.fullOwnership?['institutionsList'] as List?) ??
+      (analysis.fullOwnership?['institutions'] as List?) ??
+      const [];
+  for (final row in rows) {
+    if (row is! Map) continue;
+    final name = row['holder'] ??
+        row['Holder'] ??
+        row['organization'] ??
+        row['name'] ??
+        row['Organization'];
+    if (_hasText(name?.toString())) return name.toString();
+  }
+  return 'N/A';
+}
+
+double? _comparisonMetric(AnalysisData analysis, String key) {
+  if (key == 'targetUpside') return _upsidePercent(analysis);
+  if (key == 'institutionalOwnership') return _institutionalOwnership(analysis);
+  if (key == 'insiderOwnership') return _insiderOwnership(analysis);
+  if (key == 'insiderBuyRatio') return analysis.insiderBuyRatio;
+
+  final ks = analysis.keyStatistics;
+  double? primary;
+  switch (key) {
+    case 'marketCap':
+      primary = ks?.marketCap;
+      break;
+    case 'trailingPE':
+      primary = ks?.trailingPE;
+      break;
+    case 'forwardPE':
+      primary = ks?.forwardPE;
+      break;
+    case 'pegRatio':
+      primary = ks?.pegRatio;
+      break;
+    case 'priceToSales':
+      primary = ks?.priceToSales;
+      break;
+    case 'enterpriseToEbitda':
+      primary = ks?.enterpriseToEbitda;
+      break;
+    case 'revenueGrowth':
+      primary = ks?.revenueGrowth;
+      break;
+    case 'operatingMargins':
+      primary = ks?.operatingMargins;
+      break;
+    case 'profitMargins':
+      primary = ks?.profitMargins;
+      break;
+    case 'returnOnEquity':
+      primary = ks?.returnOnEquity;
+      break;
+    case 'debtToEquity':
+      primary = ks?.debtToEquity;
+      break;
+    case 'freeCashflow':
+      primary = ks?.freeCashflow;
+      break;
+    case 'earningsGrowth':
+      primary = ks?.earningsGrowth;
+      break;
+    case 'beta':
+      primary = ks?.beta;
+      primary ??= _parseComparisonNumber(analysis.volatility.beta);
+      break;
+    case 'shortPercentOfFloat':
+      primary = ks?.shortPercentOfFloat;
+      break;
+    case 'dividendYield':
+      primary = ks?.dividendYield;
+      break;
+  }
+  if (_isUsableNumber(primary)) return primary;
+
+  final aliases = _metricAliases(key);
+  final percentAsRatio = _metricIsPercent(key);
+  return _matrixMetric(
+        analysis,
+        aliases,
+        percentAsRatio: percentAsRatio,
+      ) ??
+      _deepMetric(
+        analysis,
+        aliases,
+        percentAsRatio: percentAsRatio,
+      );
+}
+
+String _companyDisplayName(AnalysisData analysis) {
+  if (_hasText(analysis.companyName)) return analysis.companyName!.trim();
+  final rawName = _findDeepText(
+    _rawInstitutionalMap(analysis),
+    {'companyname', 'longname', 'shortname'},
+  );
+  return rawName ?? analysis.ticker;
+}
+
+String _comparisonMetricText(
+  AnalysisData analysis,
+  String key, {
+  bool pct = false,
+  bool money = false,
+  int decimals = 1,
+}) {
+  final value = _comparisonMetric(analysis, key);
+  if (!_isUsableNumber(value)) return 'N/A';
+  if (pct) return _pct(value!);
+  if (money) return _money(value!);
+  return value!.toStringAsFixed(decimals);
+}
+
+String _targetPriceText(AnalysisData analysis) {
+  final target = analysis.targetPriceValue ??
+      _parseComparisonNumber(analysis.tradeSetup.cleanTargetPrice);
+  if (!_isUsableNumber(target)) return 'N/A';
+  return '\$${target!.toStringAsFixed(2)}';
+}
+
+List<String> _comparisonCatalystsFor(AnalysisData analysis) {
+  final items = <String>[];
+  for (final catalyst in analysis.catalysts.take(2)) {
+    final headline = catalyst.event;
+    if (_hasText(headline)) items.add('${analysis.ticker}: $headline');
+  }
+  for (final event in analysis.corporateEvents.take(2)) {
+    final label = [event.date, event.event, event.description]
+        .where((part) => _hasText(part))
+        .join(' - ');
+    if (_hasText(label)) items.add('${analysis.ticker}: $label');
+  }
+  final calendar = analysis.earningsCalendar;
+  if (calendar != null && calendar.isNotEmpty) {
+    final rawDate = calendar['Earnings Date'] ?? calendar['earningsDate'];
+    final date = rawDate is List && rawDate.isNotEmpty
+        ? rawDate.first?.toString()
+        : rawDate?.toString();
+    if (_hasText(date)) {
+      items.add('${analysis.ticker}: prochaine publication resultats $date');
+    }
+  }
+  for (final rating in analysis.analystRatings.take(1)) {
+    if (_hasText(rating.firm) || _hasText(rating.rating)) {
+      items.add(
+        '${analysis.ticker}: ${rating.firm} ${rating.action} ${rating.rating}'
+            .trim(),
+      );
+    }
+  }
+  for (final news in analysis.companyNews.take(2)) {
+    if (_hasText(news.title)) items.add('${analysis.ticker}: ${news.title}');
+  }
+  final upside = _upsidePercent(analysis);
+  if (upside != null) {
+    items.add(
+      '${analysis.ticker}: potentiel analyste ${upside >= 0 ? '+' : ''}${(upside * 100).toStringAsFixed(1)}%',
+    );
+  }
+  return items.toSet().take(5).toList(growable: false);
 }
 
 String _winnerByHigher({
@@ -2127,9 +2800,36 @@ class _BodyBlock extends StatelessWidget {
     final c = disclaimer
         ? (isDark ? _kDarkDim : _kLightDim)
         : (isDark ? _kDarkText : _kLightText);
-    return Text(
-      text.isEmpty ? '\u2014' : text,
-      style: _bodyStyle(c, disclaimer: disclaimer),
+
+    if (text.isEmpty) {
+      return Text('\u2014', style: _bodyStyle(c, disclaimer: disclaimer));
+    }
+
+    return MarkdownBody(
+      data: text,
+      styleSheet: MarkdownStyleSheet(
+        p: _bodyStyle(c, disclaimer: disclaimer),
+        strong: _bodyStyle(c, disclaimer: disclaimer)
+            .copyWith(fontWeight: FontWeight.w800),
+        em: _bodyStyle(c, disclaimer: disclaimer)
+            .copyWith(fontStyle: FontStyle.italic),
+        h1: GoogleFonts.lora(
+            fontSize: 16,
+            fontWeight: FontWeight.w800,
+            color: c,
+            letterSpacing: 0.5),
+        h2: GoogleFonts.lora(
+            fontSize: 14,
+            fontWeight: FontWeight.w800,
+            color: c,
+            letterSpacing: 0.5),
+        h3: GoogleFonts.lora(
+            fontSize: 13, fontWeight: FontWeight.w700, color: c),
+        h4: GoogleFonts.lora(
+            fontSize: 12, fontWeight: FontWeight.w700, color: c),
+        listBullet: _bodyStyle(c, disclaimer: disclaimer),
+        blockSpacing: 10,
+      ),
     );
   }
 }
@@ -2317,13 +3017,37 @@ class _AgenticCommitteeBlock extends StatelessWidget {
 
   const _AgenticCommitteeBlock({required this.a, required this.isDark});
 
+  String _truncate(String? text) {
+    if (text == null || text.isEmpty) {
+      return 'Données insuffisantes pour une conclusion ferme.';
+    }
+    return text.length > 120 ? '${text.substring(0, 117)}...' : text;
+  }
+
   @override
   Widget build(BuildContext context) {
     final thoughts = a.agenticThoughts;
-    
-    // Fallback if the list doesn't have the expected 5 agents
-    if (thoughts.length < 3) {
-      return _InvestmentCommitteeView(a: a, isDark: isDark);
+
+    // Fallback: If the AI failed to generate 5 thoughts, we build them from available high-signal structured data.
+    final List<String> syntheticThoughts = [];
+    if (thoughts.length >= 5) {
+      syntheticThoughts.addAll(thoughts);
+    } else {
+      // Agent 1: Trend
+      syntheticThoughts.add(
+          'Analyse technique: Zone d\'entrée ciblée autour de ${a.tradeSetup.entryZone}. Momentum court-terme avec Stop-Loss à ${a.tradeSetup.stopLoss}.');
+      // Agent 2: Sentiment
+      syntheticThoughts.add(
+          'Sentiment de marché: ${a.fearAndGreed.label.toUpperCase()}. ${_truncate(a.institutionalActivity.darkPoolInterpretation)}');
+      // Agent 3: Fundamentals
+      final pE = a.keyStatistics?.forwardPE ?? 0;
+      syntheticThoughts.add(
+          'Fondamentaux: Valorisation ${pE > 0 ? "à $pE P/E Forward." : "en cours d'analyse."} ${_truncate(a.summary)}');
+      // Agent 4: Risk
+      syntheticThoughts.add(
+          'Profil de risque: Niveau ${a.riskLevel.toUpperCase()}. ${_truncate(a.volatility.interpretation)}');
+      // Agent 5: Strategy
+      syntheticThoughts.add('Stratégie: ${_truncate(a.alphaRecommendation)}');
     }
 
     return Column(
@@ -2331,31 +3055,31 @@ class _AgenticCommitteeBlock extends StatelessWidget {
         _AgentRow(
           name: 'TREND ANALYST',
           icon: Icons.analytics_outlined,
-          thought: thoughts[0],
+          thought: syntheticThoughts[0],
           isDark: isDark,
         ),
         _AgentRow(
           name: 'SENTIMENT AGENT',
           icon: Icons.psychology_outlined,
-          thought: thoughts.length > 1 ? thoughts[1] : 'N/A',
+          thought: syntheticThoughts[1],
           isDark: isDark,
         ),
         _AgentRow(
-          name: 'TECHNICAL AGENT',
-          icon: Icons.query_stats_outlined,
-          thought: thoughts.length > 2 ? thoughts[2] : 'N/A',
+          name: 'FUNDAMENTAL AGENT',
+          icon: Icons.account_balance_outlined,
+          thought: syntheticThoughts[2],
           isDark: isDark,
         ),
         _AgentRow(
-          name: 'SIGNAL COMPARATOR',
+          name: 'RISK COMPARATOR',
           icon: Icons.balance_outlined,
-          thought: thoughts.length > 3 ? thoughts[3] : 'N/A',
+          thought: syntheticThoughts[3],
           isDark: isDark,
         ),
         _AgentRow(
           name: 'STRATEGY BUILDER',
           icon: Icons.gps_fixed_outlined,
-          thought: thoughts.length > 4 ? thoughts[4] : 'N/A',
+          thought: syntheticThoughts[4],
           isDark: isDark,
         ),
       ],
@@ -2484,24 +3208,37 @@ class _FinancialSummary extends StatelessWidget {
     final rows = <_KV>[];
 
     if (ks != null) {
-      if (ks.revenue > 0)
+      if (ks.revenue > 0) {
         rows.add(_KV("Chiffre d'affaires", _money(ks.revenue)));
-      if (ks.revenueGrowth != 0)
+      }
+      if (ks.revenueGrowth != 0) {
         rows.add(_KV('Croissance du CA', _pct(ks.revenueGrowth)));
-      if (ks.operatingMargins != 0)
+      }
+      if (ks.operatingMargins != 0) {
         rows.add(_KV('Marge operationnelle', _pct(ks.operatingMargins)));
-      if (ks.profitMargins != 0)
+      }
+      if (ks.profitMargins != 0) {
         rows.add(_KV('Marge nette', _pct(ks.profitMargins)));
-      if (ks.returnOnEquity != 0) rows.add(_KV('ROE', _pct(ks.returnOnEquity)));
-      if (ks.returnOnAssets != 0) rows.add(_KV('ROA', _pct(ks.returnOnAssets)));
-      if (ks.freeCashflow > 0)
+      }
+      if (ks.returnOnEquity != 0) {
+        rows.add(_KV('ROE', _pct(ks.returnOnEquity)));
+      }
+      if (ks.returnOnAssets != 0) {
+        rows.add(_KV('ROA', _pct(ks.returnOnAssets)));
+      }
+      if (ks.freeCashflow > 0) {
         rows.add(_KV('Free Cash Flow', _money(ks.freeCashflow)));
-      if (ks.totalDebt > 0) rows.add(_KV('Dette totale', _money(ks.totalDebt)));
-      if (ks.debtToEquity > 0)
+      }
+      if (ks.totalDebt > 0) {
+        rows.add(_KV('Dette totale', _money(ks.totalDebt)));
+      }
+      if (ks.debtToEquity > 0) {
         rows.add(
             _KV('Dette / Fonds propres', ks.debtToEquity.toStringAsFixed(1)));
-      if (ks.currentRatio > 0)
+      }
+      if (ks.currentRatio > 0) {
         rows.add(_KV('Liquidite generale', ks.currentRatio.toStringAsFixed(2)));
+      }
     } else {
       for (final m in a.financialMatrix.take(8)) {
         if (m.label.isNotEmpty && m.value.isNotEmpty && m.value != 'N/A') {
@@ -2536,22 +3273,30 @@ class _ValuationGrid extends StatelessWidget {
     final rows = <_KV>[];
 
     if (ks != null) {
-      if (ks.marketCap > 0)
+      if (ks.marketCap > 0) {
         rows.add(_KV('Capitalisation', _money(ks.marketCap)));
-      if (ks.enterpriseValue > 0)
+      }
+      if (ks.enterpriseValue > 0) {
         rows.add(_KV('Valeur entreprise (EV)', _money(ks.enterpriseValue)));
-      if (ks.trailingPE > 0)
+      }
+      if (ks.trailingPE > 0) {
         rows.add(_KV('P/E (TTM)', ks.trailingPE.toStringAsFixed(1)));
-      if (ks.forwardPE > 0)
+      }
+      if (ks.forwardPE > 0) {
         rows.add(_KV('P/E previsionnel', ks.forwardPE.toStringAsFixed(1)));
-      if (ks.pegRatio > 0)
+      }
+      if (ks.pegRatio > 0) {
         rows.add(_KV('Ratio PEG', ks.pegRatio.toStringAsFixed(2)));
-      if (ks.priceToBook > 0)
+      }
+      if (ks.priceToBook > 0) {
         rows.add(_KV('P/B', ks.priceToBook.toStringAsFixed(2)));
-      if (ks.priceToSales > 0)
+      }
+      if (ks.priceToSales > 0) {
         rows.add(_KV('P/S', ks.priceToSales.toStringAsFixed(2)));
-      if (ks.enterpriseToEbitda > 0)
+      }
+      if (ks.enterpriseToEbitda > 0) {
         rows.add(_KV('EV / EBITDA', ks.enterpriseToEbitda.toStringAsFixed(1)));
+      }
     }
 
     if (rows.isEmpty) {
@@ -2570,6 +3315,50 @@ class _ValuationGrid extends StatelessWidget {
     }
 
     return _MetricTable(rows: rows, isDark: isDark);
+  }
+}
+
+class _TechnicalSignalsBlock extends StatelessWidget {
+  final AnalysisData a;
+  final bool isDark;
+
+  const _TechnicalSignalsBlock({required this.a, required this.isDark});
+
+  @override
+  Widget build(BuildContext context) {
+    final rows = a.technicalAnalysis
+        .where((t) => _hasText(t.indicator) && _hasText(t.value))
+        .take(8)
+        .map((t) => _KV(t.indicator, '${t.value}  |  ${t.interpretation}'))
+        .toList(growable: false);
+
+    if (rows.isNotEmpty) {
+      return _MetricTable(rows: rows, isDark: isDark);
+    }
+
+    final fallback = <_KV>[];
+    if (_hasText(a.tradeSetup.cleanEntryZone)) {
+      fallback.add(_KV('Zone entree', a.tradeSetup.cleanEntryZone));
+    }
+    if (_hasText(a.tradeSetup.cleanStopLoss)) {
+      fallback.add(_KV('Stop', a.tradeSetup.cleanStopLoss));
+    }
+    if (_hasText(a.volatility.beta) && a.volatility.beta != 'N/A') {
+      fallback.add(_KV('Beta', a.volatility.beta));
+    }
+    if (_hasText(a.volatility.ivRank) && a.volatility.ivRank != 'N/A') {
+      fallback.add(_KV('IV rank', a.volatility.ivRank));
+    }
+
+    if (fallback.isNotEmpty) {
+      return _MetricTable(rows: fallback, isDark: isDark);
+    }
+
+    return _BodyBlock(
+      isDark: isDark,
+      text:
+          'Signaux techniques indisponibles pour cette analyse. Relancer apres chargement OHLCV complet.',
+    );
   }
 }
 
@@ -2730,64 +3519,74 @@ class _NewsDigest extends StatelessWidget {
       children: news.take(5).toList().asMap().entries.map((entry) {
         final item = entry.value;
         final isLast = entry.key == (news.take(5).length - 1);
-        return Container(
-          padding: const EdgeInsets.symmetric(vertical: 10),
-          decoration: isLast
-              ? null
-              : BoxDecoration(
-                  border: Border(
-                    bottom: BorderSide(color: border, width: 0.45),
+        return GestureDetector(
+          onTap: item.url.isNotEmpty
+              ? () async {
+                  final uri = Uri.tryParse(item.url);
+                  if (uri != null) {
+                    await launchUrl(uri, mode: LaunchMode.externalApplication);
+                  }
+                }
+              : null,
+          child: Container(
+            padding: const EdgeInsets.symmetric(vertical: 10),
+            decoration: isLast
+                ? null
+                : BoxDecoration(
+                    border: Border(
+                      bottom: BorderSide(color: border, width: 0.45),
+                    ),
                   ),
-                ),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Row(
-                children: [
-                  Expanded(
-                    child: Text(
-                      item.source.toUpperCase(),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    Expanded(
+                      child: Text(
+                        item.source.toUpperCase(),
+                        style: GoogleFonts.lora(
+                          fontSize: 9,
+                          fontWeight: FontWeight.w700,
+                          letterSpacing: 1.0,
+                          color: dim,
+                        ),
+                      ),
+                    ),
+                    Text(
+                      item.publishedAt,
                       style: GoogleFonts.lora(
-                        fontSize: 9,
-                        fontWeight: FontWeight.w700,
-                        letterSpacing: 1.0,
+                        fontSize: 10,
                         color: dim,
                       ),
                     ),
+                  ],
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  item.title,
+                  style: GoogleFonts.lora(
+                    fontSize: 13,
+                    fontWeight: FontWeight.w700,
+                    color: txt,
+                    height: 1.4,
                   ),
+                ),
+                if (item.summary.isNotEmpty) ...[
+                  const SizedBox(height: 3),
                   Text(
-                    item.publishedAt,
+                    item.summary,
+                    maxLines: 3,
+                    overflow: TextOverflow.ellipsis,
                     style: GoogleFonts.lora(
-                      fontSize: 10,
+                      fontSize: 12,
                       color: dim,
+                      height: 1.5,
                     ),
                   ),
                 ],
-              ),
-              const SizedBox(height: 4),
-              Text(
-                item.title,
-                style: GoogleFonts.lora(
-                  fontSize: 13,
-                  fontWeight: FontWeight.w700,
-                  color: txt,
-                  height: 1.4,
-                ),
-              ),
-              if (item.summary.isNotEmpty) ...[
-                const SizedBox(height: 3),
-                Text(
-                  item.summary,
-                  maxLines: 3,
-                  overflow: TextOverflow.ellipsis,
-                  style: GoogleFonts.lora(
-                    fontSize: 12,
-                    color: dim,
-                    height: 1.5,
-                  ),
-                ),
               ],
-            ],
+            ),
           ),
         );
       }).toList(),
@@ -2948,8 +3747,12 @@ class _OwnershipComparisonBlock extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final li = left.holders?.institutionsPercent;
-    final ri = right.holders?.institutionsPercent;
+    final li = _institutionalOwnership(left);
+    final ri = _institutionalOwnership(right);
+    final lInside = _insiderOwnership(left);
+    final rInside = _insiderOwnership(right);
+    final lCount = _institutionCount(left);
+    final rCount = _institutionCount(right);
 
     final ls = left.institutionalActivity.smartMoneySentiment;
     final rs = right.institutionalActivity.smartMoneySentiment;
@@ -2968,6 +3771,34 @@ class _OwnershipComparisonBlock extends StatelessWidget {
           left: li == null || li == 0 ? null : li,
           right: ri == null || ri == 0 ? null : ri,
         ),
+      ),
+      _RelativeFactor(
+        'Detention insiders',
+        lInside != null && lInside != 0 ? _smartPct(lInside) : 'N/A',
+        rInside != null && rInside != 0 ? _smartPct(rInside) : 'N/A',
+        _winnerByHigher(
+          leftTicker: left.ticker,
+          rightTicker: right.ticker,
+          left: lInside == null || lInside == 0 ? null : lInside,
+          right: rInside == null || rInside == 0 ? null : rInside,
+        ),
+      ),
+      _RelativeFactor(
+        'Nombre institutions',
+        lCount != null && lCount > 0 ? lCount.toString() : 'N/A',
+        rCount != null && rCount > 0 ? rCount.toString() : 'N/A',
+        _winnerByHigher(
+          leftTicker: left.ticker,
+          rightTicker: right.ticker,
+          left: lCount?.toDouble(),
+          right: rCount?.toDouble(),
+        ),
+      ),
+      _RelativeFactor(
+        'Premier holder',
+        _topHolderName(left),
+        _topHolderName(right),
+        null,
       ),
       _RelativeFactor(
         'Smart money sentiment',
@@ -3038,11 +3869,7 @@ class _FullReportButton extends StatelessWidget {
 }
 
 String _resolveTickerLogo(AnalysisData analysis) {
-  final image = analysis.image?.trim() ?? '';
-  if (image.isNotEmpty && !image.contains('eodhd.com')) {
-    return image;
-  }
-  return 'https://financialmodelingprep.com/image-stock/${analysis.ticker.toUpperCase()}.png';
+  return LogoResolver.resolve(analysis.ticker, providedUrl: analysis.image);
 }
 
 // ════════════════════════════════════════════════════════════════════════════
@@ -3062,43 +3889,62 @@ class _CompareGrid extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final lk = left.keyStatistics;
-    final rk = right.keyStatistics;
     final txt = isDark ? _kDarkText : _kLightText;
     final dim = isDark ? _kDarkDim : _kLightDim;
     final border = isDark ? _kDarkBorder : _kLightBorder;
 
-    String n(double? v, {bool pct = false, bool money = false}) {
-      if (v == null || v == 0.0) return 'N/A';
-      if (pct) return _pct(v);
-      if (money) return _money(v);
-      return v.toStringAsFixed(1);
-    }
-
     final rows = <_CmpKV>[
+      _CmpKV('Societe', _companyDisplayName(left), _companyDisplayName(right)),
       _CmpKV('Recommandation', left.verdict.toUpperCase(),
           right.verdict.toUpperCase()),
       _CmpKV('Prix actuel', left.price, right.price),
+      _CmpKV('Objectif', _targetPriceText(left), _targetPriceText(right)),
       _CmpKV(
-          'Objectif',
-          left.targetPriceValue != null && left.targetPriceValue! > 0
-              ? '\$${left.targetPriceValue!.toStringAsFixed(2)}'
-              : 'N/A',
-          right.targetPriceValue != null && right.targetPriceValue! > 0
-              ? '\$${right.targetPriceValue!.toStringAsFixed(2)}'
-              : 'N/A'),
-      _CmpKV('P/E (TTM)', n(lk?.trailingPE), n(rk?.trailingPE)),
-      _CmpKV('P/E previsionnel', n(lk?.forwardPE), n(rk?.forwardPE)),
-      _CmpKV('PEG', n(lk?.pegRatio), n(rk?.pegRatio)),
-      _CmpKV('Croissance CA', n(lk?.revenueGrowth, pct: true),
-          n(rk?.revenueGrowth, pct: true)),
-      _CmpKV('Marge oper.', n(lk?.operatingMargins, pct: true),
-          n(rk?.operatingMargins, pct: true)),
-      _CmpKV('ROE', n(lk?.returnOnEquity, pct: true),
-          n(rk?.returnOnEquity, pct: true)),
-      _CmpKV('Free Cash Flow', n(lk?.freeCashflow, money: true),
-          n(rk?.freeCashflow, money: true)),
-      _CmpKV('Dette / EQ', n(lk?.debtToEquity), n(rk?.debtToEquity)),
+          'Capitalisation',
+          _comparisonMetricText(left, 'marketCap', money: true),
+          _comparisonMetricText(right, 'marketCap', money: true)),
+      _CmpKV('P/E (TTM)', _comparisonMetricText(left, 'trailingPE'),
+          _comparisonMetricText(right, 'trailingPE')),
+      _CmpKV('P/E previsionnel', _comparisonMetricText(left, 'forwardPE'),
+          _comparisonMetricText(right, 'forwardPE')),
+      _CmpKV('PEG', _comparisonMetricText(left, 'pegRatio'),
+          _comparisonMetricText(right, 'pegRatio')),
+      _CmpKV('EV/EBITDA', _comparisonMetricText(left, 'enterpriseToEbitda'),
+          _comparisonMetricText(right, 'enterpriseToEbitda')),
+      _CmpKV(
+          'Croissance CA',
+          _comparisonMetricText(left, 'revenueGrowth', pct: true),
+          _comparisonMetricText(right, 'revenueGrowth', pct: true)),
+      _CmpKV(
+          'Marge oper.',
+          _comparisonMetricText(left, 'operatingMargins', pct: true),
+          _comparisonMetricText(right, 'operatingMargins', pct: true)),
+      _CmpKV(
+          'Marge nette',
+          _comparisonMetricText(left, 'profitMargins', pct: true),
+          _comparisonMetricText(right, 'profitMargins', pct: true)),
+      _CmpKV('ROE', _comparisonMetricText(left, 'returnOnEquity', pct: true),
+          _comparisonMetricText(right, 'returnOnEquity', pct: true)),
+      _CmpKV(
+          'Free Cash Flow',
+          _comparisonMetricText(left, 'freeCashflow', money: true),
+          _comparisonMetricText(right, 'freeCashflow', money: true)),
+      _CmpKV('Dette / EQ', _comparisonMetricText(left, 'debtToEquity'),
+          _comparisonMetricText(right, 'debtToEquity')),
+      _CmpKV(
+          'EPS growth',
+          _comparisonMetricText(left, 'earningsGrowth', pct: true),
+          _comparisonMetricText(right, 'earningsGrowth', pct: true)),
+      _CmpKV('Beta', _comparisonMetricText(left, 'beta'),
+          _comparisonMetricText(right, 'beta')),
+      _CmpKV(
+          'Ownership inst.',
+          _comparisonMetricText(left, 'institutionalOwnership', pct: true),
+          _comparisonMetricText(right, 'institutionalOwnership', pct: true)),
+      _CmpKV(
+          'Insider buy ratio',
+          _comparisonMetricText(left, 'insiderBuyRatio', pct: true),
+          _comparisonMetricText(right, 'insiderBuyRatio', pct: true)),
     ];
 
     return Column(
@@ -3157,12 +4003,18 @@ class _CompareGrid extends StatelessWidget {
                 Expanded(
                   flex: 3,
                   child: Text(r.left,
-                      textAlign: TextAlign.right, style: _metricValue(txt)),
+                      textAlign: TextAlign.right,
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                      style: _metricValue(txt)),
                 ),
                 Expanded(
                   flex: 3,
                   child: Text(r.right,
-                      textAlign: TextAlign.right, style: _metricValue(txt)),
+                      textAlign: TextAlign.right,
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                      style: _metricValue(txt)),
                 ),
               ],
             ),
@@ -3204,8 +4056,26 @@ class _MetricTable extends StatelessWidget {
                 ),
           child: Row(
             children: [
-              Expanded(child: Text(r.k, style: _metricLabel(dim))),
-              Text(r.v, style: _metricValue(txt)),
+              Expanded(
+                flex: 5,
+                child: Text(
+                  r.k,
+                  style: _metricLabel(dim),
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ),
+              const SizedBox(width: 8),
+              Flexible(
+                flex: 4,
+                child: Text(
+                  r.v,
+                  style: _metricValue(txt),
+                  textAlign: TextAlign.right,
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ),
             ],
           ),
         );
@@ -3345,13 +4215,16 @@ class _NoteCommandBar extends StatelessWidget {
         children: [
           Row(
             children: [
-              Text(
-                'NOTE LAB',
-                style: GoogleFonts.lora(
-                  fontSize: 10,
-                  fontWeight: FontWeight.w800,
-                  letterSpacing: 1.8,
-                  color: txt,
+              Flexible(
+                child: Text(
+                  'NOTE LAB',
+                  style: GoogleFonts.lora(
+                    fontSize: 10,
+                    fontWeight: FontWeight.w800,
+                    letterSpacing: 1.8,
+                    color: txt,
+                  ),
+                  overflow: TextOverflow.ellipsis,
                 ),
               ),
               const SizedBox(width: 10),
@@ -3570,7 +4443,7 @@ class _TickerFieldState extends State<_TickerField> {
       return;
     }
 
-    _debounce = Timer(const Duration(milliseconds: 180), () {
+    _debounce = Timer(const Duration(milliseconds: 90), () {
       if (!mounted) return;
       context.read<SigmaProvider>().updateSearchResults(query);
     });
@@ -3583,7 +4456,7 @@ class _TickerFieldState extends State<_TickerField> {
     final q = query.trim().toUpperCase();
     if (q.isEmpty) return const Iterable<Map<String, dynamic>>.empty();
 
-    final results = sp.searchResults.where((item) {
+    final results = sp.instantSearchResults(q).where((item) {
       final symbol = (item['symbol'] ?? '').toString().toUpperCase();
       final name =
           (item['description'] ?? item['name'] ?? '').toString().toUpperCase();
@@ -3708,11 +4581,13 @@ class _TickerFieldState extends State<_TickerField> {
                             symbol,
                         orElse: () => option,
                       );
-                      final name =
-                          (freshOption['description'] ?? freshOption['name'] ?? '')
-                              .toString();
+                      final name = (freshOption['description'] ??
+                              freshOption['name'] ??
+                              '')
+                          .toString();
                       final logoUrl =
-                          (freshOption['logo'] ?? freshOption['logoUrl'])?.toString();
+                          (freshOption['logo'] ?? freshOption['logoUrl'])
+                              ?.toString();
 
                       return InkWell(
                         onTap: () => onSelected(option),
@@ -3723,8 +4598,7 @@ class _TickerFieldState extends State<_TickerField> {
                           ),
                           child: Row(
                             children: [
-                              _TickerLogoThumb(
-                                  symbol: symbol, logoUrl: logoUrl),
+                              TickerLogoThumb(symbol: symbol, logoUrl: logoUrl),
                               const SizedBox(width: 10),
                               Expanded(
                                 child: Text(
@@ -3750,58 +4624,6 @@ class _TickerFieldState extends State<_TickerField> {
           },
         );
       },
-    );
-  }
-}
-
-class _TickerLogoThumb extends StatelessWidget {
-  final String symbol;
-  final String? logoUrl;
-  final double size;
-
-  const _TickerLogoThumb({
-    required this.symbol,
-    required this.logoUrl,
-    this.size = 26,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    final fallback = Container(
-      width: size,
-      height: size,
-      decoration: BoxDecoration(
-        color: AppTheme.primary.withValues(alpha: 0.12),
-        border: Border.all(
-          color: AppTheme.primary.withValues(alpha: 0.24),
-          width: 0.6,
-        ),
-        borderRadius: BorderRadius.circular(2),
-      ),
-      alignment: Alignment.center,
-      child: Text(
-        symbol.isEmpty ? '?' : symbol[0],
-        style: GoogleFonts.lora(
-          fontSize: size <= 22 ? 10 : 12,
-          fontWeight: FontWeight.w700,
-          color: AppTheme.primary,
-        ),
-      ),
-    );
-
-    final url = logoUrl?.trim() ?? '';
-    if (url.isEmpty) return fallback;
-
-    return ClipRRect(
-      borderRadius: BorderRadius.circular(2),
-      child: CachedNetworkImage(
-        imageUrl: url,
-        width: size,
-        height: size,
-        fit: BoxFit.cover,
-        placeholder: (_, __) => fallback,
-        errorWidget: (_, __, ___) => fallback,
-      ),
     );
   }
 }
@@ -4068,70 +4890,106 @@ class _ComparisonDecision {
     required this.rows,
   });
 }
+
 class _DebateBlock extends StatelessWidget {
   final AnalysisData a;
   final bool isDark;
 
   const _DebateBlock({required this.a, required this.isDark});
 
-  @override
-  Widget build(BuildContext context) {
-    final sp = context.watch<SigmaProvider>();
-    final hasDebate = a.bullCase != null && a.bearCase != null;
-
-    if (sp.isDebateLoading) {
-      return Center(
-        child: Padding(
-          padding: const EdgeInsets.symmetric(vertical: 30.0),
-          child: Column(
+  Widget _buildPointList(
+      String title, List<ProCon> points, Color color, BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: isDark ? _kDarkSurface : _kLightSurface,
+        border: Border.all(
+            color: isDark ? _kDarkBorder : _kLightBorder, width: 0.5),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
             children: [
-              SizedBox(
-                width: 20,
-                height: 20,
-                child: CircularProgressIndicator(
-                  strokeWidth: 2,
-                  color: isDark ? _kDarkDim : _kLightDim,
-                ),
-              ),
-              const SizedBox(height: 12),
+              Icon(
+                  points.isNotEmpty && title.contains('BULL')
+                      ? Icons.keyboard_double_arrow_up_rounded
+                      : Icons.keyboard_double_arrow_down_rounded,
+                  color: color,
+                  size: 14),
+              const SizedBox(width: 8),
               Text(
-                'LES ANALYSTES BULL ET BEAR S\'AFFRONTENT...',
+                title,
                 style: GoogleFonts.lora(
                   fontSize: 10,
-                  letterSpacing: 1.2,
-                  color: isDark ? _kDarkDim : _kLightDim,
+                  fontWeight: FontWeight.w900,
+                  letterSpacing: 1.5,
+                  color: color,
                 ),
               ),
             ],
           ),
-        ),
-      );
-    }
+          const SizedBox(height: 16),
+          ...points.map((p) => Padding(
+                padding: const EdgeInsets.only(bottom: 12),
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Padding(
+                      padding: const EdgeInsets.only(top: 5),
+                      child: Icon(Icons.circle,
+                          size: 4, color: color.withValues(alpha: 0.5)),
+                    ),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: Text(
+                        p.text,
+                        style: GoogleFonts.lora(
+                          fontSize: 12,
+                          height: 1.5,
+                          fontWeight: FontWeight.w500,
+                          color: isDark
+                              ? AppTheme.white.withValues(alpha: 0.8)
+                              : AppTheme.black.withValues(alpha: 0.8),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              )),
+          if (points.isEmpty)
+            Text('Aucun argument saillant identifié.',
+                style: _bodyStyle(isDark ? _kDarkDim : _kLightDim)
+                    .copyWith(fontSize: 12)),
+        ],
+      ),
+    );
+  }
 
-    if (!hasDebate) {
+  @override
+  Widget build(BuildContext context) {
+    final sp = context.watch<SigmaProvider>();
+    final hasDebate = a.bullCase != null && a.bearCase != null;
+    final bullPoints = _bullCasePoints(a);
+    final bearPoints = _bearCasePoints(a);
+
+    if (sp.isDebateLoading) {
       return Center(
         child: Padding(
-          padding: const EdgeInsets.symmetric(vertical: 20.0),
-          child: InkWell(
-            onTap: () => sp.runBullBearDebate(),
-            child: Container(
-              padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
-              decoration: BoxDecoration(
-                border: Border.all(
-                  color: isDark ? _kDarkBorder : _kLightBorder,
-                  width: 0.8,
-                ),
+          padding: const EdgeInsets.symmetric(vertical: 40.0),
+          child: Column(
+            children: [
+              const CircularProgressIndicator(
+                strokeWidth: 1.5,
+                color: AppTheme.primary,
               ),
-              child: Text(
-                'LANCER LE DÉBAT BULL VS BEAR',
-                style: GoogleFonts.lora(
-                  fontSize: 10,
-                  fontWeight: FontWeight.w700,
-                  letterSpacing: 1.5,
-                  color: AppTheme.primary,
-                ),
-              ),
-            ),
+              const SizedBox(height: 16),
+              Text('SYNTHÈSE INSTITUTIONNELLE EN COURS...',
+                  style: GoogleFonts.lora(
+                      fontSize: 9,
+                      letterSpacing: 2,
+                      color: isDark ? _kDarkDim : _kLightDim)),
+            ],
           ),
         ),
       );
@@ -4140,19 +4998,79 @@ class _DebateBlock extends StatelessWidget {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        _PersonaArgument(
-          title: 'VUE BULL · L\'OPTIMISTE',
-          content: a.bullCase!,
-          color: AppTheme.positive,
-          isDark: isDark,
+        // Structured Table View
+        Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Expanded(
+                child: _buildPointList('BULL CASE ARGUMENTS',
+                    bullPoints.take(5).toList(), AppTheme.positive, context)),
+            const SizedBox(width: 1), // Thin divider feel
+            Expanded(
+                child: _buildPointList('BEAR CASE ARGUMENTS',
+                    bearPoints.take(5).toList(), AppTheme.negative, context)),
+          ],
         ),
-        const SizedBox(height: 24),
-        _PersonaArgument(
-          title: 'VUE BEAR · LE SCEPTIQUE',
-          content: a.bearCase!,
-          color: AppTheme.negative,
-          isDark: isDark,
-        ),
+        const SizedBox(height: 32),
+
+        // Load AI debate if not present
+        if (!hasDebate)
+          Center(
+            child: InkWell(
+              onTap: () => sp.runBullBearDebate(),
+              child: Container(
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 24, vertical: 14),
+                decoration: BoxDecoration(
+                  color: AppTheme.primary.withValues(alpha: 0.05),
+                  border: Border.all(
+                    color: AppTheme.primary.withValues(alpha: 0.3),
+                    width: 0.8,
+                  ),
+                ),
+                child: Text(
+                  'GÉNÉRER LA SYNTHÈSE EXECUTIVE',
+                  style: GoogleFonts.lora(
+                    fontSize: 10,
+                    fontWeight: FontWeight.w800,
+                    letterSpacing: 2.0,
+                    color: AppTheme.primary,
+                  ),
+                ),
+              ),
+            ),
+          )
+        else ...[
+          // Show AI Summaries
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+            decoration: BoxDecoration(
+              border: Border(
+                  left: BorderSide(
+                      color: isDark ? _kDarkDim : _kLightDim, width: 2)),
+            ),
+            child: Text('EXECUTIVE SUMMARY',
+                style: GoogleFonts.lora(
+                    fontSize: 10,
+                    fontWeight: FontWeight.w800,
+                    color: isDark ? _kDarkDim : _kLightDim,
+                    letterSpacing: 1.5)),
+          ),
+          const SizedBox(height: 24),
+          _PersonaArgument(
+            title: 'INSTITUTIONAL BULL PERSPECTIVE',
+            content: a.bullCase!,
+            color: AppTheme.positive,
+            isDark: isDark,
+          ),
+          const SizedBox(height: 32),
+          _PersonaArgument(
+            title: 'INSTITUTIONAL BEAR PERSPECTIVE',
+            content: a.bearCase!,
+            color: AppTheme.negative,
+            isDark: isDark,
+          ),
+        ],
       ],
     );
   }
@@ -4171,9 +5089,51 @@ class _PersonaArgument extends StatelessWidget {
     required this.isDark,
   });
 
+  /// Strips JSON artifacts and EMOJIS from AI output to ensure clean professional text.
+  String _cleanContent(String raw) {
+    String text = raw.trim();
+
+    // Remove Emojis (Institutional requirement)
+    text = text.replaceAll(
+        RegExp(
+            r'[\u{1F600}-\u{1F64F}\u{1F300}-\u{1F5FF}\u{1F680}-\u{1F6FF}\u{1F1E6}-\u{1F1FF}\u{2600}-\u{26FF}\u{2700}-\u{27BF}\u{1F900}-\u{1F9FF}\u{1F018}-\u{1F0F5}\u{1F004}\u{1F18E}\u{1F191}-\u{1F19A}\u{1F1E6}-\u{1F1FF}\u{1F201}\u{1F21A}\u{1F22F}\u{1F232}-\u{1F23A}\u{1F250}\u{1F251}\u{1F300}-\u{1F321}\u{1F324}-\u{1F393}\u{1F396}-\u{1F39B}\u{1F39E}-\u{1F3F0}\u{1F3F3}-\u{1F3F5}\u{1F3F7}-\u{1F4FD}\u{1F4FF}-\u{1F53D}\u{1F549}-\u{1F54E}\u{1F550}-\u{1F567}\u{1F56F}\u{1F570}\u{1F573}-\u{1F579}\u{1F57B}-\u{1F5A3}\u{1F5A5}-\u{1F5FA}\u{1F600}-\u{1F64F}\u{1F680}-\u{1F6C5}\u{1F6CB}-\u{1F6D2}\u{1F6E0}-\u{1F6E5}\u{1F6E9}\u{1F6EB}\u{1F6EC}\u{1F6F0}\u{1F6F3}-\u{1F6F6}\u{1F90D}-\u{1F93A}\u{1F93C}-\u{1F945}\u{1F947}-\u{1F970}\u{1F973}-\u{1F976}\u{1F97A}\u{1F97C}-\u{1F9A2}\u{1F9B0}-\u{1F9B9}\u{1F9C0}-\u{1F9C2}\u{1F9D0}-\u{1F9FF}]',
+            unicode: true),
+        '');
+
+    // If the content looks like JSON, try to extract the text value
+    if (text.startsWith('{') || text.startsWith('[')) {
+      try {
+        // Try to extract a meaningful text field from JSON
+        final RegExp jsonValuePattern = RegExp(
+          r'"(?:bull|bear|case|text|content|analysis|argument|response)":\s*"((?:[^"\\]|\\.)*)"',
+          caseSensitive: false,
+        );
+        final match = jsonValuePattern.firstMatch(text);
+        if (match != null && match.group(1) != null) {
+          text = match
+              .group(1)!
+              .replaceAll(r'\n', '\n')
+              .replaceAll(r'\"', '"')
+              .replaceAll(r'\t', ' ');
+        }
+      } catch (_) {}
+    }
+
+    // Remove markdown formatting artifacts
+    text = text
+        .replaceAll(RegExp(r'^```[\w]*\n?', multiLine: true), '')
+        .replaceAll('```', '')
+        .replaceAll(RegExp(r'^\*\*(.+?)\*\*', multiLine: true), r'$1')
+        .trim();
+
+    return text;
+  }
+
   @override
   Widget build(BuildContext context) {
     final dim = isDark ? _kDarkDim : _kLightDim;
+    final cleanText = _cleanContent(content);
+
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -4198,13 +5158,45 @@ class _PersonaArgument extends StatelessWidget {
         ),
         const SizedBox(height: 10),
         Text(
-          content,
+          cleanText,
           style: _bodyStyle(isDark ? _kDarkText : _kLightText).copyWith(
             fontSize: 13,
             height: 1.6,
           ),
         ),
       ],
+    );
+  }
+}
+
+class _FavoriteButton extends StatelessWidget {
+  final String ticker;
+  final bool isDark;
+
+  const _FavoriteButton({
+    required this.ticker,
+    required this.isDark,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final sp = context.watch<SigmaProvider>();
+    final isFavorite = sp.favoriteTickers.contains(ticker.toUpperCase());
+
+    return IconButton(
+      icon: Icon(
+        isFavorite ? Icons.star_rounded : Icons.star_border_rounded,
+        color: isFavorite ? AppTheme.gold : (isDark ? _kDarkDim : _kLightDim),
+        size: 22,
+      ),
+      onPressed: () {
+        HapticFeedback.lightImpact();
+        sp.toggleFavorite(ticker);
+      },
+      tooltip: isFavorite ? 'Retirer des favoris' : 'Ajouter aux favoris',
+      padding: EdgeInsets.zero,
+      constraints: const BoxConstraints(),
+      splashRadius: 20,
     );
   }
 }

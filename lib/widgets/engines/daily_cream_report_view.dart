@@ -4,6 +4,7 @@ import 'package:provider/provider.dart';
 import 'package:quantum_invest/theme/app_theme.dart';
 import '../../models/sigma_engines.dart';
 import '../../providers/sigma_provider.dart';
+import '../institutional/institutional_components.dart';
 
 class DailyCreamReportScreen extends StatefulWidget {
   const DailyCreamReportScreen({super.key});
@@ -63,7 +64,9 @@ class _DailyCreamReportScreenState extends State<DailyCreamReportScreen> {
                       const SizedBox(height: 32),
                       _buildSectionTitle('TICKERS TO REVIEW'),
                       const SizedBox(height: 16),
-                      ..._report!.alphaPicks
+                      ...(_report!.alphaPicks.isNotEmpty
+                              ? _report!.alphaPicks
+                              : _report!.topMovers.take(5))
                           .map((s) => _buildSignalRow(s, isDark)),
                       const SizedBox(height: 32),
                       _buildSectionTitle('TOP MOVERS & FLOWS'),
@@ -106,7 +109,7 @@ class _DailyCreamReportScreenState extends State<DailyCreamReportScreen> {
           ),
           const SizedBox(height: 16),
           Text(
-            _report!.marketSynthesis,
+            _cleanReportText(_report!.marketSynthesis),
             style: GoogleFonts.lora(
               fontSize: 15,
               height: 1.6,
@@ -158,21 +161,7 @@ class _DailyCreamReportScreenState extends State<DailyCreamReportScreen> {
       ),
       child: Row(
         children: [
-          Container(
-            width: 40,
-            height: 40,
-            decoration: BoxDecoration(
-              color: AppTheme.primary.withValues(alpha: 0.1),
-              borderRadius: BorderRadius.circular(8),
-            ),
-            child: Center(
-              child: Text(
-                signal.ticker[0],
-                style: GoogleFonts.lora(
-                    fontWeight: FontWeight.w900, color: AppTheme.primary),
-              ),
-            ),
-          ),
+          TickerLogoThumb(symbol: signal.ticker, logoUrl: null, size: 40),
           const SizedBox(width: 16),
           Expanded(
             child: Column(
@@ -216,5 +205,19 @@ class _DailyCreamReportScreenState extends State<DailyCreamReportScreen> {
         ],
       ),
     );
+  }
+
+  String _cleanReportText(String raw) {
+    return raw
+        .replaceAll(RegExp(r'^```[a-zA-Z]*\s*', multiLine: true), '')
+        .replaceAll('```', '')
+        .replaceAll(RegExp(r'#{1,6}\s*'), '')
+        .replaceAll('**', '')
+        .replaceAll(RegExp(r'^[-•*]\s+', multiLine: true), '')
+        .split('\n')
+        .map((line) => line.trim())
+        .where((line) => line.isNotEmpty)
+        .take(5)
+        .join('\n');
   }
 }

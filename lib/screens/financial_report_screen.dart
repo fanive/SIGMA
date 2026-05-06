@@ -6,6 +6,7 @@ import 'dart:async';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:fl_chart/fl_chart.dart';
 import 'package:provider/provider.dart';
+import '../utils/logo_resolver.dart';
 import 'package:flutter_animate/flutter_animate.dart';
 import 'package:percent_indicator/circular_percent_indicator.dart';
 
@@ -555,8 +556,6 @@ class _FinancialReportScreenState extends State<FinancialReportScreen>
                 builder: (context) {
                   final ticker = report.ticker.toUpperCase();
 
-                  final logoUrl = 'https://financialmodelingprep.com/image-stock/$ticker.png';
-
                   return Container(
                     width: 52, height: 52,
                     margin: const EdgeInsets.only(right: 14),
@@ -568,7 +567,7 @@ class _FinancialReportScreenState extends State<FinancialReportScreen>
                     ),
                     padding: const EdgeInsets.all(10),
                     child: Image.network(
-                      logoUrl, 
+                      LogoResolver.resolve(ticker), 
                       fit: BoxFit.contain,
                       errorBuilder: (_, __, ___) => Center(
                         child: Text(

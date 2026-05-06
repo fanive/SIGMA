@@ -129,7 +129,7 @@ class _StatusBarState extends State<StatusBar> {
             if (tp.focusedTicker != null) ...[
               Text(
                 tp.focusedTicker!,
-                style: GoogleFonts.ibmPlexSans(
+                style: GoogleFonts.lora(
                   color: AppTheme.amber,
                   fontSize: 9,
                   fontWeight: FontWeight.w700,
@@ -146,7 +146,7 @@ class _StatusBarState extends State<StatusBar> {
             // Local time
             Text(
               _localTime,
-              style: GoogleFonts.ibmPlexSans(
+              style: GoogleFonts.lora(
                 color:
                     isDark ? AppTheme.textPrimary : AppTheme.lightTextPrimary,
                 fontSize: 10,
@@ -184,7 +184,7 @@ class _StatusBarState extends State<StatusBar> {
   Widget _label(String text, bool isDark) {
     return Text(
       text,
-      style: GoogleFonts.ibmPlexSans(
+      style: GoogleFonts.lora(
         color: isDark ? AppTheme.textMuted : AppTheme.lightTextMuted,
         fontSize: 9,
         fontWeight: FontWeight.w500,
@@ -199,7 +199,7 @@ class _StatusBarState extends State<StatusBar> {
       children: [
         Text(
           '$city ',
-          style: GoogleFonts.ibmPlexSans(
+          style: GoogleFonts.lora(
             color: isDark ? AppTheme.textMuted : AppTheme.lightTextMuted,
             fontSize: 8,
             fontWeight: FontWeight.w500,
@@ -207,7 +207,7 @@ class _StatusBarState extends State<StatusBar> {
         ),
         Text(
           time,
-          style: GoogleFonts.ibmPlexSans(
+          style: GoogleFonts.lora(
             color:
                 isDark ? AppTheme.textSecondary : AppTheme.lightTextSecondary,
             fontSize: 9,

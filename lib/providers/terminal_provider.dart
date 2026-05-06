@@ -11,6 +11,7 @@ enum TerminalPanel {
   marketOverview,
   watchlist,
   newsFeed,
+  screeners,
   noteLab,
   settings,
   // ── Extended panels (desktop sidebar, Phase 2) ────────────────────────────
@@ -31,11 +32,13 @@ extension TerminalPanelInfo on TerminalPanel {
     final isFr = lang == 'FR';
     switch (this) {
       case TerminalPanel.marketOverview:
-        return isFr ? 'MACRO' : 'MACRO';
+        return isFr ? 'MARCHÉS' : 'MARKETS';
       case TerminalPanel.watchlist:
-        return isFr ? 'CONVICTIONS' : 'CONVICTIONS';
+        return isFr ? 'WATCHLIST' : 'WATCHLIST';
       case TerminalPanel.newsFeed:
-        return isFr ? 'BRIEFING' : 'BRIEFING';
+        return isFr ? 'NEWS' : 'NEWS';
+      case TerminalPanel.screeners:
+        return isFr ? 'SCREENERS' : 'SCREENERS';
       case TerminalPanel.settings:
         return isFr ? 'PROFIL' : 'PROFILE';
       case TerminalPanel.intelligence:
@@ -45,7 +48,7 @@ extension TerminalPanelInfo on TerminalPanel {
       case TerminalPanel.charts:
         return isFr ? 'MARCHÉS' : 'MARKETS';
       case TerminalPanel.noteLab:
-        return isFr ? 'NOTE LAB' : 'NOTE LAB';
+        return isFr ? 'ANALYSE' : 'RESEARCH';
       default:
         return '';
     }
@@ -59,6 +62,8 @@ extension TerminalPanelInfo on TerminalPanel {
         return Icons.bookmark_added_rounded;
       case TerminalPanel.newsFeed:
         return Icons.article_rounded;
+      case TerminalPanel.screeners:
+        return Icons.filter_alt_rounded;
       case TerminalPanel.settings:
         return Icons.person_outline_rounded;
       case TerminalPanel.intelligence:
@@ -80,6 +85,7 @@ extension TerminalPanelInfo on TerminalPanel {
       case TerminalPanel.marketOverview:
       case TerminalPanel.watchlist:
       case TerminalPanel.newsFeed:
+      case TerminalPanel.screeners:
       case TerminalPanel.noteLab:
       case TerminalPanel.settings:
         return true;
@@ -97,16 +103,18 @@ extension TerminalPanelInfo on TerminalPanel {
         return '⌘2';
       case TerminalPanel.newsFeed:
         return '⌘3';
-      case TerminalPanel.noteLab:
+      case TerminalPanel.screeners:
         return '⌘4';
-      case TerminalPanel.settings:
+      case TerminalPanel.noteLab:
         return '⌘5';
-      case TerminalPanel.intelligence:
+      case TerminalPanel.settings:
         return '⌘6';
-      case TerminalPanel.portfolio:
+      case TerminalPanel.intelligence:
         return '⌘7';
-      case TerminalPanel.charts:
+      case TerminalPanel.portfolio:
         return '⌘8';
+      case TerminalPanel.charts:
+        return '⌘9';
       default:
         return '';
     }

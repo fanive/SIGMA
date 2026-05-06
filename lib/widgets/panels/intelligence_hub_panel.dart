@@ -171,7 +171,7 @@ class _IntelligencePanelState extends State<IntelligencePanel> {
           padding: const EdgeInsets.fromLTRB(4, 24, 0, 12),
           child: Text(
             title,
-            style: GoogleFonts.ibmPlexSans(
+            style: GoogleFonts.lora(
               fontSize: 9,
               fontWeight: FontWeight.w600,
               color: isDark ? AppTheme.white38 : AppTheme.black38,
@@ -198,6 +198,7 @@ class _IntelligencePanelState extends State<IntelligencePanel> {
     );
   }
 
+  // ignore: unused_element
   Widget _buildHeader(BuildContext context) {
     return Padding(
       padding: const EdgeInsets.fromLTRB(20, 20, 20, 8),
@@ -226,7 +227,7 @@ class _IntelligencePanelState extends State<IntelligencePanel> {
         const SizedBox(width: 8),
         Text(
           'RESEARCH CORE ONLINE',
-          style: GoogleFonts.ibmPlexSans(
+          style: GoogleFonts.lora(
             fontSize: 9,
             fontWeight: FontWeight.w600,
             color: AppTheme.greenAccent,
@@ -268,7 +269,7 @@ class _IntelligencePanelState extends State<IntelligencePanel> {
                           Flexible(
                             child: Text(
                               '${engine.title.toUpperCase()}${engine.trademark}',
-                              style: GoogleFonts.ibmPlexSans(
+                              style: GoogleFonts.lora(
                                 fontSize: 12,
                                 fontWeight: FontWeight.w700,
                                 color: isDark ? AppTheme.white : AppTheme.black,
