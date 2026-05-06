@@ -14,6 +14,7 @@ import yfinance as yf
 from cachetools import TTLCache
 from fastapi import FastAPI, HTTPException, Query, APIRouter
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import RedirectResponse
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -48,6 +49,8 @@ _cache_events     = TTLCache(maxsize=200, ttl=3600)    # 1h   — calendar/divs
 _cache_news       = TTLCache(maxsize=200, ttl=300)     # 5min — news
 _cache_insider    = TTLCache(maxsize=200, ttl=14400)   # 4h   — OpenInsider SEC Form 4
 _cache_sec        = TTLCache(maxsize=100, ttl=86400)   # 24h  — SEC EDGAR facts
+_cache_google     = TTLCache(maxsize=200, ttl=300)     # 5min — Google Finance scrape
+_cache_coverage   = TTLCache(maxsize=100, ttl=1800)    # 30min — yfinance coverage diagnostics
 
 # Stale cache (no TTL) — keeps last known good value across restarts
 _stale: dict = {}
@@ -147,6 +150,91 @@ def _clean(d):
     return _safe(d)
 
 
+def _yf_get(fn, default=None):
+    """Safely read a yfinance property/method that may hit network or be unimplemented."""
+    try:
+        value = fn()
+        return default if value is None else value
+    except Exception:
+        return default
+
+
+def _has_payload(value) -> bool:
+    if value is None:
+        return False
+    if isinstance(value, pd.DataFrame):
+        return not value.empty
+    if isinstance(value, pd.Series):
+        return not value.empty
+    if isinstance(value, dict):
+        return bool(value)
+    if isinstance(value, (list, tuple, set)):
+        return len(value) > 0
+    if isinstance(value, str):
+        return bool(value.strip())
+    return True
+
+
+def _yf_count(value) -> int:
+    if value is None:
+        return 0
+    if isinstance(value, pd.DataFrame):
+        return len(value.index)
+    if isinstance(value, pd.Series):
+        return len(value.index)
+    if isinstance(value, dict):
+        return len(value)
+    if isinstance(value, (list, tuple, set)):
+        return len(value)
+    return 1 if _has_payload(value) else 0
+
+
+def _yf_probe(label: str, fn, sample_limit: int = 3) -> dict[str, Any]:
+    try:
+        value = fn()
+        sample = _clean(value)
+        if isinstance(sample, list):
+            sample = sample[:sample_limit]
+        elif isinstance(sample, dict):
+            sample = dict(list(sample.items())[:sample_limit])
+        return {
+            "label": label,
+            "available": _has_payload(value),
+            "count": _yf_count(value),
+            "sample": sample,
+        }
+    except Exception as exc:
+        return {
+            "label": label,
+            "available": False,
+            "count": 0,
+            "error": str(exc),
+        }
+
+
+def _funds_data_to_dict(funds_data) -> dict[str, Any]:
+    if not funds_data:
+        return {}
+    fields = [
+        "description", "fund_overview", "fund_operations", "asset_classes",
+        "top_holdings", "equity_holdings", "bond_holdings", "bond_ratings",
+        "sector_weightings",
+    ]
+    out: dict[str, Any] = {}
+    for field in fields:
+        value = _yf_get(lambda f=field: getattr(funds_data, f), None)
+        if _has_payload(value):
+            out[field] = _clean(value)
+    return out
+
+
+def _shares_full_to_list(ticker_obj, limit: int = 60) -> list[dict[str, Any]]:
+    shares = _yf_get(lambda: ticker_obj.get_shares_full(), None)
+    if isinstance(shares, pd.Series):
+        return _series_to_list(shares.tail(limit), value_key="shares", limit=limit)
+    return []
+
+
 def _domain_from_website(website: str | None) -> str | None:
     if not website:
         return None
@@ -176,7 +264,7 @@ def _logo_urls(website: str | None, symbol: str | None = None) -> dict[str, str]
 
     # 1. Parqet: works for equities and ETFs, not crypto pairs like BTC-USD
     if sym:
-        result["parqet"] = f"https://assets.parqet.com/logos/symbol/{sym}?format=svg"
+        result["parqet"] = f"https://assets.parqet.com/logos/symbol/{sym}?format=png"
 
     # 2. FMP public logo (no key for PNG)
     if sym and "-" not in sym:   # crypto pairs (BTC-USD) not supported
@@ -213,19 +301,25 @@ async def health():
 async def search_tickers(q: str = Query(..., min_length=1)):
     try:
         results = yf.Search(q).quotes or []
-        return [
-            {
-                "symbol": (i.get("symbol") or "").upper(),
+        out = []
+        for i in results[:20]:
+            sym = (i.get("symbol") or "").upper()
+            if not sym:
+                continue
+            
+            # Fast logo generation without fetching website
+            logo_info = _logo_urls(None, symbol=sym)
+            
+            out.append({
+                "symbol": sym,
                 "name": i.get("shortname") or i.get("longname") or "",
                 "exchange": i.get("exchange") or "",
                 "exchangeShortName": i.get("exchange") or "",
                 "type": i.get("quoteType") or "EQUITY",
-                # Search payload does not reliably include website; leave as nullable.
-                "logoUrl": None,
-            }
-            for i in results[:20]
-            if i.get("symbol")
-        ]
+                "logoUrl": logo_info.get("primary"),
+                "logoUrls": logo_info,
+            })
+        return out
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -327,45 +421,52 @@ async def get_equity_profile(symbol: str):
 
 
 @search_router.get("/logo/{symbol}")
-async def logo(symbol: str):
-    """Return logo URLs for a symbol. Ticker-based (Parqet/FMP) + domain fallback."""
+async def logo(symbol: str, json: bool = False):
+    """
+    Return logo URLs for a symbol. 
+    By default redirects to the primary image URL for easy usage in <img> tags.
+    Set json=true to get the full JSON metadata.
+    """
     sym = symbol.upper().strip()
 
     def _fetch():
-        # Try to get website from stale quote cache first (avoids a yfinance call)
+        # Try to get website from stale quote cache first
         website = None
-        stale_quote = _stale.get(f"{id(_cache_price)}:{sym}")
+        stale_key = f"{id(_cache_price)}:{sym}"
+        stale_quote = _stale.get(stale_key)
+        
         if isinstance(stale_quote, dict):
             website = stale_quote.get("website")
-        else:
+        
+        if not website:
             try:
                 t = yf.Ticker(sym)
                 website = (t.info or {}).get("website")
             except Exception:
-                pass  # fallback gracefully to ticker-only URLs
+                pass
 
         urls = _logo_urls(website, symbol=sym)
-        source = "ticker+website" if website else "ticker-only"
         return {
             "symbol": sym,
             "website": website,
             "logoUrl": urls.get("primary"),
             "logoUrls": urls,
-            "source": source,
         }
 
     try:
-        return _cached(_cache_price, f"logo:{sym}", _fetch)
+        data = _cached(_cache_price, f"logo:{sym}", _fetch)
+        if json:
+            return data
+        
+        logo_url = data.get("logoUrl")
+        if logo_url:
+            return RedirectResponse(url=logo_url)
+        
+        # Absolute fallback if no primary URL found
+        return RedirectResponse(url=f"https://ui-avatars.com/api/?name={sym}&background=random")
+        
     except Exception:
-        # Even if everything fails, return ticker-based URLs (always valid)
-        urls = _logo_urls(None, symbol=sym)
-        return {
-            "symbol": sym,
-            "website": None,
-            "logoUrl": urls.get("primary"),
-            "logoUrls": urls,
-            "source": "ticker-only",
-        }
+        return RedirectResponse(url=f"https://ui-avatars.com/api/?name={sym}&background=random")
 
 
 # ---------------------------------------------------------------------------
@@ -378,6 +479,8 @@ async def get_equity_financials(symbol: str):
 
     def _fetch():
         t = yf.Ticker(sym)
+        earnings_dates = _yf_get(lambda: t.get_earnings_dates(limit=16), None)
+        shares_full = _shares_full_to_list(t, limit=80)
         return {
             "symbol": sym,
             "quarterlyIncomeStatement": _stmt_to_list(t.quarterly_income_stmt),
@@ -386,6 +489,9 @@ async def get_equity_financials(symbol: str):
             "annualIncomeStatement": _stmt_to_list(t.income_stmt),
             "annualBalanceSheet": _stmt_to_list(t.balance_sheet),
             "annualCashFlow": _stmt_to_list(t.cashflow),
+            "earningsDates": _df_to_list(earnings_dates, limit=16),
+            "sharesOutstandingHistory": shares_full,
+            "historyMetadata": _clean(_yf_get(lambda: t.history_metadata, {})),
             "source": "yfinance",
         }
 
@@ -410,10 +516,15 @@ async def get_equity_intelligence(symbol: str):
             "symbol": sym,
             "analystPriceTargets": _clean(t.analyst_price_targets),
             "recommendations": _df_to_list(t.recommendations, limit=10),
+            "recommendationsSummary": _df_to_list(_yf_get(lambda: t.recommendations_summary, None), limit=10),
             "upgradesDowngrades": _df_to_list(t.upgrades_downgrades, limit=15),
             "earningsHistory": _df_to_list(t.earnings_history, limit=8),
             "earningsEstimate": _df_to_list(t.earnings_estimate),
             "revenueEstimate": _df_to_list(t.revenue_estimate),
+            "epsTrend": _df_to_list(_yf_get(lambda: t.eps_trend, None)),
+            "epsRevisions": _df_to_list(_yf_get(lambda: t.eps_revisions, None)),
+            "growthEstimates": _df_to_list(_yf_get(lambda: t.growth_estimates, None)),
+            "earningsDates": _df_to_list(_yf_get(lambda: t.get_earnings_dates(limit=16), None), limit=16),
             "source": "yfinance",
         }
 
@@ -433,12 +544,19 @@ async def get_equity_ownership(symbol: str):
 
     def _fetch():
         t = yf.Ticker(sym)
+        funds_data = _funds_data_to_dict(_yf_get(lambda: t.funds_data, None))
         # Pruned: only ownership-specific data
         return {
             "symbol": sym,
+            "majorHolders": _df_to_list(_yf_get(lambda: t.major_holders, None), limit=20),
             "institutionalHolders": _df_to_list(t.institutional_holders, limit=20),
             "mutualFundHolders": _df_to_list(t.mutualfund_holders, limit=20),
             "insiderTransactions": _df_to_list(t.insider_transactions, limit=25),
+            "insiderPurchases": _df_to_list(_yf_get(lambda: t.insider_purchases, None), limit=25),
+            "sustainability": _df_to_list(_yf_get(lambda: t.sustainability, None), limit=40),
+            "sharesOutstandingHistory": _shares_full_to_list(t, limit=80),
+            "isin": _yf_get(lambda: t.get_isin(), None),
+            "fundsData": funds_data,
             "source": "yfinance",
         }
 
@@ -446,6 +564,75 @@ async def get_equity_ownership(symbol: str):
         return _cached(_cache_ownership, sym, _fetch)
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"ownership failed for {sym}: {e}")
+
+
+@equities_router.get("/{symbol}/yfinance-coverage")
+async def get_equity_yfinance_coverage(symbol: str):
+    """Live yfinance coverage report showing which data families are available for a ticker."""
+    sym = symbol.upper().strip()
+
+    def _fetch():
+        t = yf.Ticker(sym)
+        probes = [
+            _yf_probe("info", lambda: t.info),
+            _yf_probe("fast_info", lambda: dict(t.fast_info or {})),
+            _yf_probe("history_1mo_1d", lambda: t.history(period="1mo", interval="1d")),
+            _yf_probe("income_stmt", lambda: t.income_stmt),
+            _yf_probe("quarterly_income_stmt", lambda: t.quarterly_income_stmt),
+            _yf_probe("balance_sheet", lambda: t.balance_sheet),
+            _yf_probe("quarterly_balance_sheet", lambda: t.quarterly_balance_sheet),
+            _yf_probe("cashflow", lambda: t.cashflow),
+            _yf_probe("quarterly_cashflow", lambda: t.quarterly_cashflow),
+            _yf_probe("analyst_price_targets", lambda: t.analyst_price_targets),
+            _yf_probe("recommendations", lambda: t.recommendations),
+            _yf_probe("recommendations_summary", lambda: t.recommendations_summary),
+            _yf_probe("upgrades_downgrades", lambda: t.upgrades_downgrades),
+            _yf_probe("earnings_history", lambda: t.earnings_history),
+            _yf_probe("earnings_estimate", lambda: t.earnings_estimate),
+            _yf_probe("revenue_estimate", lambda: t.revenue_estimate),
+            _yf_probe("eps_trend", lambda: t.eps_trend),
+            _yf_probe("eps_revisions", lambda: t.eps_revisions),
+            _yf_probe("growth_estimates", lambda: t.growth_estimates),
+            _yf_probe("earnings_dates", lambda: t.get_earnings_dates(limit=16)),
+            _yf_probe("calendar", lambda: t.calendar),
+            _yf_probe("dividends", lambda: t.dividends),
+            _yf_probe("splits", lambda: t.splits),
+            _yf_probe("options_expirations", lambda: list(t.options or [])),
+            _yf_probe("news", lambda: t.news),
+            _yf_probe("major_holders", lambda: t.major_holders),
+            _yf_probe("institutional_holders", lambda: t.institutional_holders),
+            _yf_probe("mutualfund_holders", lambda: t.mutualfund_holders),
+            _yf_probe("insider_transactions", lambda: t.insider_transactions),
+            _yf_probe("insider_purchases", lambda: t.insider_purchases),
+            _yf_probe("sustainability", lambda: t.sustainability),
+            _yf_probe("shares_full", lambda: t.get_shares_full()),
+            _yf_probe("isin", lambda: t.get_isin()),
+            _yf_probe("funds_data", lambda: _funds_data_to_dict(t.funds_data)),
+            _yf_probe("history_metadata", lambda: t.history_metadata),
+        ]
+        available = [p["label"] for p in probes if p.get("available")]
+        missing = [p["label"] for p in probes if not p.get("available")]
+        return {
+            "symbol": sym,
+            "availableCount": len(available),
+            "totalChecked": len(probes),
+            "coverageRatio": round(len(available) / len(probes), 3) if probes else 0,
+            "available": available,
+            "missing": missing,
+            "probes": probes,
+            "recommendations": [
+                "Use /ownership for majorHolders, sustainability, insiderPurchases, sharesOutstandingHistory, and fundsData.",
+                "Use /intelligence for epsTrend, epsRevisions, growthEstimates, and earningsDates.",
+                "Use /financials for statements plus earningsDates, sharesOutstandingHistory, and historyMetadata.",
+            ],
+            "source": "yfinance",
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+        }
+
+    try:
+        return _cached(_cache_coverage, sym, _fetch)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"yfinance coverage failed for {sym}: {e}")
 
 
 # ---------------------------------------------------------------------------
@@ -637,7 +824,127 @@ async def get_market_indices():
     return _cached(_cache_price, "__macro__", _fetch)
 
 
-# ---------------------------------------------------------------------------
+def _scrape_movers(mover_type: str):
+    """Scrapes Yahoo Finance for top gainers/losers/most-active."""
+    # Maps internal type to Yahoo URL segment
+    url = f"https://finance.yahoo.com/markets/stocks/{mover_type}/"
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+    }
+    try:
+        resp = _requests.get(url, headers=headers, timeout=10)
+        if resp.status_code != 200:
+            return []
+        soup = _BS(resp.text, "html.parser")
+        # In the new layout, movers are in a table with class 'markets-table' or similar
+        table = soup.find("table")
+        if not table:
+            return []
+        
+        rows = table.find_all("tr")[1:] # skip header
+        out = []
+        for r in rows:
+            cols = r.find_all("td")
+            if len(cols) < 5: continue
+            
+            # The structure of the table
+            symbol = cols[0].text.strip()
+            name = cols[1].text.strip()
+            price = _num(cols[2].text.strip().replace(",", ""))
+            # Change and Change % are often in cols 3 and 4
+            change = _num(cols[3].text.strip().replace(",", "").replace("+", ""))
+            change_pct = _num(cols[4].text.strip().replace("%", "").replace(",", "").replace("+", ""))
+            
+            out.append({
+                "symbol": symbol,
+                "name": name,
+                "price": price,
+                "change": change,
+                "changesPercentage": change_pct
+            })
+        return out[:25]
+    except Exception as e:
+        print(f"Scrape {mover_type} failed: {e}")
+        return []
+
+
+@market_router.get("/gainers")
+async def get_gainers():
+    """Real-time US top gainers. Scraped from Yahoo Finance. Cached 5m."""
+    return _cached(_cache_price, "movers:gainers", lambda: _scrape_movers("gainers"))
+
+
+@market_router.get("/losers")
+async def get_losers():
+    """Real-time US top losers. Scraped from Yahoo Finance. Cached 5m."""
+    return _cached(_cache_price, "movers:losers", lambda: _scrape_movers("losers"))
+
+
+@market_router.get("/most-active")
+async def get_most_active():
+    """Real-time US most active stocks. Scraped from Yahoo Finance. Cached 5m."""
+    return _cached(_cache_price, "movers:active", lambda: _scrape_movers("most-active"))
+
+
+@market_router.get("/news")
+async def get_market_news(limit: int = 30):
+    """Real-time market news from multiple sources. Cached 5m."""
+    def _fetch():
+        articles = []
+        # Source 1: yfinance news for SPY (general market)
+        try:
+            t = yf.Ticker("SPY")
+            for n in (t.news or [])[:15]:
+                articles.append({
+                    "title": n.get("title", ""),
+                    "source": n.get("publisher", "Yahoo Finance"),
+                    "url": n.get("link", ""),
+                    "publishedAt": n.get("providerPublishTime", ""),
+                    "summary": n.get("title", ""),
+                    "ticker": "SPY",
+                })
+        except Exception as e:
+            print(f"SPY news fetch failed: {e}")
+        
+        # Source 2: yfinance news for QQQ (tech)
+        try:
+            t2 = yf.Ticker("QQQ")
+            for n in (t2.news or [])[:10]:
+                title = n.get("title", "")
+                if not any(a["title"] == title for a in articles):
+                    articles.append({
+                        "title": title,
+                        "source": n.get("publisher", "Yahoo Finance"),
+                        "url": n.get("link", ""),
+                        "publishedAt": n.get("providerPublishTime", ""),
+                        "summary": title,
+                        "ticker": "QQQ",
+                    })
+        except Exception as e:
+            print(f"QQQ news fetch failed: {e}")
+        
+        # Source 3: yfinance news for DIA (blue chips)
+        try:
+            t3 = yf.Ticker("DIA")
+            for n in (t3.news or [])[:8]:
+                title = n.get("title", "")
+                if not any(a["title"] == title for a in articles):
+                    articles.append({
+                        "title": title,
+                        "source": n.get("publisher", "Yahoo Finance"),
+                        "url": n.get("link", ""),
+                        "publishedAt": n.get("providerPublishTime", ""),
+                        "summary": title,
+                        "ticker": "DIA",
+                    })
+        except Exception as e:
+            print(f"DIA news fetch failed: {e}")
+
+        return articles[:limit]
+
+    return _cached(_cache_price, f"market_news:{limit}", _fetch)
+
+
 # /insider/{symbol} — SEC Form 4 insider trades via OpenInsider scraper
 # ---------------------------------------------------------------------------
 _OI_HEADERS = {
@@ -1102,55 +1409,499 @@ async def get_macro_fred_series(series_id: str):
 @equities_router.get("/{ticker}/google-finance")
 def get_equity_google_finance_info(ticker: str):
     """
-    Scrapes Google Finance for price, about description, and key stats.
+    Scrapes Google Finance for quote metadata, about text, key stats, related news,
+    and peer cards. This endpoint is an enrichment source; yfinance/SEC remain the
+    canonical structured-data sources.
     """
-    return _cached(_cache_price, f"gf:{ticker}", lambda: _scrape_google_finance_safe(ticker, raise_on_error=True))
+    return _cached(_cache_google, f"gf:{ticker.upper().strip()}", lambda: _scrape_google_finance_safe(ticker, raise_on_error=True))
+
+
+_GF_EXCHANGES = [
+    "NASDAQ", "NYSE", "NYSEARCA", "NYSEAMERICAN", "OTCMKTS", "BATS", "AMEX",
+    "TSE", "TSX", "LON", "ETR", "FRA", "EPA", "BIT", "SWX", "AMS", "STO",
+    "CPH", "HEL", "HKG", "TYO", "NSE", "BOM", "ASX",
+]
+
+
+def _gf_clean_text(value: str | None) -> str:
+    return _re.sub(r"\s+", " ", value or "").strip()
+
+
+def _gf_number(value: str | None):
+    text = _gf_clean_text(value)
+    if not text or text in {"-", "N/A"}:
+        return None
+
+    multiplier = 1.0
+    upper = text.upper()
+    if upper.endswith("T"):
+        multiplier = 1e12
+    elif upper.endswith("B"):
+        multiplier = 1e9
+    elif upper.endswith("M"):
+        multiplier = 1e6
+    elif upper.endswith("K"):
+        multiplier = 1e3
+
+    cleaned = _re.sub(r"[^0-9.\-]", "", text)
+    if not cleaned or cleaned in {"-", "."}:
+        return None
+    try:
+        return float(cleaned) * multiplier
+    except ValueError:
+        return None
+
+
+def _gf_abs_url(href: str | None) -> str:
+    if not href:
+        return ""
+    href = href.strip()
+    if href.startswith("http"):
+        return href
+    if href.startswith("/"):
+        return f"https://www.google.com{href}"
+    return href
+
+
+def _gf_first_text(soup, selectors: list[str]) -> str:
+    for selector in selectors:
+        el = soup.select_one(selector)
+        text = _gf_clean_text(el.get_text(" ") if el else "")
+        if text:
+            return text
+    return ""
+
+
+def _gf_candidate_quotes(ticker: str) -> list[tuple[str, str | None, str]]:
+    raw = ticker.upper().strip()
+    if not raw:
+        return []
+
+    candidates: list[tuple[str, str | None, str]] = []
+    seen: set[str] = set()
+
+    def add(symbol: str, exchange: str | None):
+        symbol = symbol.strip().upper()
+        if not symbol:
+            return
+        quote = f"{symbol}:{exchange}" if exchange else symbol
+        if quote in seen:
+            return
+        seen.add(quote)
+        candidates.append((symbol, exchange, quote))
+
+    if ":" in raw:
+        symbol, exchange = raw.split(":", 1)
+        add(symbol, exchange)
+    else:
+        variants = [raw]
+        if "-" in raw:
+            variants.append(raw.replace("-", "."))
+        if "." in raw:
+            variants.append(raw.replace(".", "-"))
+        for symbol in dict.fromkeys(variants):
+            for exchange in _GF_EXCHANGES:
+                add(symbol, exchange)
+            add(symbol, None)
+    return candidates
+
+
+def _gf_extract_stats(soup) -> dict[str, str]:
+    stats: dict[str, str] = {}
+
+    # Current desktop layout usually exposes paired label/value nodes.
+    labels = soup.select("div.SwQK7, div.mfs7Fc, div.gyFHrc .mfs7Fc")
+    values = soup.select("div.dO6ijd, div.P6K39c, div.gyFHrc .P6K39c")
+    for label, value in zip(labels, values):
+        key = _gf_clean_text(label.get_text(" "))
+        val = _gf_clean_text(value.get_text(" "))
+        if key and val and key not in stats:
+            stats[key] = val
+
+    # Fallback: each stat card contains both label and value.
+    for card in soup.select("div.gyFHrc"):
+        key = _gf_first_text(card, ["div.mfs7Fc", "div.SwQK7"])
+        val = _gf_first_text(card, ["div.P6K39c", "div.dO6ijd"])
+        if key and val and key not in stats:
+            stats[key] = val
+
+    return stats
+
+
+def _gf_normalize_stats(stats: dict[str, str]) -> dict[str, Any]:
+    aliases = {
+        "Previous close": "previousClose",
+        "Day range": "dayRange",
+        "Year range": "yearRange",
+        "Market cap": "marketCap",
+        "Avg Volume": "averageVolume",
+        "P/E ratio": "peRatio",
+        "Dividend yield": "dividendYield",
+        "Primary exchange": "primaryExchange",
+        "CEO": "ceo",
+        "Founded": "founded",
+        "Employees": "employees",
+        "Headquarters": "headquarters",
+    }
+    out: dict[str, Any] = {}
+    for label, raw in stats.items():
+        key = aliases.get(label)
+        if not key:
+            key = _re.sub(r"[^a-zA-Z0-9]+", "_", label).strip("_")
+            key = key[:1].lower() + key[1:]
+        out[key] = {
+            "raw": raw,
+            "value": _gf_number(raw),
+        }
+    return out
+
+
+def _gf_extract_news(soup) -> list[dict[str, str]]:
+    news = []
+    seen = set()
+    for anchor in soup.select('a[href*="/articles/"], a[href*="news.google.com"], a[href^="./articles/"]'):
+        title = _gf_clean_text(anchor.get_text(" "))
+        href = _gf_abs_url(anchor.get("href"))
+        if len(title) < 12 or not href:
+            continue
+        key = (title.lower(), href)
+        if key in seen:
+            continue
+        seen.add(key)
+        parent = anchor.find_parent(["div", "article"])
+        parent_text = _gf_clean_text(parent.get_text(" ") if parent else "")
+        source = ""
+        published = ""
+        if parent_text and parent_text != title:
+            parts = [p.strip() for p in _re.split(r"\s{2,}| · | - ", parent_text) if p.strip()]
+            for part in parts:
+                if part != title and len(part) <= 40 and not source:
+                    source = part
+                if _re.search(r"\b(min|hour|day|week|month|ago|yesterday|today)\b", part, _re.I):
+                    published = part
+        news.append({"title": title, "source": source, "url": href, "published": published})
+        if len(news) >= 8:
+            break
+    return news
+
+
+def _gf_extract_peers(soup, ticker: str) -> list[dict[str, str]]:
+    peers = []
+    seen = {ticker.upper()}
+    for anchor in soup.select('a[href*="/finance/quote/"]'):
+        href = anchor.get("href") or ""
+        match = _re.search(r"/finance/quote/([^?/#]+)", href)
+        if not match:
+            continue
+        quote = match.group(1).upper()
+        symbol = quote.split(":", 1)[0]
+        if symbol in seen:
+            continue
+        seen.add(symbol)
+        label = _gf_clean_text(anchor.get_text(" "))
+        peers.append({
+            "symbol": symbol,
+            "quote": quote,
+            "exchange": quote.split(":", 1)[1] if ":" in quote else "",
+            "label": label,
+            "url": _gf_abs_url(href),
+        })
+        if len(peers) >= 12:
+            break
+    return peers
+
+
+def _gf_unique_cells(cells: list[str]) -> list[str]:
+    out: list[str] = []
+    for cell in cells:
+        clean = _gf_clean_text(cell)
+        if not clean:
+            continue
+        if out and out[-1] == clean:
+            continue
+        out.append(clean)
+    return out
+
+
+def _gf_extract_html_tables(soup) -> list[dict[str, Any]]:
+    tables: list[dict[str, Any]] = []
+    for table_index, table in enumerate(soup.find_all("table")):
+        headers = [
+            _gf_clean_text(cell.get_text(" "))
+            for cell in table.find_all(["th"])
+            if _gf_clean_text(cell.get_text(" "))
+        ]
+        rows: list[dict[str, Any]] = []
+        for tr in table.find_all("tr"):
+            cells = _gf_unique_cells([
+                cell.get_text(" ") for cell in tr.find_all(["th", "td"])
+            ])
+            if len(cells) < 2:
+                continue
+            rows.append({
+                "label": cells[0],
+                "values": cells[1:],
+                "numericValues": [_gf_number(v) for v in cells[1:]],
+                "raw": cells,
+            })
+        if rows:
+            tables.append({"index": table_index, "headers": headers, "rows": rows})
+    return tables
+
+
+def _gf_extract_div_financial_rows(soup) -> list[dict[str, Any]]:
+    rows: list[dict[str, Any]] = []
+    seen: set[tuple[str, tuple[str, ...]]] = set()
+    selectors = [
+        '[role="row"]',
+        "div.roXhBd",
+        "div.yNnsfe",
+        "div.J9Jhg",
+        "div.P6K39c",
+    ]
+
+    for selector in selectors:
+        for node in soup.select(selector):
+            children = node.find_all(["div", "span"], recursive=False)
+            cells = _gf_unique_cells([
+                child.get_text(" ") for child in children
+            ])
+            if len(cells) < 2:
+                nested = node.find_all(["div", "span"])
+                cells = _gf_unique_cells([
+                    child.get_text(" ") for child in nested
+                    if not child.find(["div", "span"])
+                ])
+            if len(cells) < 2 or len(cells[0]) > 80:
+                continue
+            key = (cells[0].lower(), tuple(cells[1:]))
+            if key in seen:
+                continue
+            seen.add(key)
+            rows.append({
+                "label": cells[0],
+                "values": cells[1:8],
+                "numericValues": [_gf_number(v) for v in cells[1:8]],
+                "raw": cells[:9],
+            })
+    return rows
+
+
+def _gf_statement_kind(label: str) -> str:
+    lower = label.lower()
+    income_tokens = [
+        "revenue", "sales", "gross profit", "operating income", "net income",
+        "ebit", "ebitda", "earnings", "eps", "diluted", "basic",
+        "cost of revenue", "income before tax", "tax provision",
+    ]
+    balance_tokens = [
+        "assets", "liabilities", "equity", "debt", "cash and short",
+        "inventory", "receivables", "payables", "book value", "retained",
+        "working capital", "total cash", "shareholders",
+    ]
+    cash_tokens = [
+        "cash flow", "free cash", "operating cash", "capital expenditure",
+        "capex", "financing", "investing", "depreciation", "amortization",
+        "dividend paid", "stock based compensation", "repurchase",
+    ]
+    if any(token in lower for token in cash_tokens):
+        return "cashFlow"
+    if any(token in lower for token in balance_tokens):
+        return "balanceSheet"
+    if any(token in lower for token in income_tokens):
+        return "incomeStatement"
+    return "other"
+
+
+def _gf_extract_periods(rows: list[dict[str, Any]]) -> list[str]:
+    for row in rows[:8]:
+        raw = row.get("raw") or []
+        label = str(row.get("label") or "").lower()
+        values = [str(v) for v in row.get("values") or []]
+        if label in {"", "period", "year", "quarter"} or "period" in label:
+            periods = [v for v in values if _re.search(r"\b(20\d{2}|19\d{2}|q[1-4]|ttm|fy)\b", v, _re.I)]
+            if periods:
+                return periods
+        raw_periods = [v for v in raw if _re.search(r"\b(20\d{2}|19\d{2}|q[1-4]|ttm|fy)\b", str(v), _re.I)]
+        if len(raw_periods) >= 2:
+            return raw_periods[1:]
+    return []
+
+
+def _gf_rows_by_statement(rows: list[dict[str, Any]]) -> dict[str, list[dict[str, Any]]]:
+    grouped = {
+        "incomeStatement": [],
+        "balanceSheet": [],
+        "cashFlow": [],
+        "other": [],
+    }
+    for row in rows:
+        kind = _gf_statement_kind(row.get("label", ""))
+        grouped[kind].append(row)
+    return grouped
+
+
+def _gf_extract_earnings(financial_rows: list[dict[str, Any]], stats: dict[str, str]) -> dict[str, Any]:
+    def rows_containing(*tokens: str) -> list[dict[str, Any]]:
+        lowered = [t.lower() for t in tokens]
+        return [
+            row for row in financial_rows
+            if any(token in str(row.get("label", "")).lower() for token in lowered)
+        ]
+
+    eps_rows = rows_containing("eps", "earnings per share", "diluted")
+    net_income_rows = rows_containing("net income", "net earnings")
+    revenue_rows = rows_containing("revenue", "sales")
+    operating_income_rows = rows_containing("operating income", "ebit")
+
+    return {
+        "epsRows": eps_rows[:6],
+        "netIncomeRows": net_income_rows[:6],
+        "revenueRows": revenue_rows[:6],
+        "operatingIncomeRows": operating_income_rows[:6],
+        "ttmPe": stats.get("P/E ratio"),
+        "dividendYield": stats.get("Dividend yield"),
+        "source": "Google Finance financials page + overview stats",
+    }
+
+
+def _gf_scrape_financials_page(quote: str, headers: dict[str, str], attempted_urls: list[str]) -> dict[str, Any]:
+    url = f"https://www.google.com/finance/quote/{quote}/financials?hl=en"
+    attempted_urls.append(url)
+    try:
+        resp = _requests.get(url, headers=headers, timeout=12)
+        if resp.status_code != 200:
+            return {"url": url, "status": resp.status_code, "rows": [], "statements": {}}
+
+        soup = _BS(resp.text, "html.parser")
+        table_rows: list[dict[str, Any]] = []
+        for table in _gf_extract_html_tables(soup):
+            table_rows.extend(table.get("rows", []))
+        div_rows = _gf_extract_div_financial_rows(soup)
+
+        seen: set[tuple[str, tuple[str, ...]]] = set()
+        rows: list[dict[str, Any]] = []
+        for row in [*table_rows, *div_rows]:
+            label = _gf_clean_text(str(row.get("label") or ""))
+            values = [_gf_clean_text(str(v)) for v in (row.get("values") or [])]
+            if not label or not values:
+                continue
+            key = (label.lower(), tuple(values))
+            if key in seen:
+                continue
+            seen.add(key)
+            row["label"] = label
+            row["values"] = values
+            row["numericValues"] = [_gf_number(v) for v in values]
+            row["statement"] = _gf_statement_kind(label)
+            rows.append(row)
+
+        periods = _gf_extract_periods(rows)
+        statements = _gf_rows_by_statement(rows)
+        return {
+            "url": url,
+            "status": resp.status_code,
+            "periods": periods,
+            "rows": rows[:120],
+            "statements": statements,
+            "rowCount": len(rows),
+        }
+    except Exception as exc:
+        return {"url": url, "error": str(exc), "rows": [], "statements": {}}
 
 
 def _scrape_google_finance_safe(ticker: str, raise_on_error: bool = False):
-    ticker = ticker.upper()
-    # Try different combinations
-    exchanges = ["NASDAQ", "NYSE", "NYSEAMERICAN", "OTCMKTS"]
+    ticker = ticker.upper().strip()
     
     headers = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+        "Accept-Language": "en-US,en;q=0.9,fr;q=0.8",
+        "Cookie": "CONSENT=YES+1",
     }
 
     last_err = None
-    for exch in exchanges:
-        url = f"https://www.google.com/finance/quote/{ticker}:{exch}"
+    attempted_urls = []
+    for symbol, exch, quote in _gf_candidate_quotes(ticker):
+        url = f"https://www.google.com/finance/quote/{quote}?hl=en"
+        attempted_urls.append(url)
         try:
-            resp = _requests.get(url, headers=headers, timeout=5)
+            resp = _requests.get(url, headers=headers, timeout=10)
             if resp.status_code != 200:
                 continue
             
             soup = _BS(resp.text, "html.parser")
             
-            # 1. Price (using the selector found)
-            price_el = soup.select_one("div.N6SYTe")
-            price = price_el.text.strip() if price_el else "N/A"
+            price = _gf_first_text(soup, [
+                "div.YMlKec.fxKbKc",
+                "div.YMlKec",
+                "div.N6SYTe",
+                'div[jsname="ip75Cb"]',
+            ]) or "N/A"
+            company_name = _gf_first_text(soup, [
+                "div.zzDege",
+                "div.PZPZlf",
+                "h1",
+            ])
+            exchange_line = _gf_first_text(soup, [
+                "div.TgMHGc",
+                "div.e1AOyf",
+                "div.ygUjEc",
+            ])
+            change_text = _gf_first_text(soup, [
+                "div.JwB6zf",
+                "span.WlRRw",
+                "span.P2Luy",
+                "div[jsname='Fe7oBc']",
+            ])
             
-            # 2. About
-            about_el = soup.select_one("div.u3xNFb")
-            about = about_el.text.strip() if about_el else "N/A"
+            about = _gf_first_text(soup, [
+                "div.u3xNFb",
+                "div.bLLb2d",
+                "section div[jsname] div",
+            ]) or "N/A"
             
-            # 3. Key Stats
-            stats = {}
-            labels = soup.select("div.SwQK7")
-            values = soup.select("div.dO6ijd")
-            
-            for l, v in zip(labels, values):
-                stats[l.text.strip()] = v.text.strip()
+            stats = _gf_extract_stats(soup)
+            normalized_stats = _gf_normalize_stats(stats)
+            news = _gf_extract_news(soup)
+            peers = _gf_extract_peers(soup, symbol)
+            financials = _gf_scrape_financials_page(quote, headers, attempted_urls)
+            financial_rows = financials.get("rows") if isinstance(financials, dict) else []
+            earnings = _gf_extract_earnings(
+                financial_rows if isinstance(financial_rows, list) else [],
+                stats,
+            )
                 
-            if price == "N/A" and not stats:
+            if price == "N/A" and not stats and not about:
                 continue 
+
+            market_cap = normalized_stats.get("marketCap", {}).get("value")
+            pe_ratio = normalized_stats.get("peRatio", {}).get("value")
+            dividend_yield = normalized_stats.get("dividendYield", {}).get("value")
+            employees = normalized_stats.get("employees", {}).get("value")
                 
             return {
-                "symbol": ticker,
+                "symbol": symbol,
+                "query": ticker,
+                "quote": quote,
                 "exchange": exch,
+                "name": company_name,
                 "price": price,
+                "priceValue": _gf_number(price),
+                "change": change_text,
+                "exchangeLine": exchange_line,
                 "description": about,
                 "stats": stats,
+                "normalizedStats": normalized_stats,
+                "financials": financials,
+                "earnings": earnings,
+                "marketCap": market_cap,
+                "peRatio": pe_ratio,
+                "dividendYield": dividend_yield,
+                "employees": employees,
+                "news": news,
+                "peers": peers,
+                "url": url,
+                "attemptedUrls": attempted_urls,
                 "source": "Google Finance",
                 "timestamp": datetime.now(timezone.utc).isoformat()
             }
@@ -1159,8 +1910,12 @@ def _scrape_google_finance_safe(ticker: str, raise_on_error: bool = False):
             continue
             
     if raise_on_error:
-        raise HTTPException(status_code=404, detail=f"Google Finance data not found for {ticker}. {str(last_err)}")
-    return {}
+        raise HTTPException(status_code=404, detail={
+            "message": f"Google Finance data not found for {ticker}",
+            "lastError": str(last_err),
+            "attemptedUrls": attempted_urls[:12],
+        })
+    return {"symbol": ticker, "source": "Google Finance", "attemptedUrls": attempted_urls, "error": str(last_err) if last_err else None}
 
 
 # --- Register Routers ---
