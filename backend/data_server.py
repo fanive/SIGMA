@@ -630,52 +630,114 @@ async def get_equity_financials(symbol: str):
 # ---------------------------------------------------------------------------
 # /analysis/{symbol} — analyst targets, recommendations, earnings estimates
 # ---------------------------------------------------------------------------
+
+def _intelligence_fetch_yf(sym: str) -> dict:
+    """Fetch yfinance analyst/earnings data. Called in a thread with timeout."""
+    t = yf.Ticker(sym)
+    info = _yf_get(lambda: t.info, {}) or {}
+
+    analyst_targets = _clean(_yf_get(lambda: t.analyst_price_targets, {})) or {}
+    if not analyst_targets:
+        analyst_targets = _target_fallback_from_info(info)
+
+    recommendations = _df_to_list(_yf_get(lambda: t.recommendations, None), limit=10)
+    recommendations_summary = _df_to_list(_yf_get(lambda: t.recommendations_summary, None), limit=10)
+    if not recommendations_summary:
+        recommendations_summary = _recommendation_fallback_from_info(info)
+
+    upgrades_downgrades = _df_to_list(_yf_get(lambda: t.upgrades_downgrades, None), limit=15)
+    earnings_history = _df_to_list(_yf_get(lambda: t.earnings_history, None), limit=8)
+    earnings_estimate = _df_to_list(_yf_get(lambda: t.earnings_estimate, None))
+    revenue_estimate = _df_to_list(_yf_get(lambda: t.revenue_estimate, None))
+    eps_trend = _df_to_list(_yf_get(lambda: t.eps_trend, None))
+    eps_revisions = _df_to_list(_yf_get(lambda: t.eps_revisions, None))
+    growth_estimates = _df_to_list(_yf_get(lambda: t.growth_estimates, None))
+    earnings_dates = _df_to_list(_yf_get(lambda: t.get_earnings_dates(limit=16), None), limit=16)
+
+    return {
+        "info": info,
+        "analyst_targets": analyst_targets,
+        "recommendations": recommendations,
+        "recommendations_summary": recommendations_summary,
+        "upgrades_downgrades": upgrades_downgrades,
+        "earnings_history": earnings_history,
+        "earnings_estimate": earnings_estimate,
+        "revenue_estimate": revenue_estimate,
+        "eps_trend": eps_trend,
+        "eps_revisions": eps_revisions,
+        "growth_estimates": growth_estimates,
+        "earnings_dates": earnings_dates,
+    }
+
+
+def _intelligence_fetch_google(sym: str) -> dict:
+    """Fetch Google Finance data. Called in a thread with timeout."""
+    try:
+        return _scrape_google_finance_safe(sym) or {}
+    except Exception:
+        return {}
+
+
+def _intelligence_fetch_sec(sym: str) -> dict:
+    """Fetch SEC derived data. Called in a thread with timeout."""
+    return _sec_intelligence_fallback(sym)
+
+
 @equities_router.get("/{symbol}/intelligence")
 async def get_equity_intelligence(symbol: str):
-    """Analyst intelligence plus fallback signals from profile, SEC and Google Finance. Cached 4h."""
+    """Analyst intelligence with parallel fallback from profile, SEC, and Google Finance. Cached 4h."""
     sym = symbol.upper().strip()
 
     def _fetch():
-        t = yf.Ticker(sym)
-        info = _yf_get(lambda: t.info, {}) or {}
-        google = _yf_get(lambda: _scrape_google_finance_safe(sym), {}) or {}
-        sec = _sec_intelligence_fallback(sym)
+        import concurrent.futures
+
+        # Run the three slow sources in parallel with per-source timeouts.
+        # yfinance is the primary; Google + SEC are enrichment only.
+        # Individual timeouts ensure a single slow source cannot kill the worker.
+        with concurrent.futures.ThreadPoolExecutor(max_workers=3) as pool:
+            fut_yf = pool.submit(_intelligence_fetch_yf, sym)
+            fut_gf = pool.submit(_intelligence_fetch_google, sym)
+            fut_sec = pool.submit(_intelligence_fetch_sec, sym)
+
+            try:
+                yf_data = fut_yf.result(timeout=25)
+            except Exception:
+                yf_data = {}
+
+            try:
+                google = fut_gf.result(timeout=10)
+            except Exception:
+                google = {}
+
+            try:
+                sec = fut_sec.result(timeout=12)
+            except Exception:
+                sec = {}
+
+        info = yf_data.get("info", {})
         sec_derived = sec.get("derived", {}) if isinstance(sec, dict) else {}
         google_earnings = google.get("earnings", {}) if isinstance(google, dict) else {}
 
-        analyst_targets = _clean(_yf_get(lambda: t.analyst_price_targets, {})) or {}
-        if not analyst_targets:
-            analyst_targets = _target_fallback_from_info(info)
-
-        recommendations = _df_to_list(_yf_get(lambda: t.recommendations, None), limit=10)
-        recommendations_summary = _df_to_list(_yf_get(lambda: t.recommendations_summary, None), limit=10)
-        if not recommendations_summary:
-            recommendations_summary = _recommendation_fallback_from_info(info)
-
-        upgrades_downgrades = _df_to_list(_yf_get(lambda: t.upgrades_downgrades, None), limit=15)
-        earnings_history = _df_to_list(_yf_get(lambda: t.earnings_history, None), limit=8)
-        earnings_estimate = _df_to_list(_yf_get(lambda: t.earnings_estimate, None))
-        revenue_estimate = _df_to_list(_yf_get(lambda: t.revenue_estimate, None))
-        eps_trend = _df_to_list(_yf_get(lambda: t.eps_trend, None))
-        eps_revisions = _df_to_list(_yf_get(lambda: t.eps_revisions, None))
-        growth_estimates = _df_to_list(_yf_get(lambda: t.growth_estimates, None))
+        analyst_targets = yf_data.get("analyst_targets", {})
+        recommendations = yf_data.get("recommendations", [])
+        recommendations_summary = yf_data.get("recommendations_summary", [])
+        growth_estimates = yf_data.get("growth_estimates", [])
         if not growth_estimates:
             growth_estimates = _growth_fallbacks(info, sec_derived, google_earnings)
-        earnings_dates = _df_to_list(_yf_get(lambda: t.get_earnings_dates(limit=16), None), limit=16)
 
         return {
             "symbol": sym,
             "analystPriceTargets": analyst_targets,
             "recommendations": recommendations,
             "recommendationsSummary": recommendations_summary,
-            "upgradesDowngrades": upgrades_downgrades,
-            "earningsHistory": earnings_history,
-            "earningsEstimate": earnings_estimate,
-            "revenueEstimate": revenue_estimate,
-            "epsTrend": eps_trend,
-            "epsRevisions": eps_revisions,
+            "upgradesDowngrades": yf_data.get("upgrades_downgrades", []),
+            "earningsHistory": yf_data.get("earnings_history", []),
+            "earningsEstimate": yf_data.get("earnings_estimate", []),
+            "revenueEstimate": yf_data.get("revenue_estimate", []),
+            "epsTrend": yf_data.get("eps_trend", []),
+            "epsRevisions": yf_data.get("eps_revisions", []),
             "growthEstimates": growth_estimates,
-            "earningsDates": earnings_dates,
+            "earningsDates": yf_data.get("earnings_dates", []),
             "profileSignals": _info_signal_pack(info),
             "fallbackSignals": {
                 "target": _target_fallback_from_info(info),
@@ -701,7 +763,7 @@ async def get_equity_intelligence(symbol: str):
             "dataSources": {
                 "yfinanceAnalystTargets": bool(analyst_targets),
                 "yfinanceRecommendations": bool(recommendations or recommendations_summary),
-                "yfinanceEarningsEstimates": bool(earnings_estimate),
+                "yfinanceEarningsEstimates": bool(yf_data.get("earnings_estimate")),
                 "profileInfoFallback": bool(info),
                 "googleFinanceFallback": bool(google and not google.get("error")),
                 "secFallback": bool(sec_derived),
