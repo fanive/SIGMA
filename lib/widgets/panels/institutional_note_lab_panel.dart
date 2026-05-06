@@ -4589,6 +4589,11 @@ class _TickerFieldState extends State<_TickerField> {
                           (freshOption['logo'] ?? freshOption['logoUrl'])
                               ?.toString();
 
+                      final exchange = (freshOption['stockExchange'] ??
+                              freshOption['exchangeShortName'] ??
+                              freshOption['exchange'] ??
+                              '')
+                          .toString();
                       return InkWell(
                         onTap: () => onSelected(option),
                         child: Padding(
@@ -4601,15 +4606,54 @@ class _TickerFieldState extends State<_TickerField> {
                               TickerLogoThumb(symbol: symbol, logoUrl: logoUrl),
                               const SizedBox(width: 10),
                               Expanded(
-                                child: Text(
-                                  name,
-                                  maxLines: 1,
-                                  overflow: TextOverflow.ellipsis,
-                                  style: GoogleFonts.lora(
-                                    fontSize: 13,
-                                    color: txClr,
-                                    fontWeight: FontWeight.w600,
-                                  ),
+                                child: Column(
+                                  crossAxisAlignment:
+                                      CrossAxisAlignment.start,
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    Row(
+                                      children: [
+                                        Text(
+                                          symbol,
+                                          style: GoogleFonts.lora(
+                                            fontSize: 13,
+                                            color: txClr,
+                                            fontWeight: FontWeight.w800,
+                                            letterSpacing: 0.4,
+                                          ),
+                                        ),
+                                        if (exchange.isNotEmpty) ...[
+                                          const SizedBox(width: 6),
+                                          Flexible(
+                                            child: Text(
+                                              exchange.toUpperCase(),
+                                              maxLines: 1,
+                                              overflow: TextOverflow.ellipsis,
+                                              style: GoogleFonts.lora(
+                                                fontSize: 9,
+                                                color: hnClr,
+                                                fontWeight: FontWeight.w600,
+                                                letterSpacing: 0.6,
+                                              ),
+                                            ),
+                                          ),
+                                        ],
+                                      ],
+                                    ),
+                                    if (name.isNotEmpty) ...[
+                                      const SizedBox(height: 2),
+                                      Text(
+                                        name,
+                                        maxLines: 1,
+                                        overflow: TextOverflow.ellipsis,
+                                        style: GoogleFonts.lora(
+                                          fontSize: 11,
+                                          color: hnClr,
+                                          fontWeight: FontWeight.w500,
+                                        ),
+                                      ),
+                                    ],
+                                  ],
                                 ),
                               ),
                             ],
