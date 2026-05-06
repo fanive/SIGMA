@@ -142,10 +142,10 @@ String _buildExecutiveSummary(AnalysisData a) {
     final sentences = <String>[];
     if (ks.marketCap > 0) {
       final mcap = ks.marketCap >= 1e12
-          ? '\${(ks.marketCap / 1e12).toStringAsFixed(1)}T'
+          ? '\$${(ks.marketCap / 1e12).toStringAsFixed(1)}T'
           : ks.marketCap >= 1e9
-              ? '\${(ks.marketCap / 1e9).toStringAsFixed(1)}Md'
-              : '\${(ks.marketCap / 1e6).toStringAsFixed(0)}M';
+              ? '\$${(ks.marketCap / 1e9).toStringAsFixed(1)}Md'
+              : '\$${(ks.marketCap / 1e6).toStringAsFixed(0)}M';
       sentences.add('Cap. boursière : $mcap');
     }
     if (ks.trailingPE > 0 && ks.trailingPE < 999) {
@@ -174,7 +174,7 @@ String _buildExecutiveSummary(AnalysisData a) {
     final upside = ((target - current) / current * 100);
     final direction = upside >= 0 ? 'potentiel haussier' : 'risque baissier';
     parts.add(
-        'Objectif de cours : \${target.toStringAsFixed(2)}, soit un $direction de ${upside.abs().toStringAsFixed(1)}% par rapport au cours actuel.');
+        'Objectif de cours : \$${target.toStringAsFixed(2)}, soit un $direction de ${upside.abs().toStringAsFixed(1)}% par rapport au cours actuel.');
   }
 
   // Sentence 4 — catalysts + risk
