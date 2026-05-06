@@ -1093,8 +1093,6 @@ class _MarketOverviewPanelState extends State<MarketOverviewPanel> {
 
   Widget _bimSentimentIntelligence(
       MarketOverview overview, BuildContext context) {
-    print(
-        '?? Rendering SentimentIntelligence: backtest=${overview.backtest != null}, sectors=${overview.sectorSentiment != null}');
     if (overview.backtest == null && overview.sectorSentiment == null) {
       return const SizedBox.shrink();
     }

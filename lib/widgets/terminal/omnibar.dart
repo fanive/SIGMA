@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:speech_to_text/speech_to_text.dart' as stt;
+import 'package:speech_to_text/speech_to_text.dart' show SpeechListenOptions;
 import '../../utils/logo_resolver.dart';
 import '../../providers/sigma_provider.dart';
 import '../../providers/terminal_provider.dart';
@@ -180,7 +181,7 @@ class _OmnibarState extends State<Omnibar> with SingleTickerProviderStateMixin {
       localeId: lang == 'FR' ? 'fr_FR' : 'en_US',
       listenFor: const Duration(hours: 1),
       pauseFor: const Duration(seconds: 30),
-      partialResults: true,
+      listenOptions: SpeechListenOptions(partialResults: true),
     );
   }
 
