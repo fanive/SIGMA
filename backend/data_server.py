@@ -62,7 +62,12 @@ def _is_rate_limit(exc: Exception) -> bool:
     return any(p in str(exc).lower() for p in _RATE_LIMIT_PHRASES)
 
 
-def _cached(cache: TTLCache, key: str, fn, retries: int = 2, backoff: float = 1.5):
+class RateLimitError(Exception):
+    """Raised by _cached when yfinance rate-limits and no stale data is available."""
+    pass
+
+
+def _cached(cache: TTLCache, key: str, fn, retries: int = 3, backoff: float = 2.5):
     """Thread-safe cache get-or-set with retry and stale fallback on rate limit."""
     # Namespace stale keys by cache instance to avoid cross-endpoint data collisions.
     stale_key = f"{id(cache)}:{key}"
@@ -87,7 +92,8 @@ def _cached(cache: TTLCache, key: str, fn, retries: int = 2, backoff: float = 1.
                     time.sleep(backoff * (attempt + 1))
             else:
                 raise  # non-rate-limit errors bubble up immediately
-    raise last_exc
+    # All retries exhausted under rate limit — raise typed error so endpoints can return 429
+    raise RateLimitError(str(last_exc))
 
 
 def _safe(val, default=None):
@@ -497,6 +503,8 @@ async def get_equity_financials(symbol: str):
 
     try:
         return _cached(_cache_financials, sym, _fetch)
+    except RateLimitError as e:
+        raise HTTPException(status_code=429, detail={"error": "rate_limited", "symbol": sym, "message": str(e), "retryAfter": 60})
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"financials failed for {sym}: {e}")
 
@@ -511,16 +519,16 @@ async def get_equity_intelligence(symbol: str):
 
     def _fetch():
         t = yf.Ticker(sym)
-        # Pruned: only research-specific data
+        # Each property wrapped in _yf_get so a single rate-limit doesn't kill everything
         return {
             "symbol": sym,
-            "analystPriceTargets": _clean(t.analyst_price_targets),
-            "recommendations": _df_to_list(t.recommendations, limit=10),
+            "analystPriceTargets": _clean(_yf_get(lambda: t.analyst_price_targets, {})),
+            "recommendations": _df_to_list(_yf_get(lambda: t.recommendations, None), limit=10),
             "recommendationsSummary": _df_to_list(_yf_get(lambda: t.recommendations_summary, None), limit=10),
-            "upgradesDowngrades": _df_to_list(t.upgrades_downgrades, limit=15),
-            "earningsHistory": _df_to_list(t.earnings_history, limit=8),
-            "earningsEstimate": _df_to_list(t.earnings_estimate),
-            "revenueEstimate": _df_to_list(t.revenue_estimate),
+            "upgradesDowngrades": _df_to_list(_yf_get(lambda: t.upgrades_downgrades, None), limit=15),
+            "earningsHistory": _df_to_list(_yf_get(lambda: t.earnings_history, None), limit=8),
+            "earningsEstimate": _df_to_list(_yf_get(lambda: t.earnings_estimate, None)),
+            "revenueEstimate": _df_to_list(_yf_get(lambda: t.revenue_estimate, None)),
             "epsTrend": _df_to_list(_yf_get(lambda: t.eps_trend, None)),
             "epsRevisions": _df_to_list(_yf_get(lambda: t.eps_revisions, None)),
             "growthEstimates": _df_to_list(_yf_get(lambda: t.growth_estimates, None)),
@@ -530,6 +538,8 @@ async def get_equity_intelligence(symbol: str):
 
     try:
         return _cached(_cache_analysis, sym, _fetch)
+    except RateLimitError as e:
+        raise HTTPException(status_code=429, detail={"error": "rate_limited", "symbol": sym, "message": str(e), "retryAfter": 60})
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"analysis failed for {sym}: {e}")
 
@@ -562,6 +572,8 @@ async def get_equity_ownership(symbol: str):
 
     try:
         return _cached(_cache_ownership, sym, _fetch)
+    except RateLimitError as e:
+        raise HTTPException(status_code=429, detail={"error": "rate_limited", "symbol": sym, "message": str(e), "retryAfter": 60})
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"ownership failed for {sym}: {e}")
 
@@ -631,6 +643,8 @@ async def get_equity_yfinance_coverage(symbol: str):
 
     try:
         return _cached(_cache_coverage, sym, _fetch)
+    except RateLimitError as e:
+        raise HTTPException(status_code=429, detail={"error": "rate_limited", "symbol": sym, "message": str(e), "retryAfter": 60})
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"yfinance coverage failed for {sym}: {e}")
 
@@ -663,6 +677,8 @@ async def get_equity_options(symbol: str, expiration: str | None = Query(default
 
     try:
         return _cached(_cache_options, cache_key, _fetch)
+    except RateLimitError as e:
+        raise HTTPException(status_code=429, detail={"error": "rate_limited", "symbol": sym, "message": str(e), "retryAfter": 60})
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"options failed for {sym}: {e}")
 
@@ -687,6 +703,8 @@ async def get_equity_events(symbol: str):
 
     try:
         return _cached(_cache_events, sym, _fetch)
+    except RateLimitError as e:
+        raise HTTPException(status_code=429, detail={"error": "rate_limited", "symbol": sym, "message": str(e), "retryAfter": 60})
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"events failed for {sym}: {e}")
 
@@ -722,6 +740,8 @@ async def get_equity_news(symbol: str):
 
     try:
         return _cached(_cache_news, sym, _fetch)
+    except RateLimitError as e:
+        raise HTTPException(status_code=429, detail={"error": "rate_limited", "symbol": sym, "message": str(e), "retryAfter": 60})
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"news failed for {sym}: {e}")
 
@@ -786,6 +806,8 @@ async def get_equity_history(symbol: str, range: str = "1mo", interval: str = "1
 
     try:
         return _cached(_cache_history, cache_key, _fetch)
+    except RateLimitError as e:
+        raise HTTPException(status_code=429, detail={"error": "rate_limited", "symbol": sym, "message": str(e), "retryAfter": 60})
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"history failed for {sym}: {e}")
 
@@ -1068,6 +1090,8 @@ async def get_equity_insider(symbol: str, days: int = Query(default=365, ge=1, l
 
     try:
         return _cached(_cache_insider, cache_key, _fetch)
+    except RateLimitError as e:
+        raise HTTPException(status_code=429, detail={"error": "rate_limited", "symbol": sym, "message": str(e), "retryAfter": 60})
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"insider fetch failed for {sym}: {e}")
 
