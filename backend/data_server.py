@@ -241,6 +241,124 @@ def _shares_full_to_list(ticker_obj, limit: int = 60) -> list[dict[str, Any]]:
     return []
 
 
+def _limited_list(value, limit: int = 20) -> list:
+    return value[:limit] if isinstance(value, list) else []
+
+
+def _info_signal_pack(info: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "currentPrice": _safe(info.get("currentPrice") or info.get("regularMarketPrice")),
+        "targetHighPrice": _safe(info.get("targetHighPrice")),
+        "targetLowPrice": _safe(info.get("targetLowPrice")),
+        "targetMeanPrice": _safe(info.get("targetMeanPrice")),
+        "targetMedianPrice": _safe(info.get("targetMedianPrice")),
+        "recommendationMean": _safe(info.get("recommendationMean")),
+        "recommendationKey": _safe(info.get("recommendationKey")),
+        "numberOfAnalystOpinions": _safe(info.get("numberOfAnalystOpinions")),
+        "earningsGrowth": _safe(info.get("earningsGrowth")),
+        "revenueGrowth": _safe(info.get("revenueGrowth")),
+        "pegRatio": _safe(info.get("pegRatio") or info.get("trailingPegRatio")),
+        "forwardPE": _safe(info.get("forwardPE")),
+        "trailingPE": _safe(info.get("trailingPE")),
+        "enterpriseToRevenue": _safe(info.get("enterpriseToRevenue")),
+        "enterpriseToEbitda": _safe(info.get("enterpriseToEbitda")),
+        "grossMargins": _safe(info.get("grossMargins")),
+        "operatingMargins": _safe(info.get("operatingMargins")),
+        "profitMargins": _safe(info.get("profitMargins")),
+        "returnOnAssets": _safe(info.get("returnOnAssets")),
+        "returnOnEquity": _safe(info.get("returnOnEquity")),
+        "freeCashflow": _safe(info.get("freeCashflow")),
+        "operatingCashflow": _safe(info.get("operatingCashflow")),
+        "totalDebt": _safe(info.get("totalDebt")),
+        "totalCash": _safe(info.get("totalCash")),
+        "shortRatio": _safe(info.get("shortRatio")),
+        "shortPercentOfFloat": _safe(info.get("shortPercentOfFloat")),
+    }
+
+
+def _target_fallback_from_info(info: dict[str, Any]) -> dict[str, Any]:
+    targets = {
+        "current": _safe(info.get("currentPrice") or info.get("regularMarketPrice")),
+        "low": _safe(info.get("targetLowPrice")),
+        "mean": _safe(info.get("targetMeanPrice")),
+        "median": _safe(info.get("targetMedianPrice")),
+        "high": _safe(info.get("targetHighPrice")),
+        "numberOfAnalysts": _safe(info.get("numberOfAnalystOpinions")),
+        "source": "yfinance.info",
+    }
+    return {k: v for k, v in targets.items() if v is not None}
+
+
+def _recommendation_fallback_from_info(info: dict[str, Any]) -> list[dict[str, Any]]:
+    key = info.get("recommendationKey")
+    mean = info.get("recommendationMean")
+    count = info.get("numberOfAnalystOpinions")
+    if key is None and mean is None and count is None:
+        return []
+    return [{
+        "period": "current",
+        "rating": _safe(key),
+        "mean": _safe(mean),
+        "numberOfAnalystOpinions": _safe(count),
+        "source": "yfinance.info",
+    }]
+
+
+def _growth_fallbacks(info: dict[str, Any], sec_derived: dict[str, Any], google_earnings: dict[str, Any]) -> list[dict[str, Any]]:
+    rows: list[dict[str, Any]] = []
+    for key, label in (
+        ("earningsGrowth", "Earnings growth"),
+        ("revenueGrowth", "Revenue growth"),
+    ):
+        value = info.get(key)
+        if value is not None:
+            rows.append({"metric": label, "value": _safe(value), "source": "yfinance.info"})
+
+    for key, label in (
+        ("revenue_yoy_growth_pct", "SEC revenue YoY growth"),
+        ("net_income_yoy_growth_pct", "SEC net income YoY growth"),
+        ("operating_income_yoy_growth_pct", "SEC operating income YoY growth"),
+    ):
+        value = sec_derived.get(key)
+        if value is not None:
+            rows.append({"metric": label, "value": value, "source": "sec.gov/edgar"})
+
+    if google_earnings:
+        rows.append({"metric": "Google Finance earnings", "value": google_earnings, "source": "Google Finance"})
+    return rows
+
+
+def _sec_intelligence_fallback(sym: str) -> dict[str, Any]:
+    try:
+        cik = _load_cik_map().get(sym)
+        if not cik:
+            return {}
+        url = f"https://data.sec.gov/api/xbrl/companyfacts/CIK{cik}.json"
+        resp = _requests.get(url, headers=_EDGAR_HEADERS, timeout=20)
+        resp.raise_for_status()
+        facts_json = resp.json()
+
+        extracted: dict[str, list] = {}
+        revenue_filled = False
+        for label, taxonomy, concept in _EDGAR_FACTS:
+            if label == "revenue" and revenue_filled:
+                continue
+            series = _extract_edgar_series(facts_json, taxonomy, concept)
+            if series:
+                extracted[label] = series
+                if label == "revenue":
+                    revenue_filled = True
+
+        return {
+            "cik": cik,
+            "entityName": facts_json.get("entityName", sym),
+            "derived": _compute_sec_derived(extracted),
+            "source": "sec.gov/edgar",
+        }
+    except Exception as exc:
+        return {"error": str(exc), "source": "sec.gov/edgar"}
+
+
 def _domain_from_website(website: str | None) -> str | None:
     if not website:
         return None
@@ -514,26 +632,81 @@ async def get_equity_financials(symbol: str):
 # ---------------------------------------------------------------------------
 @equities_router.get("/{symbol}/intelligence")
 async def get_equity_intelligence(symbol: str):
-    """Analyst price targets, recommendations, earnings/revenue estimates. Cached 4h."""
+    """Analyst intelligence plus fallback signals from profile, SEC and Google Finance. Cached 4h."""
     sym = symbol.upper().strip()
 
     def _fetch():
         t = yf.Ticker(sym)
-        # Each property wrapped in _yf_get so a single rate-limit doesn't kill everything
+        info = _yf_get(lambda: t.info, {}) or {}
+        google = _yf_get(lambda: _scrape_google_finance_safe(sym), {}) or {}
+        sec = _sec_intelligence_fallback(sym)
+        sec_derived = sec.get("derived", {}) if isinstance(sec, dict) else {}
+        google_earnings = google.get("earnings", {}) if isinstance(google, dict) else {}
+
+        analyst_targets = _clean(_yf_get(lambda: t.analyst_price_targets, {})) or {}
+        if not analyst_targets:
+            analyst_targets = _target_fallback_from_info(info)
+
+        recommendations = _df_to_list(_yf_get(lambda: t.recommendations, None), limit=10)
+        recommendations_summary = _df_to_list(_yf_get(lambda: t.recommendations_summary, None), limit=10)
+        if not recommendations_summary:
+            recommendations_summary = _recommendation_fallback_from_info(info)
+
+        upgrades_downgrades = _df_to_list(_yf_get(lambda: t.upgrades_downgrades, None), limit=15)
+        earnings_history = _df_to_list(_yf_get(lambda: t.earnings_history, None), limit=8)
+        earnings_estimate = _df_to_list(_yf_get(lambda: t.earnings_estimate, None))
+        revenue_estimate = _df_to_list(_yf_get(lambda: t.revenue_estimate, None))
+        eps_trend = _df_to_list(_yf_get(lambda: t.eps_trend, None))
+        eps_revisions = _df_to_list(_yf_get(lambda: t.eps_revisions, None))
+        growth_estimates = _df_to_list(_yf_get(lambda: t.growth_estimates, None))
+        if not growth_estimates:
+            growth_estimates = _growth_fallbacks(info, sec_derived, google_earnings)
+        earnings_dates = _df_to_list(_yf_get(lambda: t.get_earnings_dates(limit=16), None), limit=16)
+
         return {
             "symbol": sym,
-            "analystPriceTargets": _clean(_yf_get(lambda: t.analyst_price_targets, {})),
-            "recommendations": _df_to_list(_yf_get(lambda: t.recommendations, None), limit=10),
-            "recommendationsSummary": _df_to_list(_yf_get(lambda: t.recommendations_summary, None), limit=10),
-            "upgradesDowngrades": _df_to_list(_yf_get(lambda: t.upgrades_downgrades, None), limit=15),
-            "earningsHistory": _df_to_list(_yf_get(lambda: t.earnings_history, None), limit=8),
-            "earningsEstimate": _df_to_list(_yf_get(lambda: t.earnings_estimate, None)),
-            "revenueEstimate": _df_to_list(_yf_get(lambda: t.revenue_estimate, None)),
-            "epsTrend": _df_to_list(_yf_get(lambda: t.eps_trend, None)),
-            "epsRevisions": _df_to_list(_yf_get(lambda: t.eps_revisions, None)),
-            "growthEstimates": _df_to_list(_yf_get(lambda: t.growth_estimates, None)),
-            "earningsDates": _df_to_list(_yf_get(lambda: t.get_earnings_dates(limit=16), None), limit=16),
-            "source": "yfinance",
+            "analystPriceTargets": analyst_targets,
+            "recommendations": recommendations,
+            "recommendationsSummary": recommendations_summary,
+            "upgradesDowngrades": upgrades_downgrades,
+            "earningsHistory": earnings_history,
+            "earningsEstimate": earnings_estimate,
+            "revenueEstimate": revenue_estimate,
+            "epsTrend": eps_trend,
+            "epsRevisions": eps_revisions,
+            "growthEstimates": growth_estimates,
+            "earningsDates": earnings_dates,
+            "profileSignals": _info_signal_pack(info),
+            "fallbackSignals": {
+                "target": _target_fallback_from_info(info),
+                "recommendation": _recommendation_fallback_from_info(info),
+                "growth": _growth_fallbacks(info, sec_derived, google_earnings),
+            },
+            "secDerived": sec_derived,
+            "googleFinance": {
+                "name": google.get("name") if isinstance(google, dict) else None,
+                "priceValue": google.get("priceValue") if isinstance(google, dict) else None,
+                "stats": google.get("stats", {}) if isinstance(google, dict) else {},
+                "normalizedStats": google.get("normalizedStats", {}) if isinstance(google, dict) else {},
+                "earnings": google_earnings,
+                "financials": {
+                    "rows": _limited_list((google.get("financials") or {}).get("rows"), 24)
+                    if isinstance(google, dict) and isinstance(google.get("financials"), dict)
+                    else [],
+                },
+                "peers": _limited_list(google.get("peers"), 12) if isinstance(google, dict) else [],
+                "news": _limited_list(google.get("news"), 8) if isinstance(google, dict) else [],
+                "source": "Google Finance",
+            },
+            "dataSources": {
+                "yfinanceAnalystTargets": bool(analyst_targets),
+                "yfinanceRecommendations": bool(recommendations or recommendations_summary),
+                "yfinanceEarningsEstimates": bool(earnings_estimate),
+                "profileInfoFallback": bool(info),
+                "googleFinanceFallback": bool(google and not google.get("error")),
+                "secFallback": bool(sec_derived),
+            },
+            "source": "yfinance+profile+google-finance+sec",
         }
 
     try:
