@@ -11,12 +11,8 @@ import '../utils/logo_resolver.dart';
 /// To switch URL: replace _base with your HF Space URL below.
 /// ═══════════════════════════════════════════════════════════════════════════
 class SigmaApiService {
-  // ── Backend URL — update after deploying to Hugging Face Spaces ──────────
-  // Old Render URL (cold-start issues):
-  //   https://sigma-yfinance-api.onrender.com
-  // New HF Spaces URL (replace YOUR_USERNAME with your HF username):
-  //   https://YOUR_USERNAME-sigma-api.hf.space
-  static const String _base = 'https://sigma-yfinance-api.onrender.com';
+  // ── Backend URL — Hugging Face Spaces (always-on, no cold starts) ────────
+  static const String _base = 'https://fanive-sigma-api.hf.space';
   // Render free tier cold-start can take 60-90s; we also add one retry below.
   static const Duration _timeout = Duration(seconds: 90);
 
