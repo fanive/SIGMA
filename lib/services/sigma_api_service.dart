@@ -7,10 +7,15 @@ import '../utils/logo_resolver.dart';
 /// ═══════════════════════════════════════════════════════════════════════════
 /// SIGMA API Service — Single source of truth for all financial data
 /// ═══════════════════════════════════════════════════════════════════════════
-/// All market data comes from https://sigma-yfinance-api.onrender.com/
-/// No external API keys required.
+/// Backend hosted on Hugging Face Spaces (Docker) — always-on, no cold starts.
+/// To switch URL: replace _base with your HF Space URL below.
 /// ═══════════════════════════════════════════════════════════════════════════
 class SigmaApiService {
+  // ── Backend URL — update after deploying to Hugging Face Spaces ──────────
+  // Old Render URL (cold-start issues):
+  //   https://sigma-yfinance-api.onrender.com
+  // New HF Spaces URL (replace YOUR_USERNAME with your HF username):
+  //   https://YOUR_USERNAME-sigma-api.hf.space
   static const String _base = 'https://sigma-yfinance-api.onrender.com';
   // Render free tier cold-start can take 60-90s; we also add one retry below.
   static const Duration _timeout = Duration(seconds: 90);
