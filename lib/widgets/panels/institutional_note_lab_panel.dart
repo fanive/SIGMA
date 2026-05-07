@@ -395,6 +395,22 @@ bool _hasText(String? v) {
       !u.startsWith('EN ATTENTE');
 }
 
+bool _hasAnalystConsensus(AnalysisData a) {
+  final r = a.analystRecommendations;
+  return r.strongBuy + r.buy + r.hold + r.sell + r.strongSell > 0;
+}
+
+bool _hasOwnershipSignals(AnalysisData a) {
+  final h = a.holders;
+  return (h?.institutionsPercent ?? 0) != 0 ||
+      (h?.insidersPercent ?? 0) != 0 ||
+      (h?.institutionsCount ?? 0) > 0 ||
+      a.institutionalActivity.smartMoneySentiment != 0 ||
+      a.institutionalActivity.retailSentiment != 0 ||
+      (a.socialSentiment?.mentions ?? 0) > 0 ||
+      (a.insiderBuyRatio ?? 0) > 0;
+}
+
 Color _verdictColor(String v) {
   final u = v.toUpperCase();
   if (u.contains('BUY') || u.contains('ACHAT') || u.contains('SURPERF')) {
@@ -939,19 +955,19 @@ class _ResearchNoteScroll extends StatelessWidget {
           child: _TechnicalSignalsBlock(a: a, isDark: isDark),
         ),
 
-        // 7. Analyst consensus (report-style)
-        _Section(
-          isDark: isDark,
-          label: 'ANALYST CONSENSUS',
-          child: _AnalystConsensusBlock(a: a, isDark: isDark),
-        ),
+        if (_hasAnalystConsensus(a))
+          _Section(
+            isDark: isDark,
+            label: 'ANALYST CONSENSUS',
+            child: _AnalystConsensusBlock(a: a, isDark: isDark),
+          ),
 
-        // 8. Ownership and flows (report-style)
-        _Section(
-          isDark: isDark,
-          label: 'OWNERSHIP & FLOWS',
-          child: _OwnershipFlowBlock(a: a, isDark: isDark),
-        ),
+        if (_hasOwnershipSignals(a))
+          _Section(
+            isDark: isDark,
+            label: 'OWNERSHIP & FLOWS',
+            child: _OwnershipFlowBlock(a: a, isDark: isDark),
+          ),
 
         // 9. Risk Factors
         _Section(
@@ -3028,26 +3044,33 @@ class _AgenticCommitteeBlock extends StatelessWidget {
   Widget build(BuildContext context) {
     final thoughts = a.agenticThoughts;
 
-    // Fallback: If the AI failed to generate 5 thoughts, we build them from available high-signal structured data.
     final List<String> syntheticThoughts = [];
     if (thoughts.length >= 5) {
       syntheticThoughts.addAll(thoughts);
     } else {
-      // Agent 1: Trend
-      syntheticThoughts.add(
-          'Analyse technique: Zone d\'entrée ciblée autour de ${a.tradeSetup.entryZone}. Momentum court-terme avec Stop-Loss à ${a.tradeSetup.stopLoss}.');
-      // Agent 2: Sentiment
-      syntheticThoughts.add(
-          'Sentiment de marché: ${a.fearAndGreed.label.toUpperCase()}. ${_truncate(a.institutionalActivity.darkPoolInterpretation)}');
-      // Agent 3: Fundamentals
+      final current = _parsePrice(a.price);
+      final target =
+          a.targetPriceValue ?? _parsePrice(a.tradeSetup.cleanTargetPrice);
+      final upside = current > 0 && target > 0
+          ? ((target - current) / current * 100).toStringAsFixed(1)
+          : null;
+
+      syntheticThoughts.add(upside != null
+          ? 'Analyse technique: objectif implicite ${upside.startsWith('-') ? '' : '+'}$upside% contre le dernier prix observe.'
+          : 'Analyse technique: surveiller la confirmation du prix et des volumes avant de renforcer.');
+      syntheticThoughts.add(_hasText(
+              a.institutionalActivity.darkPoolInterpretation)
+          ? 'Sentiment de marche: ${_truncate(a.institutionalActivity.darkPoolInterpretation)}'
+          : 'Sentiment de marche: aucun signal institutionnel exploitable ne domine aujourd hui.');
       final pE = a.keyStatistics?.forwardPE ?? 0;
       syntheticThoughts.add(
-          'Fondamentaux: Valorisation ${pE > 0 ? "à $pE P/E Forward." : "en cours d'analyse."} ${_truncate(a.summary)}');
-      // Agent 4: Risk
-      syntheticThoughts.add(
-          'Profil de risque: Niveau ${a.riskLevel.toUpperCase()}. ${_truncate(a.volatility.interpretation)}');
-      // Agent 5: Strategy
-      syntheticThoughts.add('Stratégie: ${_truncate(a.alphaRecommendation)}');
+          'Fondamentaux: ${pE > 0 ? "valorisation a ${pE.toStringAsFixed(1)}x P/E forward." : _truncate(a.summary)}');
+      syntheticThoughts.add(_hasText(a.volatility.interpretation)
+          ? 'Profil de risque: ${a.riskLevel.toUpperCase()}. ${_truncate(a.volatility.interpretation)}'
+          : 'Profil de risque: taille de position a calibrer tant que la volatilite realisee reste incomplete.');
+      syntheticThoughts.add(_hasText(a.alphaRecommendation)
+          ? 'Strategie: ${_truncate(a.alphaRecommendation)}'
+          : 'Strategie: entree progressive, controle du risque, reevaluation apres prochains resultats.');
     }
 
     return Column(
@@ -3350,6 +3373,21 @@ class _TechnicalSignalsBlock extends StatelessWidget {
       fallback.add(_KV('IV rank', a.volatility.ivRank));
     }
 
+    final current = _parsePrice(a.price);
+    final target =
+        a.targetPriceValue ?? _parsePrice(a.tradeSetup.cleanTargetPrice);
+    if (current > 0 && target > 0) {
+      final upside = ((target - current) / current) * 100;
+      fallback.add(_KV('Potentiel cible',
+          '${upside >= 0 ? '+' : ''}${upside.toStringAsFixed(1)}%'));
+    }
+    if (a.sigmaScore > 0) {
+      fallback.add(_KV('Score SIGMA', a.sigmaScore.toStringAsFixed(0)));
+    }
+    if (_hasText(a.riskLevel)) {
+      fallback.add(_KV('Regime de risque', a.riskLevel.toUpperCase()));
+    }
+
     if (fallback.isNotEmpty) {
       return _MetricTable(rows: fallback, isDark: isDark);
     }
@@ -3357,7 +3395,7 @@ class _TechnicalSignalsBlock extends StatelessWidget {
     return _BodyBlock(
       isDark: isDark,
       text:
-          'Signaux techniques indisponibles pour cette analyse. Relancer apres chargement OHLCV complet.',
+          'Le flux OHLCV complet n est pas encore charge; la lecture technique sera enrichie automatiquement des que le graphique sera disponible.',
     );
   }
 }
@@ -4129,6 +4167,8 @@ class _RelativeTable extends StatelessWidget {
                 child: Text(
                   row.leftValue,
                   textAlign: TextAlign.right,
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
                   style: _metricValue(txt),
                 ),
               ),
@@ -4137,6 +4177,8 @@ class _RelativeTable extends StatelessWidget {
                 child: Text(
                   row.rightValue,
                   textAlign: TextAlign.right,
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
                   style: _metricValue(txt),
                 ),
               ),
@@ -4607,8 +4649,7 @@ class _TickerFieldState extends State<_TickerField> {
                               const SizedBox(width: 10),
                               Expanded(
                                 child: Column(
-                                  crossAxisAlignment:
-                                      CrossAxisAlignment.start,
+                                  crossAxisAlignment: CrossAxisAlignment.start,
                                   mainAxisSize: MainAxisSize.min,
                                   children: [
                                     Row(
@@ -4941,6 +4982,28 @@ class _DebateBlock extends StatelessWidget {
 
   const _DebateBlock({required this.a, required this.isDark});
 
+  bool _validNarrative(String? value) {
+    final clean = (value ?? '').trim().toLowerCase();
+    return clean.length > 24 &&
+        !clean.contains('failed to generate') &&
+        clean != '{}' &&
+        clean != '[]';
+  }
+
+  String _fallbackNarrative(List<ProCon> points, bool bull) {
+    final ticker = a.ticker.toUpperCase();
+    final base = bull
+        ? '$ticker presente un cas constructif si les fondamentaux et le consensus confirment le potentiel identifie.'
+        : '$ticker conserve un cas de prudence si la valorisation, les marges ou le momentum se degradent.';
+    final cleanPoints = points
+        .map((p) => _cleanText(p.text))
+        .where(_isUsefulLine)
+        .take(3)
+        .toList(growable: false);
+    if (cleanPoints.isEmpty) return base;
+    return '$base Points cles: ${cleanPoints.join(' ')}';
+  }
+
   Widget _buildPointList(
       String title, List<ProCon> points, Color color, BuildContext context) {
     return Container(
@@ -5013,9 +5076,19 @@ class _DebateBlock extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final sp = context.watch<SigmaProvider>();
-    final hasDebate = a.bullCase != null && a.bearCase != null;
     final bullPoints = _bullCasePoints(a);
     final bearPoints = _bearCasePoints(a);
+    final bullNarrative = _validNarrative(a.bullCase)
+        ? a.bullCase!
+        : _fallbackNarrative(bullPoints, true);
+    final bearNarrative = _validNarrative(a.bearCase)
+        ? a.bearCase!
+        : _fallbackNarrative(bearPoints, false);
+    final narrow = MediaQuery.of(context).size.width < 560;
+    final bullList = _buildPointList('BULL CASE ARGUMENTS',
+        bullPoints.take(5).toList(), AppTheme.positive, context);
+    final bearList = _buildPointList('BEAR CASE ARGUMENTS',
+        bearPoints.take(5).toList(), AppTheme.negative, context);
 
     if (sp.isDebateLoading) {
       return Center(
@@ -5042,79 +5115,52 @@ class _DebateBlock extends StatelessWidget {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        // Structured Table View
-        Row(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Expanded(
-                child: _buildPointList('BULL CASE ARGUMENTS',
-                    bullPoints.take(5).toList(), AppTheme.positive, context)),
-            const SizedBox(width: 1), // Thin divider feel
-            Expanded(
-                child: _buildPointList('BEAR CASE ARGUMENTS',
-                    bearPoints.take(5).toList(), AppTheme.negative, context)),
-          ],
+        if (narrow)
+          Column(
+            children: [
+              bullList,
+              const SizedBox(height: 10),
+              bearList,
+            ],
+          )
+        else
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Expanded(child: bullList),
+              const SizedBox(width: 1),
+              Expanded(child: bearList),
+            ],
+          ),
+        const SizedBox(height: 32),
+        Container(
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+          decoration: BoxDecoration(
+            border: Border(
+                left: BorderSide(
+                    color: isDark ? _kDarkDim : _kLightDim, width: 2)),
+          ),
+          child: Text('EXECUTIVE SUMMARY',
+              style: GoogleFonts.lora(
+                  fontSize: 10,
+                  fontWeight: FontWeight.w800,
+                  color: isDark ? _kDarkDim : _kLightDim,
+                  letterSpacing: 1.5)),
+        ),
+        const SizedBox(height: 24),
+        _PersonaArgument(
+          title: 'INSTITUTIONAL BULL PERSPECTIVE',
+          content: bullNarrative,
+          color: AppTheme.positive,
+          isDark: isDark,
         ),
         const SizedBox(height: 32),
-
-        // Load AI debate if not present
-        if (!hasDebate)
-          Center(
-            child: InkWell(
-              onTap: () => sp.runBullBearDebate(),
-              child: Container(
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 24, vertical: 14),
-                decoration: BoxDecoration(
-                  color: AppTheme.primary.withValues(alpha: 0.05),
-                  border: Border.all(
-                    color: AppTheme.primary.withValues(alpha: 0.3),
-                    width: 0.8,
-                  ),
-                ),
-                child: Text(
-                  'GÉNÉRER LA SYNTHÈSE EXECUTIVE',
-                  style: GoogleFonts.lora(
-                    fontSize: 10,
-                    fontWeight: FontWeight.w800,
-                    letterSpacing: 2.0,
-                    color: AppTheme.primary,
-                  ),
-                ),
-              ),
-            ),
-          )
-        else ...[
-          // Show AI Summaries
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
-            decoration: BoxDecoration(
-              border: Border(
-                  left: BorderSide(
-                      color: isDark ? _kDarkDim : _kLightDim, width: 2)),
-            ),
-            child: Text('EXECUTIVE SUMMARY',
-                style: GoogleFonts.lora(
-                    fontSize: 10,
-                    fontWeight: FontWeight.w800,
-                    color: isDark ? _kDarkDim : _kLightDim,
-                    letterSpacing: 1.5)),
-          ),
-          const SizedBox(height: 24),
-          _PersonaArgument(
-            title: 'INSTITUTIONAL BULL PERSPECTIVE',
-            content: a.bullCase!,
-            color: AppTheme.positive,
-            isDark: isDark,
-          ),
-          const SizedBox(height: 32),
-          _PersonaArgument(
-            title: 'INSTITUTIONAL BEAR PERSPECTIVE',
-            content: a.bearCase!,
-            color: AppTheme.negative,
-            isDark: isDark,
-          ),
-        ],
+        _PersonaArgument(
+          title: 'INSTITUTIONAL BEAR PERSPECTIVE',
+          content: bearNarrative,
+          color: AppTheme.negative,
+          isDark: isDark,
+        ),
       ],
     );
   }
@@ -5189,13 +5235,17 @@ class _PersonaArgument extends StatelessWidget {
               color: color,
             ),
             const SizedBox(width: 8),
-            Text(
-              title,
-              style: GoogleFonts.lora(
-                fontSize: 10,
-                fontWeight: FontWeight.w800,
-                letterSpacing: 1.2,
-                color: color,
+            Expanded(
+              child: Text(
+                title,
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+                style: GoogleFonts.lora(
+                  fontSize: 10,
+                  fontWeight: FontWeight.w800,
+                  letterSpacing: 1.2,
+                  color: color,
+                ),
               ),
             ),
           ],

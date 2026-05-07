@@ -1,5 +1,4 @@
 ﻿import 'package:flutter/material.dart';
-import 'package:google_fonts/google_fonts.dart';
 import 'package:provider/provider.dart';
 import '../../providers/sigma_provider.dart';
 import '../../providers/terminal_provider.dart';
@@ -15,17 +14,16 @@ class ChartPanel extends StatefulWidget {
 }
 
 class _ChartPanelState extends State<ChartPanel> {
-  static const _ranges = ['1D', '5D', '1M', '6M', 'YTD', '1Y', '5Y', 'MAX'];
+  String? _loadedTicker;
 
   @override
   Widget build(BuildContext context) {
-    final isDark = Theme.of(context).brightness == Brightness.dark;
     final tp = context.watch<TerminalProvider>();
     final ticker = tp.focusedTicker;
     return ResearchPanelContainer(
       title: 'Market Workbench${ticker != null ? " — $ticker" : ""}',
       icon: Icons.query_stats_rounded,
-      child: ticker == null ? _noTicker() : _chart(isDark, ticker),
+      child: ticker == null ? _noTicker() : _chart(ticker),
     );
   }
 
@@ -33,56 +31,26 @@ class _ChartPanelState extends State<ChartPanel> {
         icon: Icons.query_stats_rounded,
         title: 'Aucun actif sélectionné',
         message:
-      'Selectionnez une societe depuis la recherche ou votre liste de suivi pour ouvrir le graphique, les volumes et les niveaux cles.',
+            'Selectionnez une societe depuis la recherche ou votre liste de suivi pour ouvrir le graphique, les volumes et les niveaux cles.',
       );
 
-  Widget _chart(bool isDark, String ticker) {
+  Widget _chart(String ticker) {
     return Consumer<SigmaProvider>(
       builder: (context, sp, _) {
+        final cleanTicker = ticker.trim().toUpperCase();
+        if (_loadedTicker != cleanTicker && !sp.isChartLoading) {
+          _loadedTicker = cleanTicker;
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            if (!mounted) return;
+            context.read<SigmaProvider>().fetchChartDataForTicker(
+                  cleanTicker,
+                  sp.chartRange.isEmpty ? '1Y' : sp.chartRange,
+                );
+          });
+        }
+
         return Column(
           children: [
-            // Period selector
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-              color: isDark
-                  ? AppTheme.surface.withValues(alpha: .5)
-                  : AppTheme.lightSurfaceLight,
-              child: Row(
-                children: _ranges.map((r) {
-                  final active = sp.chartRange == r;
-                  return GestureDetector(
-                    onTap: () => sp.fetchChartData(r),
-                    child: Container(
-                      margin: const EdgeInsets.only(right: 6),
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 10,
-                        vertical: 4,
-                      ),
-                      decoration: BoxDecoration(
-                        color: active
-                            ? AppTheme.amber.withValues(alpha: .15)
-                            : AppTheme.transparent,
-                        borderRadius: BorderRadius.circular(3),
-                      ),
-                      child: Text(
-                        r,
-                        style: GoogleFonts.lora(
-                          color: active
-                              ? AppTheme.amber
-                              : (isDark
-                                  ? AppTheme.textMuted
-                                  : AppTheme.lightTextMuted),
-                          fontSize: 10,
-                          fontWeight:
-                              active ? FontWeight.w800 : FontWeight.w500,
-                        ),
-                      ),
-                    ),
-                  );
-                }).toList(),
-              ),
-            ),
-            // Chart area
             Expanded(
               child: sp.isChartLoading
                   ? const Center(

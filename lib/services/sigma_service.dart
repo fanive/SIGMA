@@ -3934,16 +3934,76 @@ RESPOND IN ${isFr ? 'FRENCH' : 'ENGLISH'}.
       ]);
 
       return {
-        'bear': results[0],
-        'bull': results[1],
+        'bear': _isUsableDebateText(results[0])
+            ? results[0]
+            : _fallbackBearCase(data),
+        'bull': _isUsableDebateText(results[1])
+            ? results[1]
+            : _fallbackBullCase(data),
       };
     } catch (e) {
       dev.log('❌ Error generating debate: $e');
       return {
-        'bear': "Failed to generate bear case.",
-        'bull': "Failed to generate bull case.",
+        'bear': _fallbackBearCase(data),
+        'bull': _fallbackBullCase(data),
       };
     }
+  }
+
+  bool _isUsableDebateText(String value) {
+    final clean = value.trim().toLowerCase();
+    if (clean.length < 24) return false;
+    if (clean.contains('failed to generate')) return false;
+    if (clean == '{}' || clean == '[]') return false;
+    return true;
+  }
+
+  String _fallbackBullCase(AnalysisData data) {
+    final decision = FinancialDecisionEngine.evaluate(data, language: 'FR');
+    final points = data.pros.map((p) => p.text).where(_hasDebatePoint).take(3);
+    final positives = points.isNotEmpty ? points : decision.positives.take(3);
+    final buffer = StringBuffer()
+      ..write('${data.ticker.toUpperCase()} conserve un angle constructif si ')
+      ..write('le marche reconnait la qualite relative du dossier. ');
+    if (data.targetPriceValue != null && data.targetPriceValue! > 0) {
+      buffer.write(
+          'L objectif disponible de \$${data.targetPriceValue!.toStringAsFixed(2)} fournit un repere de valorisation. ');
+    }
+    if (positives.isNotEmpty) {
+      buffer.write('Les principaux arguments favorables sont: ');
+      buffer.write(positives.join(' '));
+    } else {
+      buffer.write(decision.summary);
+    }
+    return buffer.toString();
+  }
+
+  String _fallbackBearCase(AnalysisData data) {
+    final decision = FinancialDecisionEngine.evaluate(data, language: 'FR');
+    final points = data.cons.map((p) => p.text).where(_hasDebatePoint).take(3);
+    final negatives = points.isNotEmpty ? points : decision.negatives.take(3);
+    final buffer = StringBuffer()
+      ..write('Le risque principal sur ${data.ticker.toUpperCase()} vient de ')
+      ..write(
+          'la sensibilite du dossier aux donnees encore incompletes et a la discipline de prix. ');
+    if (negatives.isNotEmpty) {
+      buffer.write('Les points de vigilance sont: ');
+      buffer.write(negatives.join(' '));
+    } else {
+      buffer.write(
+          'La these doit etre invalidee si le momentum, les marges ou le consensus se deteriorent apres les prochaines publications.');
+    }
+    return buffer.toString();
+  }
+
+  bool _hasDebatePoint(String value) {
+    final clean = value.trim().toLowerCase();
+    return clean.isNotEmpty &&
+        clean != 'n/a' &&
+        clean != 'na' &&
+        !clean.contains('failed to generate') &&
+        !clean.contains('donnees insuffisantes') &&
+        !clean.contains('données insuffisantes');
   }
 
   DateTime _parseAnyDate(dynamic raw) {

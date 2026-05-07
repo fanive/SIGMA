@@ -2158,6 +2158,8 @@ class SigmaProvider extends ChangeNotifier {
   Future<void> fetchChartData(String range) async {
     if (currentTicker == null) return;
 
+    final requestedTicker = currentTicker!.toUpperCase();
+
     chartRange = range;
     isChartLoading = true;
     notifyListeners();
@@ -2167,15 +2169,16 @@ class SigmaProvider extends ChangeNotifier {
       final apiRange = _getApiRange(range);
 
       final data = await _sigmaService.marketDataService.getHistoricalOHLCV(
-        currentTicker!,
+        requestedTicker,
         apiRange,
       );
 
+      if (currentTicker?.toUpperCase() != requestedTicker) return;
       chartHistory = data;
 
       if (currentAnalysis != null &&
-          _periodAnalysesCache['${currentTicker!.toUpperCase()}_$range'] ==
-              null) {
+          currentAnalysis!.ticker.toUpperCase() == requestedTicker &&
+          _periodAnalysesCache['${requestedTicker}_$range'] == null) {
         _fetchAndAnalyzeRange(currentAnalysis!, range);
       }
     } catch (e) {
@@ -2185,6 +2188,13 @@ class SigmaProvider extends ChangeNotifier {
       isChartLoading = false;
       notifyListeners();
     }
+  }
+
+  Future<void> fetchChartDataForTicker(String ticker, String range) async {
+    final cleanTicker = ticker.trim().toUpperCase();
+    if (cleanTicker.isEmpty) return;
+    currentTicker = cleanTicker;
+    await fetchChartData(range);
   }
 
   String _getIntervalForRange(String range) {
