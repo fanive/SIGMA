@@ -1487,9 +1487,9 @@ class SigmaProvider extends ChangeNotifier {
         return sa.compareTo(sb);
       });
 
-    return matches.take(8).map((item) {
+    return matches.take(8).map<Map<String, dynamic>>((item) {
       final symbol = item['symbol']!;
-      return {
+      return <String, dynamic>{
         'symbol': symbol,
         'description': item['name'],
         'displaySymbol': symbol,
