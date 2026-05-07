@@ -213,79 +213,80 @@ CRITICAL RULES:
     final webSearchTask =
         _webSearch.search('$symbol stock latest news catalysts $currentDate');
 
-    // ── 2. ACQUISITION DE DONNÉES EN PARALLÈLE (OPTIMISÉ) ──────────────────────
-    // Note: timeouts genereux pour le cold-start Render (30-50s)
+    // ── 2. ACQUISITION DE DONNÉES EN PARALLÈLE (DÉDUPLIQUÉ) ────────────────
+    // Phase 1: 15 appels UNIQUES qui réchauffent le cache SigmaApiService.
+    // Les méthodes dérivées (getSigmaContext, getKeyMetricsTTM, etc.) sont
+    // appelées en Phase 2 et lisent le cache instantanément (0 HTTP).
     final results = await Future.wait([
-      _safeCall(() => _marketData.getSigmaContext(symbol), "",
+      // [0] QUOTE — réchauffe cache pour: getSigmaContext, getCompanyProfileStable,
+      //             getKeyMetricsTTM, getRatiosTTM, getQuoteMap
+      _safeCall(() => SigmaApiService.getQuote(symbol), <String, dynamic>{},
           timeout: const Duration(seconds: 35)),
+      // [1] OWNERSHIP — réchauffe cache pour: getSigmaContext, getHoldersBundle
+      _safeCall(() => SigmaApiService.getOwnership(symbol), <String, dynamic>{},
+          timeout: const Duration(seconds: 35)),
+      // [2] INSIDER — réchauffe cache pour: getSigmaContext, getInsiderFull
+      _safeCall(() => SigmaApiService.getInsider(symbol), <String, dynamic>{},
+          timeout: const Duration(seconds: 35)),
+      // [3] WEB SEARCH
       _safeCall(() => webSearchTask, "", timeout: const Duration(seconds: 12)),
+      // [4] PEERS
       _safeCall(
           () => _marketData
               .getPeers(symbol)
               .then((list) => _marketData.getFullQuotes(list.take(5).toList())),
           [],
           timeout: const Duration(seconds: 35)),
+      // [5] NEWS
       _safeCall(() => _marketData.getStockNews(symbol, limit: 20), [],
           timeout: const Duration(seconds: 35)),
-      _safeCall(() => _marketData.getCompanyProfileStable(symbol),
-          <String, dynamic>{},
-          timeout: const Duration(seconds: 35)),
-      _safeCall(() => _marketData.getKeyMetricsTTM(symbol), <String, dynamic>{},
+      // [6] FINANCIALS — réchauffe cache pour: getSigmaContext, getKeyMetricsTTM
+      _safeCall(() => SigmaApiService.getFinancials(symbol), <String, dynamic>{},
           timeout: const Duration(seconds: 40)),
-      _safeCall(() => _marketData.getRatiosTTM(symbol), <String, dynamic>{},
-          timeout: const Duration(seconds: 35)),
-      _safeCall(() => _marketData.getHoldersBundle(symbol), <String, dynamic>{},
-          timeout: const Duration(seconds: 35)),
-      _safeCall(() => _marketData.getInsiderFull(symbol), <String, dynamic>{},
-          timeout: const Duration(seconds: 35)),
-      _safeCall(
-          () => SigmaApiService.getFinancials(symbol), <String, dynamic>{},
-          timeout: const Duration(seconds: 40)),
-      _safeCall(() => _marketData.getQuoteMap(symbol), <String, dynamic>{},
-          timeout: const Duration(seconds: 35)),
+      // [7] REAL-TIME PRICE
       _getMultiSourcePrice(symbol),
-      _safeCall(() => _finnhub.basicFinancials(symbol), <String, dynamic>{},
-          timeout: const Duration(seconds: 12)),
-      _safeCall(() => _finnhub.recommendationTrends(symbol), <dynamic>[],
-          timeout: const Duration(seconds: 12)),
-      _safeCall(() => _finnhub.earningsSurprises(symbol, limit: 4), <dynamic>[],
-          timeout: const Duration(seconds: 12)),
+      // [8] FEAR & GREED
       _safeCall(() => _sentiment.fetchFearGreed(), null,
           timeout: const Duration(seconds: 8)),
+      // [9] SENTIMENT NEWS
       _safeCall(() => _sentiment.fetchNews(), [],
           timeout: const Duration(seconds: 8)),
-      _safeCall(
-          () => _marketData.getGoogleFinanceInfo(symbol), <String, dynamic>{},
-          timeout: const Duration(seconds: 35)),
+      // [10] INTELLIGENCE (analyst targets, recommendations, earnings, googleFinance)
       _safeCall(() => SigmaApiService.getAnalysis(symbol), <String, dynamic>{},
           timeout: const Duration(seconds: 40)),
+      // [11] OPTIONS
       _safeCall(() => _marketData.getOptionsChain(symbol), <String, dynamic>{},
           timeout: const Duration(seconds: 35)),
+      // [12] EVENTS
       _safeCall(() => _marketData.getEvents(symbol), <String, dynamic>{},
           timeout: const Duration(seconds: 35)),
+      // [13] SEC — réchauffe cache pour: getKeyMetricsTTM, getRatiosTTM
       _safeCall(() => _marketData.getSecFacts(symbol), <String, dynamic>{},
           timeout: const Duration(seconds: 40)),
+      // [14] HISTORY 6M
       _safeCall(() => _marketData.getHistoricalOHLCV(symbol, '6M'),
           <Map<String, dynamic>>[],
           timeout: const Duration(seconds: 35)),
     ]);
 
-    final sigmaContext = results[0] as String;
-    final webContext = results[1] as String;
-    final peersDataList = results[2] as List<dynamic>;
-    final sigmaNews = results[3] as List<dynamic>;
-    final sigmaProfile = results[4] as Map<String, dynamic>;
-    final sigmaMetrics = results[5] as Map<String, dynamic>;
-    final sigmaRatios = results[6] as Map<String, dynamic>;
-    final _holdersBundle = results[7] as Map<String, dynamic>;
+    // ── Phase 2: Données dérivées — cache chaud, 0 appel HTTP ──────────────
+    final sigmaContext = await _marketData.getSigmaContext(symbol);
+    final sigmaProfile = results[0] as Map<String, dynamic>;
+    final sigmaMetrics = await _marketData.getKeyMetricsTTM(symbol);
+    final sigmaRatios = await _marketData.getRatiosTTM(symbol);
+    final _holdersBundle = await _marketData.getHoldersBundle(symbol);
     final sigmaHolders =
         (_holdersBundle['institutionsList'] as List?) ?? <dynamic>[];
-    final insiderFull = results[8] as Map<String, dynamic>;
+    final insiderFull = await _marketData.getInsiderFull(symbol);
     final sigmaInsiderTrading = (insiderFull['trades'] as List?) ?? <dynamic>[];
     final insiderSummary =
         (insiderFull['summary'] as Map?)?.cast<String, dynamic>() ??
             <String, dynamic>{};
-    final financialsRaw = results[9] as Map<String, dynamic>;
+
+    final webContext = results[3] as String;
+    final peersDataList = results[4] as List<dynamic>;
+    final sigmaNews = results[5] as List<dynamic>;
+    final financialsRaw = results[6] as Map<String, dynamic>;
     final sigmaIncome =
         (financialsRaw['quarterlyIncomeStatement'] as List?) ?? <dynamic>[];
     final sigmaAnnualIncome =
@@ -296,22 +297,28 @@ CRITICAL RULES:
         (financialsRaw['quarterlyCashFlow'] as List?) ?? <dynamic>[];
     final sigmaAnnualCashFlow =
         (financialsRaw['annualCashFlow'] as List?) ?? <dynamic>[];
-    final sigmaQuote = results[10] as Map<String, dynamic>;
-    final realTimePrice = results[11] as Map<String, dynamic>;
-    final finnhubBasic = results[12] as Map<String, dynamic>;
-    final finnhubRecommendations = results[13] as List<dynamic>;
-    final finnhubEarningsSurprises = results[14] as List<dynamic>;
-    final fgData = results[15] as FearGreedData?;
-    final fgNews = results[16] as List<SentimentNews>;
-    final googleFinance = results[17] as Map<String, dynamic>;
-    final intelligenceData = results[18] as Map<String, dynamic>;
-    final optionsData = results[19] as Map<String, dynamic>;
-    final eventsData = results[20] as Map<String, dynamic>;
-    final secData = results[21] as Map<String, dynamic>;
+    final sigmaQuote = results[0] as Map<String, dynamic>;
+    final realTimePrice = results[7] as Map<String, dynamic>;
+    // Finnhub supprimé — données déjà dans sigmaProfile et intelligenceData
+    final finnhubBasic = <String, dynamic>{};
+    final intelligenceData = results[10] as Map<String, dynamic>;
+    final finnhubRecommendations =
+        (intelligenceData['recommendationsSummary'] as List?) ?? <dynamic>[];
+    final finnhubEarningsSurprises =
+        (intelligenceData['earningsHistory'] as List?) ?? <dynamic>[];
+    final fgData = results[8] as FearGreedData?;
+    final fgNews = results[9] as List<SentimentNews>;
+    // Google Finance supprimé en appel séparé — déjà dans intelligenceData
+    final googleFinance =
+        (intelligenceData['googleFinance'] as Map?)?.cast<String, dynamic>() ??
+            <String, dynamic>{};
+    final optionsData = results[11] as Map<String, dynamic>;
+    final eventsData = results[12] as Map<String, dynamic>;
+    final secData = results[13] as Map<String, dynamic>;
     final secDerived =
         (secData['derived'] as Map?)?.cast<String, dynamic>() ?? {};
     final secFacts = (secData['facts'] as Map?)?.cast<String, dynamic>() ?? {};
-    final priceHistory = results[22] as List<Map<String, dynamic>>;
+    final priceHistory = results[14] as List<Map<String, dynamic>>;
 
     final peerContext = peersDataList
         .map((p) =>
