@@ -1855,10 +1855,11 @@ STRUCTURE JSON (STRICTE) :
 
   /// Formate un prix pour l'affichage
   String _formatPrice(dynamic price) {
-    if (price == null || price == 0) return '0.00';
+    if (price == null || price == 0) return 'N/A';
     final numPrice = price is num
         ? price.toDouble()
         : double.tryParse(price.toString()) ?? 0;
+    if (numPrice <= 0) return 'N/A';
     if (numPrice >= 1000) {
       return numPrice.toStringAsFixed(2);
     } else if (numPrice >= 1) {

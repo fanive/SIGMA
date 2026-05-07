@@ -30,7 +30,7 @@ class _StatusBarState extends State<StatusBar> {
     super.initState();
     _updateClocks();
     _clockTimer = Timer.periodic(
-      const Duration(seconds: 1),
+      const Duration(minutes: 1),
       (_) => _updateClocks(),
     );
   }
@@ -53,7 +53,7 @@ class _StatusBarState extends State<StatusBar> {
 
     if (mounted) {
       setState(() {
-        _localTime = DateFormat('HH:mm:ss').format(now);
+        _localTime = DateFormat('HH:mm').format(now);
         _nyTime = DateFormat('HH:mm').format(nyNow);
         _londonTime = DateFormat('HH:mm').format(londonNow);
       });

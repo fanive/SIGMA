@@ -97,6 +97,32 @@ double _parsePrice(String raw) {
   return double.tryParse(digits) ?? 0.0;
 }
 
+String _displayCurrentPrice(AnalysisData a) {
+  final numeric = _parsePrice(a.price);
+  if (numeric > 0) {
+    return '\$${numeric.toStringAsFixed(numeric >= 1 ? 2 : 4)}';
+  }
+  final raw = a.price.trim();
+  if (_hasText(raw) && raw != '0' && raw != '0.00') {
+    return raw.startsWith('\$') ? raw : '\$$raw';
+  }
+  return 'Prix en chargement';
+}
+
+String _formatNoteTimestamp(String raw) {
+  final clean = raw.trim();
+  if (clean.isEmpty) return 'Date N/A';
+  final dt = DateTime.tryParse(clean);
+  if (dt == null) {
+    return clean
+        .replaceFirst(RegExp(r'\.\d+'), '')
+        .replaceFirst(RegExp(r':\d{2}(?:\s|$)'), ' ')
+        .trim();
+  }
+  String two(int value) => value.toString().padLeft(2, '0');
+  return '${dt.year}-${two(dt.month)}-${two(dt.day)} ${two(dt.hour)}:${two(dt.minute)}';
+}
+
 String _cleanText(String v) {
   String clean = v.replaceAll('[AGENTIC OLLAMA]', '').trim();
   clean = clean.replaceAll(
@@ -126,7 +152,7 @@ String _buildExecutiveSummary(AnalysisData a) {
   final parts = <String>[];
 
   // Sentence 1 — identity + price + verdict
-  final priceStr = a.price.isNotEmpty ? '\$${a.price}' : 'N/A';
+  final priceStr = _displayCurrentPrice(a);
   final changeStr = (a.changePercent != null)
       ? ' (${a.changePercent! >= 0 ? '+' : ''}${a.changePercent!.toStringAsFixed(2)}%)'
       : '';
@@ -870,7 +896,7 @@ class _ResearchNoteScroll extends StatelessWidget {
           isDark: isDark,
           label: 'EXECUTIVE SUMMARY',
           meta:
-              'Confiance: ${(a.confidence * 100).toStringAsFixed(0)}% · ${a.lastUpdated.isEmpty ? 'Date N/A' : a.lastUpdated}',
+              'Confiance: ${(a.confidence * 100).toStringAsFixed(0)}% · ${_formatNoteTimestamp(a.lastUpdated)}',
           child: _BodyBlock(text: summary, isDark: isDark),
         ),
 
@@ -1214,7 +1240,7 @@ class _NoteCover extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final bg = isDark ? _kDarkSurface : _kLightSurface;
+    final bg = isDark ? _kDarkBg : _kLightBg;
     final border = isDark ? _kDarkBorder : _kLightBorder;
     final txt = isDark ? _kDarkText : _kLightText;
     final dim = isDark ? _kDarkDim : _kLightDim;
@@ -1332,10 +1358,11 @@ class _NoteCover extends StatelessWidget {
           Row(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              if (a.price.isNotEmpty)
-                Expanded(
-                    child: _CoverKV(
-                        label: 'PRIX ACTUEL', value: a.price, isDark: isDark)),
+              Expanded(
+                  child: _CoverKV(
+                      label: 'PRIX ACTUEL',
+                      value: _displayCurrentPrice(a),
+                      isDark: isDark)),
               if (targetPrice > 0) ...[
                 const SizedBox(width: 16),
                 Expanded(
@@ -1370,7 +1397,7 @@ class _NoteCover extends StatelessWidget {
               Text('HORIZON 12 MOIS', style: _sectionLabel(dim)),
               const Spacer(),
               Text(
-                a.lastUpdated.isEmpty ? 'N/A' : a.lastUpdated,
+                _formatNoteTimestamp(a.lastUpdated),
                 style: GoogleFonts.lora(fontSize: 10, color: dim),
               ),
             ],
@@ -1400,7 +1427,7 @@ class _ComparativeCover extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final bg = isDark ? _kDarkSurface : _kLightSurface;
+    final bg = isDark ? _kDarkBg : _kLightBg;
     final border = isDark ? _kDarkBorder : _kLightBorder;
     final txt = isDark ? _kDarkText : _kLightText;
     final dim = isDark ? _kDarkDim : _kLightDim;
@@ -5006,13 +5033,8 @@ class _DebateBlock extends StatelessWidget {
 
   Widget _buildPointList(
       String title, List<ProCon> points, Color color, BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: isDark ? _kDarkSurface : _kLightSurface,
-        border: Border.all(
-            color: isDark ? _kDarkBorder : _kLightBorder, width: 0.5),
-      ),
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 2),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -5025,13 +5047,17 @@ class _DebateBlock extends StatelessWidget {
                   color: color,
                   size: 14),
               const SizedBox(width: 8),
-              Text(
-                title,
-                style: GoogleFonts.lora(
-                  fontSize: 10,
-                  fontWeight: FontWeight.w900,
-                  letterSpacing: 1.5,
-                  color: color,
+              Expanded(
+                child: Text(
+                  title,
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  style: GoogleFonts.lora(
+                    fontSize: 10,
+                    fontWeight: FontWeight.w900,
+                    letterSpacing: 1.5,
+                    color: color,
+                  ),
                 ),
               ),
             ],

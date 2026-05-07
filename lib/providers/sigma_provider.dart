@@ -144,8 +144,10 @@ class SigmaProvider extends ChangeNotifier {
   static const String _radarCacheKey = 'sigma_radar_insights_cache';
   static const Duration _analysisCacheTtl = Duration(minutes: 20);
   static const Duration _watchlistRefreshInterval = Duration(seconds: 20);
+  static const Duration _backendKeepAliveInterval = Duration(minutes: 8);
 
   Timer? _watchlistRefreshTimer;
+  Timer? _backendKeepAliveTimer;
 
   DateTime? _lastMarketFetch;
   DateTime? _lastRadarFetch;
@@ -206,6 +208,7 @@ class SigmaProvider extends ChangeNotifier {
     final p9 = fetchSentiment();
     fetchDailyCreamReport();
     _startWatchlistAutoRefresh();
+    _startBackendKeepAlive();
 
     // We wait for a "minimum set" to be ready for the splash transition if needed,
     // but the provider itself remains reactive.
@@ -221,6 +224,13 @@ class SigmaProvider extends ChangeNotifier {
     });
   }
 
+  void _startBackendKeepAlive() {
+    _backendKeepAliveTimer?.cancel();
+    SigmaApiService.keepAlive();
+    _backendKeepAliveTimer = Timer.periodic(
+        _backendKeepAliveInterval, (_) => SigmaApiService.keepAlive());
+  }
+
   bool _isAnalysisFresh(AnalysisData data) {
     final ts = DateTime.tryParse(data.lastUpdated);
     if (ts == null) return false;
@@ -230,6 +240,7 @@ class SigmaProvider extends ChangeNotifier {
   @override
   void dispose() {
     _watchlistRefreshTimer?.cancel();
+    _backendKeepAliveTimer?.cancel();
     super.dispose();
   }
 
@@ -1255,6 +1266,7 @@ class SigmaProvider extends ChangeNotifier {
 
   Future<void> updateSearchResults(String query) async {
     final normalized = query.trim();
+    final cacheKey = normalized.toLowerCase();
     if (normalized.isEmpty) {
       _searchRequestId++;
       searchResults = [];
@@ -1264,15 +1276,18 @@ class SigmaProvider extends ChangeNotifier {
     }
 
     final localResults = _localSearchResults(normalized);
-    if (localResults.isNotEmpty) {
-      searchResults = localResults;
+    final stableFallback = localResults.isNotEmpty
+        ? localResults
+        : _typedTickerFallback(normalized);
+    if (stableFallback.isNotEmpty) {
+      searchResults = stableFallback;
       isSearching = true;
       notifyListeners();
     }
 
     // 0. Check local cache for instant results
-    if (_searchCache.containsKey(normalized)) {
-      searchResults = _searchCache[normalized]!;
+    if (_searchCache.containsKey(cacheKey)) {
+      searchResults = _searchCache[cacheKey]!;
       isSearching = false;
       notifyListeners();
       // Even if cached, we still run the background fetch to update prices/logos
@@ -1286,8 +1301,8 @@ class SigmaProvider extends ChangeNotifier {
     try {
       // Unified backend + Finnhub fallback search.
       List<Map<String, dynamic>> searchResultsUnified;
-      if (_searchCache.containsKey(normalized)) {
-        searchResultsUnified = _searchCache[normalized]!;
+      if (_searchCache.containsKey(cacheKey)) {
+        searchResultsUnified = _searchCache[cacheKey]!;
       } else {
         searchResultsUnified = await _sigmaService
             .searchTickerSymbolsUnified(normalized)
@@ -1295,7 +1310,7 @@ class SigmaProvider extends ChangeNotifier {
 
         // Save to cache
         if (searchResultsUnified.isNotEmpty) {
-          _searchCache[normalized] = searchResultsUnified;
+          _searchCache[cacheKey] = searchResultsUnified;
         }
       }
 
@@ -1372,6 +1387,13 @@ class SigmaProvider extends ChangeNotifier {
       }
 
       // 1) Build results immediately (autocomplete UX first).
+      for (final item in stableFallback) {
+        final symbol = (item['symbol'] ?? '').toString().toUpperCase();
+        if (symbol.isEmpty) continue;
+        mergedResults[symbol] = Map<String, dynamic>.from(item);
+        symbolsToQuote.add(symbol);
+      }
+
       for (final item in sorted.take(16)) {
         final symbol = (item['symbol'] ?? '').toString().toUpperCase();
         if (symbol.isEmpty) continue;
@@ -1388,9 +1410,10 @@ class SigmaProvider extends ChangeNotifier {
 
       if (requestId != _searchRequestId) return;
 
-      searchResults = mergedResults.values.toList();
-      _searchCache[normalized] =
-          searchResults; // Update cache with mapped items
+      searchResults = mergedResults.isNotEmpty
+          ? mergedResults.values.toList()
+          : stableFallback;
+      _searchCache[cacheKey] = searchResults; // Update cache with mapped items
       isSearching = false;
       notifyListeners();
 
@@ -1454,13 +1477,15 @@ class SigmaProvider extends ChangeNotifier {
       }
 
       if (requestId != _searchRequestId) return;
-      searchResults = mergedResults.values.toList();
+      searchResults = mergedResults.isNotEmpty
+          ? mergedResults.values.toList()
+          : stableFallback;
       notifyListeners();
     } catch (e) {
       dev.log('âŒ Global Search Convergence Failure: $e',
           name: 'SigmaProvider');
       if (requestId == _searchRequestId) {
-        searchResults = [];
+        searchResults = stableFallback;
       }
     } finally {
       if (requestId == _searchRequestId) {
@@ -1508,6 +1533,25 @@ class SigmaProvider extends ChangeNotifier {
     }).toList();
   }
 
+  List<Map<String, dynamic>> _typedTickerFallback(String query) {
+    final q = query.trim().toUpperCase();
+    if (!_looksLikeTickerSymbol(q)) return const [];
+    return [
+      <String, dynamic>{
+        'symbol': q,
+        'description': 'Analyser $q',
+        'displaySymbol': q,
+        'stockExchange': 'Recherche directe',
+        'exchangeShortName': 'DIRECT',
+        'exchange': 'DIRECT',
+        'type': 'EQUITY',
+        'logoUrl': LogoResolver.resolve(q),
+        'logo': LogoResolver.resolve(q),
+        'source': 'DIRECT',
+      },
+    ];
+  }
+
   List<Map<String, dynamic>> instantSearchResults(String query) {
     final q = query.trim().toUpperCase();
     if (q.isEmpty) return const [];
@@ -1524,6 +1568,13 @@ class SigmaProvider extends ChangeNotifier {
       if (symbol.isEmpty) continue;
       if (symbol.startsWith(q) || symbol.contains(q) || name.contains(q)) {
         merged[symbol] = item;
+      }
+    }
+
+    if (merged.isEmpty) {
+      for (final item in _typedTickerFallback(q)) {
+        final symbol = (item['symbol'] ?? '').toString().toUpperCase();
+        if (symbol.isNotEmpty) merged[symbol] = item;
       }
     }
 

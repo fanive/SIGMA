@@ -29,6 +29,10 @@ class SigmaApiService {
     _cache[key] = _Cache(data, DateTime.now().add(ttl));
   }
 
+  static Future<void> keepAlive() async {
+    await _get('/', timeout: const Duration(seconds: 8), retries: 1);
+  }
+
   // ── HTTP helper ──────────────────────────────────────────────────────────
   static Future<dynamic> _get(
     String path, {
@@ -55,13 +59,11 @@ class SigmaApiService {
             continue;
           }
         } else {
-          dev.log('SigmaApi $path → $code',
-              name: 'SigmaApiService');
+          dev.log('SigmaApi $path → $code', name: 'SigmaApiService');
           return null;
         }
       } catch (e) {
-        dev.log(
-            'SigmaApi $path error (attempt ${attempt + 1}/$retries): $e',
+        dev.log('SigmaApi $path error (attempt ${attempt + 1}/$retries): $e',
             name: 'SigmaApiService');
         if (attempt < retries - 1) {
           await Future.delayed(const Duration(seconds: 2));

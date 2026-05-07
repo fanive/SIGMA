@@ -1287,6 +1287,33 @@ class AnalysisData {
       return {};
     }
 
+    String parsePriceField() {
+      final candidates = [
+        json['price'],
+        json['currentPrice'],
+        json['regularMarketPrice'],
+        json['lastPrice'],
+        json['previousClose'],
+      ];
+      for (final candidate in candidates) {
+        final numeric = parseNum(candidate);
+        if (numeric > 0) {
+          return numeric.toStringAsFixed(numeric >= 1 ? 2 : 4);
+        }
+        final text = candidate?.toString().trim() ?? '';
+        final upper = text.toUpperCase();
+        if (text.isNotEmpty &&
+            upper != 'N/A' &&
+            upper != 'NA' &&
+            upper != 'NULL' &&
+            text != '0' &&
+            text != '0.00') {
+          return text;
+        }
+      }
+      return '';
+    }
+
     return AnalysisData(
       ticker: parseString(json['ticker']),
       companyName: json['companyName']?.toString(),
@@ -1294,7 +1321,7 @@ class AnalysisData {
       businessModel: parseString(json['businessModel'], fallback: 'N/A'),
       revenueStreams: parseString(json['revenueStreams'], fallback: 'N/A'),
       lastUpdated: parseString(json['lastUpdated']),
-      price: parseString(json['price']),
+      price: parsePriceField(),
       verdict: parseString(json['verdict'], fallback: 'ATTENDRE'),
       verdictReasons:
           parseList(json['verdictReasons']).map((e) => e.toString()).toList(),

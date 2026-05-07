@@ -34,43 +34,38 @@ class VerdictSection extends StatelessWidget {
         ]),
       ]),
       const SizedBox(height: 16),
-      // Scenario levels box
-      Container(
-        padding: const EdgeInsets.all(16),
-        decoration: BoxDecoration(
-            border: Border.all(color: color.withValues(alpha: 0.2)),
-            color: color.withValues(alpha: 0.02)),
-        child: Column(children: [
-          Row(children: [
-            Icon(Icons.gps_fixed, size: 14, color: color),
-            const SizedBox(width: 12),
-            Expanded(
-                child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                    Text('REPERE DE VALORISATION',
-                      style: AppTheme.label(context).copyWith(fontSize: 7)),
-                  Text('\$${a.tradeSetup.cleanTargetPrice}',
-                      style: AppTheme.numeric(context,
-                          size: 16, weight: FontWeight.w900)),
-                ])),
-            RiskBadge(a.riskLevel),
-          ]),
-          const SizedBox(height: 12),
-          Row(children: [
-            _chip('ZONE', a.tradeSetup.cleanEntryZone),
-            const SizedBox(width: 8),
-            _chip('INVALID.', a.tradeSetup.cleanStopLoss, isRed: true),
-            const SizedBox(width: 8),
-            _chip('R/R', a.tradeSetup.riskRewardRatio),
-          ]),
+      Column(children: [
+        Row(children: [
+          Icon(Icons.gps_fixed, size: 14, color: color),
+          const SizedBox(width: 12),
+          Expanded(
+              child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                Text('REPERE DE VALORISATION',
+                    style: AppTheme.label(context).copyWith(fontSize: 7)),
+                Text(_priceLabel(a.tradeSetup.cleanTargetPrice),
+                    style: AppTheme.numeric(context,
+                        size: 16, weight: FontWeight.w900)),
+              ])),
+          RiskBadge(a.riskLevel),
         ]),
-      ),
+        const SizedBox(height: 12),
+        Divider(height: 1, thickness: 0.4, color: AppTheme.getBorder(context)),
+        const SizedBox(height: 10),
+        Row(children: [
+          _chip('ZONE', a.tradeSetup.cleanEntryZone),
+          const SizedBox(width: 8),
+          _chip('INVALID.', a.tradeSetup.cleanStopLoss, isRed: true),
+          const SizedBox(width: 8),
+          _chip('R/R', a.tradeSetup.riskRewardRatio),
+        ]),
+      ]),
       // Confidence bar
       if (a.confidence > 0) ...[
         const SizedBox(height: 12),
         Row(children: [
-            Text('NIVEAU DE CONFIANCE',
+          Text('NIVEAU DE CONFIANCE',
               style: GoogleFonts.lora(
                   fontSize: 8,
                   fontWeight: FontWeight.w600,
@@ -95,17 +90,15 @@ class VerdictSection extends StatelessWidget {
 
   Widget _chip(String label, String value, {bool isRed = false}) {
     return Expanded(
-        child: Container(
-      padding: const EdgeInsets.symmetric(vertical: 6, horizontal: 8),
-      decoration: BoxDecoration(
-        border: Border.all(
-            color: (isRed ? AppTheme.negative : AppTheme.textTertiary)
-                .withValues(alpha: 0.2)),
-      ),
+        child: Padding(
+      padding: const EdgeInsets.symmetric(vertical: 4),
       child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
         Text(label,
             style: GoogleFonts.lora(
-                fontSize: 7, fontWeight: FontWeight.w600, color: AppTheme.textTertiary, letterSpacing: 1.2)),
+                fontSize: 7,
+                fontWeight: FontWeight.w600,
+                color: AppTheme.textTertiary,
+                letterSpacing: 1.2)),
         const SizedBox(height: 2),
         Text(value,
             style: GoogleFonts.lora(
@@ -116,6 +109,15 @@ class VerdictSection extends StatelessWidget {
             overflow: TextOverflow.ellipsis),
       ]),
     ));
+  }
+
+  String _priceLabel(String value) {
+    final clean = value.trim();
+    if (clean.isEmpty || clean.toUpperCase() == 'N/A') {
+      return 'Prix indisponible';
+    }
+    if (clean.startsWith('\$')) return clean;
+    return '\$$clean';
   }
 }
 
@@ -128,8 +130,8 @@ class ProsConsSection extends StatelessWidget {
   Widget build(BuildContext context) {
     return Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
       Expanded(
-          child: _list(context, 'FORCES', a.pros, AppTheme.positive,
-              Icons.trending_up)),
+          child: _list(
+              context, 'FORCES', a.pros, AppTheme.positive, Icons.trending_up)),
       const SizedBox(width: 16),
       Expanded(
           child: _list(context, 'RISQUES', a.cons, AppTheme.negative,
@@ -139,13 +141,8 @@ class ProsConsSection extends StatelessWidget {
 
   Widget _list(BuildContext context, String title, List<ProCon> items,
       Color color, IconData icon) {
-    return Container(
-      padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(
-        color: color.withValues(alpha: 0.05),
-        borderRadius: BorderRadius.circular(8),
-        border: Border.all(color: color.withValues(alpha: 0.15), width: 0.5),
-      ),
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 2),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -157,6 +154,9 @@ class ProsConsSection extends StatelessWidget {
                   style: AppTheme.label(context).copyWith(color: color)),
             ],
           ),
+          const SizedBox(height: 8),
+          Divider(
+              height: 1, thickness: 0.4, color: AppTheme.getBorder(context)),
           const SizedBox(height: 12),
           ...items.take(5).map((p) => Padding(
                 padding: const EdgeInsets.only(bottom: 10),
@@ -252,52 +252,49 @@ class FundamentalMatrixSection extends StatelessWidget {
         .toList();
     if (active.isEmpty) return const SizedBox.shrink();
 
-    return Container(
-      decoration: BoxDecoration(
-        color: AppTheme.getSurface(context),
-        borderRadius: BorderRadius.circular(8),
-        border: Border.all(color: AppTheme.getBorder(context), width: 0.5),
-      ),
-      child: GridView.builder(
-        shrinkWrap: true,
-        padding: EdgeInsets.zero,
-        physics: const NeverScrollableScrollPhysics(),
-        gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-            crossAxisCount: 3,
-            mainAxisSpacing: 0,
-            crossAxisSpacing: 0,
-            childAspectRatio: 2.4),
-        itemCount: active.length,
-        itemBuilder: (context, i) {
-          final m = active[i];
-          return Container(
-            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-            decoration: BoxDecoration(
-              border:
-                  Border.all(color: AppTheme.getBorder(context), width: 0.2),
+    return GridView.builder(
+      shrinkWrap: true,
+      padding: EdgeInsets.zero,
+      physics: const NeverScrollableScrollPhysics(),
+      gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+          crossAxisCount: 3,
+          mainAxisSpacing: 0,
+          crossAxisSpacing: 16,
+          childAspectRatio: 2.6),
+      itemCount: active.length,
+      itemBuilder: (context, i) {
+        final m = active[i];
+        return Container(
+          padding: const EdgeInsets.symmetric(vertical: 8),
+          decoration: BoxDecoration(
+            border: Border(
+              bottom: BorderSide(
+                color: AppTheme.getBorder(context).withValues(alpha: 0.7),
+                width: 0.4,
+              ),
             ),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                Text(m.label,
-                    style: AppTheme.label(context).copyWith(fontSize: 7),
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis),
-                const SizedBox(height: 4),
-                Flexible(
-                  child: FittedBox(
-                      fit: BoxFit.scaleDown,
-                      alignment: Alignment.centerLeft,
-                      child: Text(m.value,
-                          style: AppTheme.numeric(context,
-                              size: 14, weight: FontWeight.w900))),
-                ),
-              ],
-            ),
-          );
-        },
-      ),
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Text(m.label,
+                  style: AppTheme.label(context).copyWith(fontSize: 7),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis),
+              const SizedBox(height: 4),
+              Flexible(
+                child: FittedBox(
+                    fit: BoxFit.scaleDown,
+                    alignment: Alignment.centerLeft,
+                    child: Text(m.value,
+                        style: AppTheme.numeric(context,
+                            size: 14, weight: FontWeight.w900))),
+              ),
+            ],
+          ),
+        );
+      },
     );
   }
 }
@@ -451,8 +448,8 @@ class CatalystsSection extends StatelessWidget {
             ]),
             const SizedBox(height: 6),
             Text(c.headline,
-                style: GoogleFonts.lora(
-                    fontSize: 12, fontWeight: FontWeight.w700),
+                style:
+                    GoogleFonts.lora(fontSize: 12, fontWeight: FontWeight.w700),
                 maxLines: 2,
                 overflow: TextOverflow.ellipsis),
             if (c.insight.isNotEmpty) ...[
@@ -493,7 +490,8 @@ class AnalystConsensusSection extends StatelessWidget {
                   color: verdictColor(rec.consensusLabel))),
           const Spacer(),
           Text('$total analystes',
-              style: GoogleFonts.lora(fontSize: 10, color: AppTheme.textTertiary)),
+              style:
+                  GoogleFonts.lora(fontSize: 10, color: AppTheme.textTertiary)),
         ]),
         const SizedBox(height: 10),
         ClipRRect(
@@ -555,7 +553,8 @@ class AnalystConsensusSection extends StatelessWidget {
                 ),
                 const Spacer(),
                 Text(r.action,
-                    style: GoogleFonts.lora(fontSize: 9, color: AppTheme.textTertiary)),
+                    style: GoogleFonts.lora(
+                        fontSize: 9, color: AppTheme.textTertiary)),
               ]),
             )),
       ],
@@ -583,7 +582,7 @@ class NewsSection extends StatelessWidget {
   Widget build(BuildContext context) {
     if (a.companyNews.isEmpty) return const SizedBox.shrink();
     return Column(
-      children: a.companyNews.take(8).map((n) {
+        children: a.companyNews.take(8).map((n) {
       return GestureDetector(
         onTap: () {
           if (n.url.isNotEmpty) launchUrl(Uri.parse(n.url));
@@ -622,10 +621,12 @@ class NewsSection extends StatelessWidget {
                   if (n.summary.isNotEmpty && n.summary != 'N/A') ...[
                     const SizedBox(height: 4),
                     Text(n.summary,
-                      maxLines: 3,
+                        maxLines: 3,
                         overflow: TextOverflow.ellipsis,
                         style: GoogleFonts.lora(
-                            fontSize: 10, color: AppTheme.textTertiary, height: 1.4)),
+                            fontSize: 10,
+                            color: AppTheme.textTertiary,
+                            height: 1.4)),
                   ],
                 ])),
             Icon(Icons.chevron_right,
@@ -692,10 +693,8 @@ class SentimentSection extends StatelessWidget {
         : score < 40
             ? AppTheme.negative
             : AppTheme.warning;
-    return Container(
-      padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(
-          border: Border.all(color: color.withValues(alpha: 0.2))),
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 8),
       child: Column(children: [
         Text(label,
             style: GoogleFonts.lora(
@@ -787,8 +786,8 @@ class PeersSection extends StatelessWidget {
                     const SizedBox(width: 8),
                     Text(
                         'P/E ${p.peRatio > 0 ? p.peRatio.toStringAsFixed(1) : "N/A"}',
-                        style:
-                            GoogleFonts.lora(fontSize: 9, color: AppTheme.textTertiary)),
+                        style: GoogleFonts.lora(
+                            fontSize: 9, color: AppTheme.textTertiary)),
                     const SizedBox(width: 8),
                     Flexible(
                         child: FittedBox(
@@ -942,8 +941,8 @@ class EpsTrendSection extends StatelessWidget {
             Expanded(
                 child: Text(m['numAnalysts']?.toString() ?? '-',
                     textAlign: TextAlign.right,
-                    style:
-                        GoogleFonts.lora(fontSize: 10, color: AppTheme.textTertiary))),
+                    style: GoogleFonts.lora(
+                        fontSize: 10, color: AppTheme.textTertiary))),
           ]),
         );
       }),
@@ -997,8 +996,8 @@ class InstitutionalHoldersSection extends StatelessWidget {
                   width: 55,
                   child: Text(valStr,
                       textAlign: TextAlign.right,
-                      style:
-                          GoogleFonts.lora(fontSize: 9, color: AppTheme.textTertiary))),
+                      style: GoogleFonts.lora(
+                          fontSize: 9, color: AppTheme.textTertiary))),
           ]),
         );
       }),
@@ -1120,8 +1119,7 @@ class RangeBarSection extends StatelessWidget {
                   Border.all(color: AppTheme.positive.withValues(alpha: 0.2)),
               color: AppTheme.positive.withValues(alpha: 0.02)),
           child: Row(children: [
-            const Icon(Icons.payments,
-                size: 14, color: AppTheme.positive),
+            const Icon(Icons.payments, size: 14, color: AppTheme.positive),
             const SizedBox(width: 10),
             Expanded(
                 child: Column(
@@ -1157,11 +1155,9 @@ class RangeBarSection extends StatelessWidget {
       const SizedBox(width: 4),
       Text(label,
           style: GoogleFonts.lora(
-              fontSize: 7, fontWeight: FontWeight.w700, color: AppTheme.textTertiary)),
+              fontSize: 7,
+              fontWeight: FontWeight.w700,
+              color: AppTheme.textTertiary)),
     ]);
   }
 }
-
-
-
-
