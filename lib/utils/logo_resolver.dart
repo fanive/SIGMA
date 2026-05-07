@@ -1,5 +1,5 @@
 class LogoResolver {
-  static const String _backendBase = 'https://sigma-yfinance-api.onrender.com';
+  static const String _backendBase = 'https://fanive-sigma-api.hf.space';
 
   static String endpoint(String ticker, {bool json = false}) {
     final symbol = ticker.toUpperCase().trim();

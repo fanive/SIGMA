@@ -1377,10 +1377,54 @@ class _NoteCover extends StatelessWidget {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Expanded(
-                  child: _CoverKV(
-                      label: 'PRIX ACTUEL',
-                      value: _displayCurrentPrice(a),
-                      isDark: isDark)),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text('PRIX ACTUEL', style: _sectionLabel(dim)),
+                    const SizedBox(height: 5),
+                    Row(
+                      crossAxisAlignment: CrossAxisAlignment.center,
+                      children: [
+                        Text(
+                          _displayCurrentPrice(a),
+                          style: GoogleFonts.lora(
+                            fontSize: 15,
+                            fontWeight: FontWeight.w700,
+                            letterSpacing: 0.3,
+                            color: txt,
+                          ),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                        if (a.changePercent != null) ...[
+                          const SizedBox(width: 6),
+                          Container(
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 5, vertical: 2),
+                            decoration: BoxDecoration(
+                              color: (a.changePercent! >= 0
+                                      ? AppTheme.positive
+                                      : AppTheme.negative)
+                                  .withValues(alpha: 0.10),
+                              borderRadius: BorderRadius.circular(2),
+                            ),
+                            child: Text(
+                              '${a.changePercent! >= 0 ? '+' : ''}${a.changePercent!.toStringAsFixed(2)}%',
+                              style: GoogleFonts.lora(
+                                fontSize: 10,
+                                fontWeight: FontWeight.w800,
+                                color: a.changePercent! >= 0
+                                    ? AppTheme.positive
+                                    : AppTheme.negative,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ],
+                    ),
+                  ],
+                ),
+              ),
               if (targetPrice > 0) ...[
                 const SizedBox(width: 16),
                 Expanded(
@@ -3386,6 +3430,144 @@ class _ValuationGrid extends StatelessWidget {
   }
 }
 
+// ════════════════════════════════════════════════════════════════════════════
+//  TECHNICAL SIGNAL TABLE — 3-column: indicator | value | colored badge
+// ════════════════════════════════════════════════════════════════════════════
+
+class _TechnicalSignalTable extends StatelessWidget {
+  final List<TechnicalIndicator> signals;
+  final bool isDark;
+
+  const _TechnicalSignalTable({required this.signals, required this.isDark});
+
+  Color _signalColor(String interpretation) {
+    final up = interpretation.toUpperCase().trim();
+    if (up.contains('BULLISH') ||
+        up.contains('STRONG BUY') ||
+        up == 'BUY' ||
+        up.contains('OVERSOLD') ||
+        up.contains('UPTREND') ||
+        up.contains('POSITIVE')) {
+      return AppTheme.positive;
+    }
+    if (up.contains('BEARISH') ||
+        up.contains('STRONG SELL') ||
+        up == 'SELL' ||
+        up.contains('OVERBOUGHT') ||
+        up.contains('DOWNTREND') ||
+        up.contains('NEGATIVE')) {
+      return AppTheme.negative;
+    }
+    // NEUTRAL, HOLD, WAIT, MIXED → amber
+    return const Color(0xFFFFC107);
+  }
+
+  String _signalLabel(String interpretation) {
+    final up = interpretation.toUpperCase().trim();
+    if (up.isEmpty) return '—';
+    // Normalize well-known labels
+    const known = [
+      'STRONG BUY',
+      'BUY',
+      'STRONG SELL',
+      'SELL',
+      'HOLD',
+      'NEUTRAL',
+      'OVERSOLD',
+      'OVERBOUGHT',
+      'BULLISH',
+      'BEARISH',
+      'WAIT',
+      'MIXED',
+      'UPTREND',
+      'DOWNTREND',
+      'POSITIVE',
+      'NEGATIVE',
+    ];
+    for (final k in known) {
+      if (up.contains(k)) return k;
+    }
+    return up.length > 11 ? '${up.substring(0, 11)}…' : up;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final txt = isDark ? _kDarkText : _kLightText;
+    final dim = isDark ? _kDarkDim : _kLightDim;
+    final border = isDark ? _kDarkBorder : _kLightBorder;
+
+    return Column(
+      children: signals.asMap().entries.map((entry) {
+        final t = entry.value;
+        final isLast = entry.key == signals.length - 1;
+        final sigColor = _signalColor(t.interpretation);
+        final sigLabel = _signalLabel(t.interpretation);
+
+        return Container(
+          padding: const EdgeInsets.symmetric(vertical: 9),
+          decoration: isLast
+              ? null
+              : BoxDecoration(
+                  border: Border(
+                    bottom: BorderSide(color: border, width: 0.5),
+                  ),
+                ),
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.center,
+            children: [
+              // Indicator name
+              Expanded(
+                flex: 4,
+                child: Text(
+                  t.indicator,
+                  style: _metricLabel(dim),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ),
+              const SizedBox(width: 8),
+              // Value
+              Expanded(
+                flex: 3,
+                child: Text(
+                  t.value,
+                  style: _metricValue(txt),
+                  textAlign: TextAlign.center,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ),
+              const SizedBox(width: 8),
+              // Signal badge
+              Container(
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
+                decoration: BoxDecoration(
+                  color: sigColor.withValues(alpha: 0.10),
+                  border: Border.all(
+                      color: sigColor.withValues(alpha: 0.30), width: 0.5),
+                  borderRadius: BorderRadius.circular(2),
+                ),
+                child: Text(
+                  sigLabel,
+                  style: GoogleFonts.lora(
+                    fontSize: 8,
+                    fontWeight: FontWeight.w800,
+                    color: sigColor,
+                    letterSpacing: 0.7,
+                  ),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ),
+            ],
+          ),
+        );
+      }).toList(),
+    );
+  }
+}
+
 class _TechnicalSignalsBlock extends StatelessWidget {
   final AnalysisData a;
   final bool isDark;
@@ -3394,16 +3576,16 @@ class _TechnicalSignalsBlock extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final rows = a.technicalAnalysis
+    final signals = a.technicalAnalysis
         .where((t) => _hasText(t.indicator) && _hasText(t.value))
-        .take(8)
-        .map((t) => _KV(t.indicator, '${t.value}  |  ${t.interpretation}'))
+        .take(10)
         .toList(growable: false);
 
-    if (rows.isNotEmpty) {
-      return _MetricTable(rows: rows, isDark: isDark);
+    if (signals.isNotEmpty) {
+      return _TechnicalSignalTable(signals: signals, isDark: isDark);
     }
 
+    // Fallback when no technical data yet
     final fallback = <_KV>[];
     if (_hasText(a.tradeSetup.cleanEntryZone)) {
       fallback.add(_KV('Zone entree', a.tradeSetup.cleanEntryZone));
