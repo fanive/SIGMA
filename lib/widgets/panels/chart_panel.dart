@@ -23,6 +23,7 @@ class _ChartPanelState extends State<ChartPanel> {
     return ResearchPanelContainer(
       title: 'Market Workbench${ticker != null ? " — $ticker" : ""}',
       icon: Icons.query_stats_rounded,
+      showHeader: false,
       child: ticker == null ? _noTicker() : _chart(ticker),
     );
   }

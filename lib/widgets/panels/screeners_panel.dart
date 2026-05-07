@@ -64,6 +64,7 @@ class _ScreenersPanelState extends State<ScreenersPanel> {
     return ResearchPanelContainer(
       title: 'Screeners',
       icon: Icons.filter_alt_rounded,
+      showHeader: false,
       actions: [
         IconButton(
           tooltip: 'Refresh',
@@ -105,9 +106,16 @@ class _ScreenersPanelState extends State<ScreenersPanel> {
                   onRefresh: _refresh,
                   child: ListView.separated(
                     physics: const AlwaysScrollableScrollPhysics(),
-                    padding: const EdgeInsets.fromLTRB(12, 8, 12, 18),
+                    padding: const EdgeInsets.only(bottom: 24),
                     itemCount: rows.length,
-                    separatorBuilder: (_, __) => const SizedBox(height: 8),
+                    separatorBuilder: (_, __) => Divider(
+                      height: 0.5,
+                      thickness: 0.5,
+                      indent: 46,
+                      color: AppTheme.isDark(context)
+                          ? AppTheme.white10
+                          : AppTheme.black.withValues(alpha: 0.06),
+                    ),
                     itemBuilder: (context, index) => _resultRow(
                       context,
                       rows[index],
@@ -209,94 +217,96 @@ class _ScreenersPanelState extends State<ScreenersPanel> {
   }
 
   Widget _resultRow(BuildContext context, Map<String, dynamic> row, int index) {
-    final isDark = AppTheme.isDark(context);
     final symbol = _text(row['symbol']);
     final title = _rowTitle(row);
     final subtitle = _rowSubtitle(row);
     final metric = _rowMetric(row);
     final accent = _rowAccent(row);
 
-    return Container(
-      constraints: const BoxConstraints(minHeight: 76),
-      padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(
-        color: isDark ? AppTheme.bgSecondary : AppTheme.white,
-        borderRadius: BorderRadius.circular(8),
-        border: Border.all(
-          color: isDark
-              ? AppTheme.white10
-              : AppTheme.black.withValues(alpha: 0.06),
-          width: 0.8,
-        ),
-      ),
-      child: Row(
-        children: [
-          SizedBox(
-            width: 34,
-            child: Text(
-              '${index + 1}',
-              textAlign: TextAlign.center,
-              style: GoogleFonts.lora(
-                fontSize: 12,
-                fontWeight: FontWeight.w800,
-                color: AppTheme.getSecondaryText(context),
+    return InkWell(
+      onTap: symbol.isNotEmpty
+          ? () {
+              context.read<TerminalProvider>().openNoteLab(ticker: symbol);
+              context.read<SigmaProvider>().analyzeTicker(symbol);
+            }
+          : null,
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.center,
+          children: [
+            // ── Rank ────────────────────────────────────────────────
+            SizedBox(
+              width: 22,
+              child: Text(
+                '${index + 1}',
+                textAlign: TextAlign.center,
+                style: GoogleFonts.lora(
+                  fontSize: 10,
+                  fontWeight: FontWeight.w700,
+                  color: AppTheme.getSecondaryText(context).withValues(alpha: 0.5),
+                ),
               ),
             ),
-          ),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                Wrap(
-                  spacing: 8,
-                  runSpacing: 4,
-                  crossAxisAlignment: WrapCrossAlignment.center,
-                  children: [
-                    if (symbol.isNotEmpty)
-                      Text(
-                        symbol,
-                        style: GoogleFonts.lora(
-                          fontSize: 14,
-                          fontWeight: FontWeight.w900,
-                          color: AppTheme.getPrimaryText(context),
+            const SizedBox(width: 10),
+            // ── Symbol + title ───────────────────────────────────────
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Row(
+                    crossAxisAlignment: CrossAxisAlignment.baseline,
+                    textBaseline: TextBaseline.alphabetic,
+                    children: [
+                      if (symbol.isNotEmpty) ...[
+                        Text(
+                          symbol,
+                          style: GoogleFonts.lora(
+                            fontSize: 13,
+                            fontWeight: FontWeight.w900,
+                            color: AppTheme.getPrimaryText(context),
+                          ),
+                        ),
+                        const SizedBox(width: 6),
+                      ],
+                      Flexible(
+                        child: Text(
+                          title,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: GoogleFonts.lora(
+                            fontSize: 11,
+                            fontWeight: FontWeight.w500,
+                            color: AppTheme.getSecondaryText(context),
+                          ),
                         ),
                       ),
-                    Text(
-                      title,
-                      style: GoogleFonts.lora(
-                        fontSize: 12,
-                        fontWeight: FontWeight.w600,
-                        color: AppTheme.getPrimaryText(context),
-                      ),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 5),
-                Text(
-                  subtitle,
-                  maxLines: 2,
-                  overflow: TextOverflow.ellipsis,
-                  style: GoogleFonts.lora(
-                    fontSize: 11,
-                    height: 1.25,
-                    color: AppTheme.getSecondaryText(context),
+                    ],
                   ),
-                ),
-              ],
+                  const SizedBox(height: 3),
+                  Text(
+                    subtitle,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: GoogleFonts.lora(
+                      fontSize: 10,
+                      height: 1.3,
+                      color: AppTheme.getSecondaryText(context)
+                          .withValues(alpha: 0.7),
+                    ),
+                  ),
+                ],
+              ),
             ),
-          ),
-          const SizedBox(width: 10),
-          SizedBox(
-            width: 108,
-            child: Column(
+            const SizedBox(width: 10),
+            // ── Metric + actions ─────────────────────────────────────
+            Column(
               crossAxisAlignment: CrossAxisAlignment.end,
-              mainAxisAlignment: MainAxisAlignment.center,
+              mainAxisSize: MainAxisSize.min,
               children: [
                 Text(
                   metric,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
                   style: GoogleFonts.lora(
                     fontSize: 13,
                     fontWeight: FontWeight.w900,
@@ -304,13 +314,13 @@ class _ScreenersPanelState extends State<ScreenersPanel> {
                   ),
                 ),
                 if (symbol.isNotEmpty) ...[
-                  const SizedBox(height: 6),
+                  const SizedBox(height: 4),
                   _quickActions(context, symbol),
                 ],
               ],
             ),
-          ),
-        ],
+          ],
+        ),
       ),
     );
   }

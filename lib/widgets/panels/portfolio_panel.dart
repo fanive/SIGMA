@@ -20,6 +20,7 @@ class PortfolioPanel extends StatelessWidget {
     return ResearchPanelContainer(
       title: context.t('portfolio'),
       icon: Icons.account_balance_wallet,
+      showHeader: false,
       child: Consumer<SigmaProvider>(
         builder: (context, sp, _) {
           return ListView(
