@@ -1,0 +1,65 @@
+name: Deploy backend to Hugging Face Spaces
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'backend/**'
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install huggingface_hub
+        run: pip install huggingface_hub
+
+      - name: Prepare Space files
+        run: |
+          # Copy backend folder to a staging area
+          cp -r backend /tmp/hf_space
+
+          # HF Spaces requires README.md with YAML frontmatter at the root
+          cp /tmp/hf_space/hf_README.md /tmp/hf_space/README.md
+          rm /tmp/hf_space/hf_README.md
+
+          # Remove files not needed on the Space
+          rm -rf /tmp/hf_space/data/
+          rm -rf /tmp/hf_space/__pycache__/
+          rm -rf /tmp/hf_space/yf_core/
+          rm -f  /tmp/hf_space/run_collector.py
+          rm -f  /tmp/hf_space/validate_yfinance.py
+          rm -f  /tmp/hf_space/cloud_setup.md
+          rm -f  /tmp/hf_space/render.yaml
+          rm -f  /tmp/hf_space/watchlist.txt
+          rm -f  /tmp/hf_space/start_data_server.bat
+          rm -f  /tmp/hf_space/start_server.bat
+
+      - name: Push to Hugging Face Space
+        env:
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
+          # Update HF_REPO_ID to: YOUR_HF_USERNAME/sigma-api
+          HF_REPO_ID: ${{ secrets.HF_REPO_ID }}
+        run: |
+          python - <<'EOF'
+          import os
+          from huggingface_hub import HfApi
+
+          api = HfApi()
+          api.upload_folder(
+              folder_path="/tmp/hf_space",
+              repo_id=os.environ["HF_REPO_ID"],
+              repo_type="space",
+              token=os.environ["HF_TOKEN"],
+              commit_message="Deploy from GitHub Actions",
+              delete_patterns=["*.pyc", "__pycache__/"],
+          )
+          print("Deployment complete!")
+          EOF
