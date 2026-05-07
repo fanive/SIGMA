@@ -17,6 +17,8 @@ import '../../theme/app_theme.dart';
 import '../institutional/institutional_components.dart';
 import '../../utils/logo_resolver.dart';
 import '../../utils/financial_decision_engine.dart';
+import '../../services/sigma_api_service.dart';
+import '../analysis/analysis_sections.dart' show AiSentimentSection;
 import 'package:url_launcher/url_launcher.dart';
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -1037,6 +1039,14 @@ class _ResearchNoteScroll extends StatelessWidget {
             label: 'MARKET INTELLIGENCE',
             child: _NewsDigest(news: a.companyNews, isDark: isDark),
           ),
+
+        // 10bis. AI News Sentiment — FinBERT via Hugging Face
+        _Section(
+          isDark: isDark,
+          label: 'AI NEWS SENTIMENT',
+          meta: 'FinBERT · Hugging Face Inference API',
+          child: _AiSentimentBlock(symbol: a.ticker, isDark: isDark),
+        ),
 
         // 11. Hypotheses & Limits
         _Section(
@@ -3655,6 +3665,62 @@ class _NewsDigest extends StatelessWidget {
           ),
         );
       }).toList(),
+    );
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// AI SENTIMENT BLOCK — loads FinBERT sentiment lazily
+// ─────────────────────────────────────────────────────────────────────────────
+class _AiSentimentBlock extends StatefulWidget {
+  final String symbol;
+  final bool isDark;
+
+  const _AiSentimentBlock({required this.symbol, required this.isDark});
+
+  @override
+  State<_AiSentimentBlock> createState() => _AiSentimentBlockState();
+}
+
+class _AiSentimentBlockState extends State<_AiSentimentBlock> {
+  late final Future<Map<String, dynamic>> _future;
+
+  @override
+  void initState() {
+    super.initState();
+    _future = SigmaApiService.getAiSentiment(widget.symbol);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return FutureBuilder<Map<String, dynamic>>(
+      future: _future,
+      builder: (ctx, snap) {
+        if (snap.connectionState == ConnectionState.waiting) {
+          return Padding(
+            padding: const EdgeInsets.symmetric(vertical: 12),
+            child: Row(children: [
+              const SizedBox(
+                  width: 14,
+                  height: 14,
+                  child: CircularProgressIndicator(strokeWidth: 1.5)),
+              const SizedBox(width: 10),
+              Text('Analyse FinBERT en cours...',
+                  style: GoogleFonts.lora(
+                      fontSize: 11, color: AppTheme.textTertiary)),
+            ]),
+          );
+        }
+        if (snap.hasError || !snap.hasData || snap.data!.isEmpty) {
+          return Padding(
+            padding: const EdgeInsets.symmetric(vertical: 8),
+            child: Text('Sentiment IA indisponible pour ce ticker.',
+                style: GoogleFonts.lora(
+                    fontSize: 11, color: AppTheme.textTertiary)),
+          );
+        }
+        return AiSentimentSection(snap.data);
+      },
     );
   }
 }

@@ -527,6 +527,50 @@ class SigmaApiService {
     }
     return {};
   }
+
+  // ═══════════════════════════════════════════════════════════════════════
+  // AI — HUGGING FACE  /ai/{symbol}/sentiment | /summary | /analysis
+  // ═══════════════════════════════════════════════════════════════════════
+
+  /// FinBERT sentiment on latest news headlines.
+  /// Returns { aggregate, confidence, counts, articles }
+  static Future<Map<String, dynamic>> getAiSentiment(String ticker) async {
+    final key = 'ai_sentiment:${ticker.toUpperCase()}';
+    final cached = _getCache<Map<String, dynamic>>(key);
+    if (cached != null) return cached;
+
+    final data = await _get(
+      '/ai/${ticker.toUpperCase()}/sentiment',
+      timeout: const Duration(seconds: 60),
+      retries: 1,
+    );
+    if (data is Map) {
+      final m = Map<String, dynamic>.from(data);
+      _setCache(key, m, const Duration(minutes: 5));
+      return m;
+    }
+    return {};
+  }
+
+  /// BART AI summary of the company profile.
+  /// Returns { symbol, summary, source }
+  static Future<Map<String, dynamic>> getAiSummary(String ticker) async {
+    final key = 'ai_summary:${ticker.toUpperCase()}';
+    final cached = _getCache<Map<String, dynamic>>(key);
+    if (cached != null) return cached;
+
+    final data = await _get(
+      '/ai/${ticker.toUpperCase()}/summary',
+      timeout: const Duration(seconds: 90),
+      retries: 1,
+    );
+    if (data is Map) {
+      final m = Map<String, dynamic>.from(data);
+      _setCache(key, m, const Duration(minutes: 10));
+      return m;
+    }
+    return {};
+  }
 }
 
 // ── Internal cache entry ────────────────────────────────────────────────────

@@ -1161,3 +1161,100 @@ class RangeBarSection extends StatelessWidget {
     ]);
   }
 }
+
+/// 16 — AI SENTIMENT (Hugging Face FinBERT)
+class AiSentimentSection extends StatelessWidget {
+  /// Raw JSON from /ai/{symbol}/sentiment
+  final Map<String, dynamic>? data;
+  const AiSentimentSection(this.data, {super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    if (data == null || data!.isEmpty) {
+      return const Center(
+          child: Padding(
+              padding: EdgeInsets.symmetric(vertical: 16),
+              child: Text('Sentiment IA indisponible',
+                  style: TextStyle(color: Colors.grey))));
+    }
+
+    final aggregate = (data!['aggregate'] ?? '').toString().toUpperCase();
+    final confidence = (data!['confidence'] ?? 0.0) as num;
+    final counts = data!['counts'] as Map? ?? {};
+    final articles = (data!['articles'] as List? ?? []).cast<Map>();
+
+    final sentimentColor = aggregate == 'POSITIVE'
+        ? AppTheme.positive
+        : aggregate == 'NEGATIVE'
+            ? AppTheme.negative
+            : AppTheme.warning;
+
+    return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+      // Aggregate badge
+      Row(children: [
+        Container(
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+          decoration: BoxDecoration(
+              color: sentimentColor.withAlpha(30),
+              border: Border.all(color: sentimentColor, width: 1),
+              borderRadius: BorderRadius.circular(4)),
+          child: Text(aggregate,
+              style: GoogleFonts.lora(
+                  fontSize: 14,
+                  fontWeight: FontWeight.w900,
+                  color: sentimentColor)),
+        ),
+        const SizedBox(width: 12),
+        Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Text('CONFIANCE ${(confidence * 100).toInt()}%',
+              style: GoogleFonts.lora(
+                  fontSize: 9,
+                  fontWeight: FontWeight.w700,
+                  color: AppTheme.textTertiary)),
+          Text(
+              '${counts['positive'] ?? 0}+ / ${counts['neutral'] ?? 0}= / ${counts['negative'] ?? 0}-',
+              style: GoogleFonts.lora(
+                  fontSize: 9, color: AppTheme.textTertiary)),
+        ]),
+      ]),
+      const SizedBox(height: 12),
+      // Per-article list
+      ...articles.take(6).map((art) {
+        final label = (art['sentiment'] ?? '').toString().toUpperCase();
+        final score = (art['score'] ?? 0.0) as num;
+        final color = label == 'POSITIVE'
+            ? AppTheme.positive
+            : label == 'NEGATIVE'
+                ? AppTheme.negative
+                : AppTheme.textTertiary;
+        return Padding(
+          padding: const EdgeInsets.only(bottom: 8),
+          child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            SizedBox(
+                width: 6,
+                child: Padding(
+                    padding: const EdgeInsets.only(top: 4),
+                    child: Container(
+                        width: 6,
+                        height: 6,
+                        decoration: BoxDecoration(
+                            color: color, shape: BoxShape.circle)))),
+            const SizedBox(width: 8),
+            Expanded(
+                child: Text(art['headline']?.toString() ?? '',
+                    style: GoogleFonts.lora(
+                        fontSize: 10, fontWeight: FontWeight.w600),
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis)),
+            const SizedBox(width: 8),
+            Text('${(score * 100).toInt()}%',
+                style: GoogleFonts.lora(
+                    fontSize: 9,
+                    fontWeight: FontWeight.w800,
+                    color: color)),
+          ]),
+        );
+      }),
+    ]);
+  }
+}

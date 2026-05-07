@@ -2177,11 +2177,201 @@ def _scrape_google_finance_safe(ticker: str, raise_on_error: bool = False):
     return {"symbol": ticker, "source": "Google Finance", "attemptedUrls": attempted_urls, "error": str(last_err) if last_err else None}
 
 
+# ---------------------------------------------------------------------------
+# AI Router — Hugging Face Inference API
+# ---------------------------------------------------------------------------
+ai_router = APIRouter(prefix="/ai", tags=["AI"])
+
+_HF_TOKEN = os.getenv("HF_TOKEN", "")
+_HF_HEADERS = lambda: {"Authorization": f"Bearer {_HF_TOKEN}"} if _HF_TOKEN else {}
+_HF_API = "https://api-inference.huggingface.co/models"
+
+_cache_ai_sentiment = TTLCache(maxsize=200, ttl=300)   # 5min
+_cache_ai_summary   = TTLCache(maxsize=100, ttl=600)   # 10min
+
+
+def _hf_post(model: str, payload: dict, timeout: int = 30) -> Any:
+    """POST to HF Inference API with cold-start retry (model may be loading)."""
+    url = f"{_HF_API}/{model}"
+    for attempt in range(3):
+        r = _requests.post(url, headers=_HF_HEADERS(), json=payload, timeout=timeout)
+        if r.status_code == 503:
+            # Model loading — wait and retry
+            estimated = r.json().get("estimated_time", 20)
+            time.sleep(min(float(estimated), 20))
+            continue
+        r.raise_for_status()
+        return r.json()
+    raise HTTPException(status_code=503, detail="HF model unavailable after retries")
+
+
+@ai_router.get("/{symbol}/sentiment")
+async def ai_sentiment(symbol: str):
+    """
+    FinBERT sentiment on the latest news headlines for a ticker.
+    Returns per-article scores + an aggregate (positive/negative/neutral).
+    """
+    sym = symbol.upper().strip()
+
+    def _fetch():
+        # Get news from existing endpoint cache
+        t = yf.Ticker(sym)
+        raw = t.news or []
+        headlines = []
+        for item in raw[:10]:
+            c = item.get("content") or item
+            title = c.get("title") or ""
+            if title:
+                headlines.append(title)
+
+        if not headlines:
+            return {"symbol": sym, "headlines": [], "aggregate": None, "articles": []}
+
+        results = _hf_post(
+            "ProsusAI/finbert",
+            {"inputs": headlines},
+            timeout=45,
+        )
+
+        articles = []
+        counts = {"positive": 0, "negative": 0, "neutral": 0}
+        for headline, scores in zip(headlines, results):
+            top = max(scores, key=lambda x: x["score"])
+            label = top["label"].lower()
+            counts[label] = counts.get(label, 0) + 1
+            articles.append({
+                "headline": headline,
+                "sentiment": label,
+                "score": round(top["score"], 4),
+                "all": {s["label"].lower(): round(s["score"], 4) for s in scores},
+            })
+
+        total = sum(counts.values()) or 1
+        aggregate = max(counts, key=counts.get)
+        return {
+            "symbol": sym,
+            "aggregate": aggregate,
+            "confidence": round(counts[aggregate] / total, 2),
+            "counts": counts,
+            "articles": articles,
+        }
+
+    try:
+        return _cached(_cache_ai_sentiment, sym, _fetch, retries=1)
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail={"error": str(e), "symbol": sym})
+
+
+@ai_router.get("/{symbol}/summary")
+async def ai_summary(symbol: str):
+    """
+    AI-generated summary of the company profile using BART.
+    Summarizes the longBusinessSummary field from yfinance.
+    """
+    sym = symbol.upper().strip()
+
+    def _fetch():
+        t = yf.Ticker(sym)
+        info = t.info or {}
+        text = info.get("longBusinessSummary") or info.get("description") or ""
+        if not text or len(text) < 100:
+            return {"symbol": sym, "summary": text or None, "source": "yfinance_raw"}
+
+        # BART summarization — truncate to 1024 tokens max
+        result = _hf_post(
+            "facebook/bart-large-cnn",
+            {
+                "inputs": text[:3000],
+                "parameters": {"max_length": 120, "min_length": 40, "do_sample": False},
+            },
+            timeout=60,
+        )
+        summary = result[0]["summary_text"] if isinstance(result, list) else text
+        return {"symbol": sym, "summary": summary, "original_length": len(text), "source": "bart"}
+
+    try:
+        return _cached(_cache_ai_summary, sym, _fetch, retries=1)
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail={"error": str(e), "symbol": sym})
+
+
+@ai_router.get("/{symbol}/analysis")
+async def ai_analysis(symbol: str):
+    """
+    Combined AI analysis: sentiment + summary in one call.
+    Used by the Flutter ANALYSE tab.
+    """
+    sym = symbol.upper().strip()
+    cache_key = f"analysis:{sym}"
+
+    def _fetch():
+        # Run both in parallel threads
+        import concurrent.futures
+        with concurrent.futures.ThreadPoolExecutor(max_workers=2) as ex:
+            f_sentiment = ex.submit(_hf_post, "ProsusAI/finbert",
+                                    {"inputs": _get_headlines(sym)}, 45)
+            f_profile   = ex.submit(_get_profile_text, sym)
+            headlines_raw, profile_text = f_sentiment.result(), f_profile.result()
+
+        # Sentiment aggregate
+        headlines = _get_headlines(sym)
+        sentiment_result = None
+        if headlines:
+            scores_list = headlines_raw if isinstance(headlines_raw, list) else []
+            counts = {"positive": 0, "negative": 0, "neutral": 0}
+            for scores in scores_list:
+                if isinstance(scores, list):
+                    top = max(scores, key=lambda x: x["score"])
+                    counts[top["label"].lower()] = counts.get(top["label"].lower(), 0) + 1
+            total = sum(counts.values()) or 1
+            agg = max(counts, key=counts.get)
+            sentiment_result = {"aggregate": agg, "confidence": round(counts[agg] / total, 2), "counts": counts}
+
+        # Summary
+        summary = None
+        if profile_text and len(profile_text) >= 100:
+            res = _hf_post("facebook/bart-large-cnn",
+                           {"inputs": profile_text[:3000],
+                            "parameters": {"max_length": 120, "min_length": 40, "do_sample": False}},
+                           timeout=60)
+            summary = res[0]["summary_text"] if isinstance(res, list) else None
+
+        return {"symbol": sym, "sentiment": sentiment_result, "summary": summary}
+
+    try:
+        return _cached(_cache_ai_sentiment, cache_key, _fetch, retries=1)
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail={"error": str(e), "symbol": sym})
+
+
+def _get_headlines(sym: str) -> list:
+    try:
+        raw = yf.Ticker(sym).news or []
+        return [((item.get("content") or item).get("title") or "") for item in raw[:10] if (item.get("content") or item).get("title")]
+    except Exception:
+        return []
+
+
+def _get_profile_text(sym: str) -> str:
+    try:
+        info = yf.Ticker(sym).info or {}
+        return info.get("longBusinessSummary") or info.get("description") or ""
+    except Exception:
+        return ""
+
+
 # --- Register Routers ---
 app.include_router(search_router)
 app.include_router(equities_router)
 app.include_router(market_router)
 app.include_router(macro_router)
+app.include_router(ai_router)
 
 if __name__ == "__main__":
     import uvicorn
