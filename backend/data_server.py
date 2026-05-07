@@ -2351,15 +2351,42 @@ async def ai_analysis(symbol: str):
 
 
 def _get_headlines(sym: str) -> list:
+    """Get news headlines reusing the /equities/{sym}/news cache to avoid direct yfinance calls."""
     try:
-        raw = yf.Ticker(sym).news or []
-        return [((item.get("content") or item).get("title") or "") for item in raw[:10] if (item.get("content") or item).get("title")]
+        # Reuse the existing news cache (same cache used by the /equities/{sym}/news endpoint)
+        cached = _cache_news.get(sym)
+        if cached is not None:
+            articles = cached.get("articles") or []
+            return [a["title"] for a in articles[:10] if a.get("title")]
+
+        # Not in cache yet — fetch directly and populate the cache
+        t = yf.Ticker(sym)
+        raw = t.news or []
+        items = []
+        headlines = []
+        for item in raw[:10]:
+            c = item.get("content") or item
+            title = c.get("title") or ""
+            if title:
+                headlines.append(title)
+                items.append({"title": title})
+        # Warm the news cache so the /news endpoint benefits too
+        _cache_news[sym] = {"symbol": sym, "articles": items, "source": "yfinance"}
+        return headlines
     except Exception:
         return []
 
 
 def _get_profile_text(sym: str) -> str:
+    """Get company profile text reusing the price/profile cache."""
     try:
+        # Try price cache first (same key used by /equities/{sym}/profile)
+        cached = _cache_price.get(sym)
+        if cached is not None:
+            text = cached.get("longBusinessSummary") or cached.get("description") or ""
+            if text:
+                return text
+        # Fallback: direct yfinance call
         info = yf.Ticker(sym).info or {}
         return info.get("longBusinessSummary") or info.get("description") or ""
     except Exception:

@@ -5,11 +5,14 @@ import 'package:provider/provider.dart';
 import '../../models/sigma_models.dart';
 import '../../providers/sigma_provider.dart';
 import '../../providers/terminal_provider.dart';
+import '../../services/sigma_api_service.dart';
 import '../../services/sigma_market_data_service.dart';
 import '../../theme/app_theme.dart';
 import '../terminal/research_panel.dart';
 
-enum _ScreenerView { picks, ratings, smartMoney, holdings, alerts }
+// Gainers / Losers / Most-Active → 1 appel backend each (scraping Yahoo Finance)
+// Smart Money / Alerts → sur univers réduit de 12 tickers pour limiter les appels
+enum _ScreenerView { gainers, losers, active, smartMoney, alerts }
 
 class ScreenersPanel extends StatefulWidget {
   const ScreenersPanel({super.key});
@@ -20,7 +23,7 @@ class ScreenersPanel extends StatefulWidget {
 
 class _ScreenersPanelState extends State<ScreenersPanel> {
   final SigmaMarketDataService _service = SigmaMarketDataService();
-  _ScreenerView _activeView = _ScreenerView.picks;
+  _ScreenerView _activeView = _ScreenerView.gainers;
   late Future<List<Map<String, dynamic>>> _future;
 
   @override
@@ -30,19 +33,16 @@ class _ScreenersPanelState extends State<ScreenersPanel> {
   }
 
   Future<List<Map<String, dynamic>>> _load() async {
-    final remote = switch (_activeView) {
-      _ScreenerView.picks => _service.getResearchStockPicks(limit: 16),
-      _ScreenerView.ratings => _service.screenAnalystRatings(limit: 20),
-      _ScreenerView.smartMoney => _service.screenSmartMoney(limit: 20),
-      _ScreenerView.holdings => _service.screenTopHoldings(limit: 30),
-      _ScreenerView.alerts => _service.getAnalystRatingAlerts(limit: 30),
-    };
-
     try {
-      final rows = await remote;
-      return rows.isNotEmpty ? rows : _fallbackRows();
+      return switch (_activeView) {
+        _ScreenerView.gainers    => await SigmaApiService.getGainers(),
+        _ScreenerView.losers     => await SigmaApiService.getLosers(),
+        _ScreenerView.active     => await SigmaApiService.getMostActive(),
+        _ScreenerView.smartMoney => await _service.screenSmartMoney(limit: 12),
+        _ScreenerView.alerts     => await _service.getAnalystRatingAlerts(limit: 15),
+      };
     } catch (_) {
-      return _fallbackRows();
+      return [];
     }
   }
 
@@ -134,11 +134,11 @@ class _ScreenersPanelState extends State<ScreenersPanel> {
   Widget _viewTabs(BuildContext context) {
     final isDark = AppTheme.isDark(context);
     final tabs = [
-      (_ScreenerView.picks, Icons.stars_rounded, 'Picks'),
-      (_ScreenerView.ratings, Icons.verified_rounded, 'Ratings'),
-      (_ScreenerView.smartMoney, Icons.account_balance_rounded, 'Smart'),
-      (_ScreenerView.holdings, Icons.business_center_rounded, 'Holdings'),
-      (_ScreenerView.alerts, Icons.notifications_active_rounded, 'Alerts'),
+      (_ScreenerView.gainers,    Icons.trending_up_rounded,         'Gainers'),
+      (_ScreenerView.losers,     Icons.trending_down_rounded,       'Losers'),
+      (_ScreenerView.active,     Icons.local_fire_department_rounded,'Active'),
+      (_ScreenerView.smartMoney, Icons.account_balance_rounded,     'Smart'),
+      (_ScreenerView.alerts,     Icons.notifications_active_rounded,'Alerts'),
     ];
 
     return Container(
@@ -384,75 +384,6 @@ class _ScreenersPanelState extends State<ScreenersPanel> {
     );
   }
 
-  List<Map<String, dynamic>> _fallbackRows() {
-    const symbols = [
-      ('NVDA', 'NVIDIA', 82.0, 18.5),
-      ('MSFT', 'Microsoft', 78.0, 12.0),
-      ('AAPL', 'Apple', 64.0, 7.5),
-      ('AMZN', 'Amazon', 72.0, 14.0),
-      ('GOOGL', 'Alphabet', 69.0, 10.0),
-      ('META', 'Meta Platforms', 74.0, 13.0),
-      ('TSLA', 'Tesla', 55.0, 9.0),
-      ('JPM', 'JPMorgan', 61.0, 6.0),
-    ];
-
-    return symbols.map<Map<String, dynamic>>((item) {
-      final symbol = item.$1;
-      final name = item.$2;
-      final score = item.$3;
-      final upside = item.$4;
-
-      switch (_activeView) {
-        case _ScreenerView.picks:
-          return {
-            'symbol': symbol,
-            'pickType': name,
-            'targetUpsidePct': upside,
-            'smartMoneyScore': score,
-            'topHolder': 'Large-cap reference universe',
-            'convictionScore': score,
-          };
-        case _ScreenerView.ratings:
-          return {
-            'symbol': symbol,
-            'recommendation': score >= 70 ? 'BUY' : 'HOLD',
-            'targetMeanPrice': 100 + score,
-            'targetUpsidePct': upside,
-            'latestFirm': 'Consensus fallback',
-            'latestAction': 'coverage pending',
-          };
-        case _ScreenerView.smartMoney:
-          return {
-            'symbol': symbol,
-            'topHolder': 'Institutional universe',
-            'institutionalHoldersCount': (score * 12).round(),
-            'fundHoldersCount': (score * 7).round(),
-            'insiderBuyRatio': score >= 70 ? 0.18 : 0.08,
-            'score': score,
-          };
-        case _ScreenerView.holdings:
-          return {
-            'symbol': symbol,
-            'holder': name,
-            'source': 'fallback watchlist',
-            'shares': score * 1000000,
-            'dateReported': 'latest available',
-            'value': score * 100000000,
-          };
-        case _ScreenerView.alerts:
-          return {
-            'symbol': symbol,
-            'firm': 'SIGMA monitor',
-            'action': 'Watch',
-            'fromGrade': 'Neutral',
-            'toGrade': score >= 70 ? 'Positive' : 'Stable',
-            'date': 'live feed pending',
-            'targetPrice': 100 + score,
-          };
-      }
-    }).toList(growable: false);
-  }
-
   Widget _emptyState(
     BuildContext context,
     IconData icon,
@@ -493,66 +424,74 @@ class _ScreenersPanelState extends State<ScreenersPanel> {
 
   String _rowTitle(Map<String, dynamic> row) {
     switch (_activeView) {
-      case _ScreenerView.picks:
-        return _text(row['pickType']).toUpperCase();
-      case _ScreenerView.ratings:
-        return _text(row['recommendation']).toUpperCase();
+      case _ScreenerView.gainers:
+      case _ScreenerView.losers:
+      case _ScreenerView.active:
+        return _text(row['name']);
       case _ScreenerView.smartMoney:
-        return _text(row['topHolder']).isEmpty
-            ? 'Institutional flow'
-            : _text(row['topHolder']);
-      case _ScreenerView.holdings:
-        return _text(row['holder']);
+        final holder = _text(row['topHolder']);
+        return holder.isEmpty ? 'Institutional flow' : holder;
       case _ScreenerView.alerts:
-        return _text(row['firm']).isEmpty ? 'Consensus' : _text(row['firm']);
+        final firm = _text(row['firm']);
+        return firm.isEmpty ? 'Consensus' : firm;
     }
   }
 
   String _rowSubtitle(Map<String, dynamic> row) {
     switch (_activeView) {
-      case _ScreenerView.picks:
-        return 'Upside ${_pct(row['targetUpsidePct'])} | Smart ${_number(row['smartMoneyScore'])} | ${_text(row['topHolder'])}';
-      case _ScreenerView.ratings:
-        return 'Target ${_money(row['targetMeanPrice'])} | Upside ${_pct(row['targetUpsidePct'])} | ${_text(row['latestFirm'])} ${_text(row['latestAction'])}';
+      case _ScreenerView.gainers:
+      case _ScreenerView.losers:
+      case _ScreenerView.active:
+        final price = AnalysisData.parseNum(row['price']);
+        final pct = AnalysisData.parseNum(row['changesPercentage']);
+        final priceStr = price > 0 ? '\$${price.toStringAsFixed(2)}' : '';
+        final sign = pct >= 0 ? '+' : '';
+        return '${priceStr.isNotEmpty ? '$priceStr  ' : ''}$sign${pct.toStringAsFixed(2)}%';
       case _ScreenerView.smartMoney:
-        return 'Institutions ${_number(row['institutionalHoldersCount'])} | Funds ${_number(row['fundHoldersCount'])} | Insider buy ratio ${_pctRatio(row['insiderBuyRatio'])}';
-      case _ScreenerView.holdings:
-        return '${_text(row['source']).toUpperCase()} | Shares ${_compact(row['shares'])} | Report ${_text(row['dateReported'])}';
+        final inst = _number(row['institutionalHoldersCount']);
+        final funds = _number(row['fundHoldersCount']);
+        final ratio = _pctRatio(row['insiderBuyRatio']);
+        return 'Inst $inst · Fonds $funds · Insiders $ratio achat';
       case _ScreenerView.alerts:
-        return '${_text(row['action'])} | ${_text(row['fromGrade'])} -> ${_text(row['toGrade'])} | ${_text(row['date'])}';
+        final from = _text(row['fromGrade']);
+        final to = _text(row['toGrade']);
+        final action = _text(row['action']);
+        final grade = from.isNotEmpty && to.isNotEmpty ? '$from → $to' : to;
+        return '${action.isNotEmpty ? '$action · ' : ''}$grade';
     }
   }
 
   String _rowMetric(Map<String, dynamic> row) {
     switch (_activeView) {
-      case _ScreenerView.picks:
-        return _number(row['convictionScore']);
-      case _ScreenerView.ratings:
-        return _pct(row['targetUpsidePct']);
+      case _ScreenerView.gainers:
+      case _ScreenerView.losers:
+      case _ScreenerView.active:
+        return _pct(row['changesPercentage']);
       case _ScreenerView.smartMoney:
         return _number(row['score']);
-      case _ScreenerView.holdings:
-        return _compact(row['value']);
       case _ScreenerView.alerts:
         final target = AnalysisData.parseNum(row['targetPrice']);
-        return target > 0
-            ? _money(target)
-            : _text(row['toGrade']).toUpperCase();
+        return target > 0 ? _money(target) : _text(row['toGrade']).toUpperCase();
     }
   }
 
   Color _rowAccent(Map<String, dynamic> row) {
-    final raw = _activeView == _ScreenerView.ratings
-        ? AnalysisData.parseNum(row['targetUpsidePct'])
-        : AnalysisData.parseNum(row['score'] ?? row['convictionScore']);
-    if (_activeView == _ScreenerView.holdings) return AppTheme.primary;
-    if (raw >= 70 || raw >= 15 && _activeView == _ScreenerView.ratings) {
-      return AppTheme.greenAccent;
+    switch (_activeView) {
+      case _ScreenerView.gainers:
+        return AppTheme.greenAccent;
+      case _ScreenerView.losers:
+        return AppTheme.redAccent;
+      case _ScreenerView.active:
+        final pct = AnalysisData.parseNum(row['changesPercentage']);
+        return pct >= 0 ? AppTheme.greenAccent : AppTheme.redAccent;
+      case _ScreenerView.smartMoney:
+        final score = AnalysisData.parseNum(row['score']);
+        if (score >= 70) return AppTheme.greenAccent;
+        if (score < 40) return AppTheme.redAccent;
+        return AppTheme.primary;
+      case _ScreenerView.alerts:
+        return AppTheme.primary;
     }
-    if (raw < 0 || raw < 40 && _activeView != _ScreenerView.ratings) {
-      return AppTheme.redAccent;
-    }
-    return AppTheme.primary;
   }
 
   String _text(dynamic value) => value?.toString().trim() ?? '';
@@ -573,18 +512,5 @@ class _ScreenersPanelState extends State<ScreenersPanel> {
     final parsed = AnalysisData.parseNum(value);
     if (parsed <= 0) return '-';
     return '\$${parsed.toStringAsFixed(parsed >= 100 ? 0 : 2)}';
-  }
-
-  String _compact(dynamic value) {
-    final parsed = AnalysisData.parseNum(value).abs();
-    if (parsed >= 1000000000000) {
-      return '\$${(parsed / 1000000000000).toStringAsFixed(1)}T';
-    }
-    if (parsed >= 1000000000) {
-      return '\$${(parsed / 1000000000).toStringAsFixed(1)}B';
-    }
-    if (parsed >= 1000000) return '\$${(parsed / 1000000).toStringAsFixed(1)}M';
-    if (parsed >= 1000) return '\$${(parsed / 1000).toStringAsFixed(1)}K';
-    return '\$${parsed.toStringAsFixed(0)}';
   }
 }
