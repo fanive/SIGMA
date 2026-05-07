@@ -1048,6 +1048,14 @@ class _ResearchNoteScroll extends StatelessWidget {
           child: _AiSentimentBlock(symbol: a.ticker, isDark: isDark),
         ),
 
+        // 10ter. AI News Summary — BART-large-cnn via Hugging Face
+        _Section(
+          isDark: isDark,
+          label: 'AI NEWS SUMMARY',
+          meta: 'BART-large-cnn · Hugging Face Inference API',
+          child: _AiSummaryBlock(symbol: a.ticker, isDark: isDark),
+        ),
+
         // 11. Hypotheses & Limits
         _Section(
           isDark: isDark,
@@ -3720,6 +3728,111 @@ class _AiSentimentBlockState extends State<_AiSentimentBlock> {
           );
         }
         return AiSentimentSection(snap.data);
+      },
+    );
+  }
+}
+
+// ── AI Summary Block (BART) ────────────────────────────────────────────────
+class _AiSummaryBlock extends StatefulWidget {
+  final String symbol;
+  final bool isDark;
+
+  const _AiSummaryBlock({required this.symbol, required this.isDark});
+
+  @override
+  State<_AiSummaryBlock> createState() => _AiSummaryBlockState();
+}
+
+class _AiSummaryBlockState extends State<_AiSummaryBlock> {
+  late final Future<Map<String, dynamic>> _future;
+
+  @override
+  void initState() {
+    super.initState();
+    _future = SigmaApiService.getAiSummary(widget.symbol);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return FutureBuilder<Map<String, dynamic>>(
+      future: _future,
+      builder: (ctx, snap) {
+        if (snap.connectionState == ConnectionState.waiting) {
+          return Padding(
+            padding: const EdgeInsets.symmetric(vertical: 12),
+            child: Row(children: [
+              const SizedBox(
+                  width: 14,
+                  height: 14,
+                  child: CircularProgressIndicator(strokeWidth: 1.5)),
+              const SizedBox(width: 10),
+              Text('Résumé BART en cours...',
+                  style: GoogleFonts.lora(
+                      fontSize: 11, color: AppTheme.textTertiary)),
+            ]),
+          );
+        }
+        if (snap.hasError || !snap.hasData || snap.data!.isEmpty) {
+          return Padding(
+            padding: const EdgeInsets.symmetric(vertical: 8),
+            child: Text('Résumé IA indisponible pour ce ticker.',
+                style: GoogleFonts.lora(
+                    fontSize: 11, color: AppTheme.textTertiary)),
+          );
+        }
+        final d = snap.data!;
+        final summaryText = (d['summary'] as String? ?? '').trim();
+        if (summaryText.isEmpty) {
+          return Padding(
+            padding: const EdgeInsets.symmetric(vertical: 8),
+            child: Text('Résumé IA indisponible pour ce ticker.',
+                style: GoogleFonts.lora(
+                    fontSize: 11, color: AppTheme.textTertiary)),
+          );
+        }
+        final sourcesRaw = d['sources'];
+        final sources = sourcesRaw is List
+            ? sourcesRaw.map((s) => s.toString()).toList()
+            : <String>[];
+        final textColor = widget.isDark
+            ? AppTheme.white.withValues(alpha: 0.87)
+            : AppTheme.black87;
+        final dimColor = widget.isDark ? AppTheme.white24 : AppTheme.black26;
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(summaryText,
+                style: GoogleFonts.lora(
+                    fontSize: 12,
+                    height: 1.6,
+                    color: textColor)),
+            if (sources.isNotEmpty) ...[
+              const SizedBox(height: 10),
+              Wrap(
+                spacing: 6,
+                runSpacing: 4,
+                children: sources
+                    .take(5)
+                    .map((s) => Container(
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 6, vertical: 2),
+                          decoration: BoxDecoration(
+                            color: AppTheme.primary.withValues(alpha: 0.07),
+                            borderRadius: BorderRadius.circular(2),
+                          ),
+                          child: Text(s,
+                              style: GoogleFonts.lora(
+                                  fontSize: 9,
+                                  fontWeight: FontWeight.w700,
+                                  color: AppTheme.primary,
+                                  letterSpacing: 0.3)),
+                        ))
+                    .toList(),
+              ),
+            ],
+          ],
+        );
       },
     );
   }
