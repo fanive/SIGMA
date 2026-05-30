@@ -2192,6 +2192,131 @@ def _gf_extract_earnings_panel(lines: list[str]) -> dict[str, Any]:
     return {key: value for key, value in panel.items() if value not in (None, "")}
 
 
+def _gf_extract_earnings_call(lines: list[str]) -> dict[str, Any]:
+    if "Call transcript" not in lines:
+        return {}
+
+    call: dict[str, Any] = {"source": "Google Finance earnings tab"}
+    if "Recorded" in lines:
+        call["status"] = "Recorded"
+    times = [line for line in lines if _re.fullmatch(r"\d{1,2}:\d{2}(?::\d{2})?", line)]
+    if times:
+        call["duration"] = times[-1]
+
+    if "Highlights" in lines:
+        idx = lines.index("Highlights")
+        for candidate in lines[idx + 1:idx + 5]:
+            if len(candidate) > 80 and not candidate.startswith("Expand "):
+                call["highlights"] = candidate
+                break
+
+    segments: list[dict[str, str]] = []
+    start = lines.index("Call transcript") + 1
+    stop_markers = {"Earnings history", "Related stocks", "News stories", "Help", "Privacy", "Terms"}
+    i = start
+    while i < len(lines):
+        line = lines[i]
+        if line in stop_markers:
+            break
+        if _re.fullmatch(r"\d+m(?:\s+\d+s)?|\d+s", line) and i >= 1:
+            speaker = lines[i - 1]
+            text_parts: list[str] = []
+            j = i + 1
+            while j < len(lines):
+                nxt = lines[j]
+                if nxt in stop_markers or _re.fullmatch(r"\d+m(?:\s+\d+s)?|\d+s", nxt):
+                    break
+                if nxt not in {"music_history", "Listen from here", "play_arrow", "volume_up", "Mute"} and len(nxt) > 30:
+                    text_parts.append(nxt)
+                j += 1
+            if text_parts:
+                segments.append({
+                    "timestamp": line,
+                    "speaker": speaker,
+                    "text": " ".join(text_parts)[:2500],
+                })
+                i = j
+                if len(segments) >= 12:
+                    break
+                continue
+        i += 1
+
+    if segments:
+        call["transcriptSegments"] = segments
+    return call
+
+
+def _gf_extract_insider_transactions_from_lines(lines: list[str]) -> list[dict[str, Any]]:
+    if "Insider transactions" not in lines:
+        return []
+
+    try:
+        start = lines.index("Insider transactions")
+    except ValueError:
+        return []
+
+    header = ["Insider", "Position", "Type", "Date", "Shares", "Amount"]
+    header_positions = []
+    for label in header:
+        try:
+            header_positions.append(lines.index(label, start))
+        except ValueError:
+            return []
+    cursor = max(header_positions) + 1
+
+    skip = {
+        "first_page",
+        "keyboard_arrow_left",
+        "keyboard_arrow_right",
+        "Page 1",
+        "Learn more",
+    }
+    tail_stop = {"Help", "Privacy", "Terms", "Disclaimer", "Research", "New thread"}
+    values: list[str] = []
+    for line in lines[cursor:]:
+        if line in tail_stop:
+            break
+        if line in skip:
+            continue
+        values.append(line)
+
+    out: list[dict[str, Any]] = []
+    i = 0
+    while i + 5 < len(values):
+        insider, position, tx_type, date, shares, amount = values[i:i + 6]
+        if not _re.search(r"\d{1,2}/\d{1,2}/\d{4}", date):
+            i += 1
+            continue
+        out.append({
+            "insider": insider,
+            "position": position,
+            "type": tx_type,
+            "date": date,
+            "shares": shares,
+            "amount": amount,
+            "amountValue": _gf_number(amount),
+        })
+        i += 6
+        if len(out) >= 25:
+            break
+    return out
+
+
+def _gf_yfinance_holdings_fallback(symbol: str) -> dict[str, Any]:
+    try:
+        t = yf.Ticker(symbol)
+        return _gf_prune_empty({
+            "insiderTransactions": _df_to_list(_yf_get(lambda: t.insider_transactions, None), limit=25),
+            "insiderPurchases": _df_to_list(_yf_get(lambda: t.insider_purchases, None), limit=25),
+            "majorHolders": _df_to_list(_yf_get(lambda: t.major_holders, None), limit=20),
+            "institutionalHolders": _df_to_list(_yf_get(lambda: t.institutional_holders, None), limit=20),
+            "mutualFundHolders": _df_to_list(_yf_get(lambda: t.mutualfund_holders, None), limit=20),
+            "source": "yfinance fallback",
+        })
+    except Exception:
+        return {}
+
+
 def _gf_extract_related_stocks_from_lines(lines: list[str], ticker: str) -> list[dict[str, Any]]:
     if "Related stocks" not in lines:
         return []
@@ -2810,7 +2935,19 @@ def _scrape_google_finance_safe(ticker: str, raise_on_error: bool = False):
             earnings_panel = _gf_extract_earnings_panel(earnings_lines)
             if earnings_panel:
                 earnings["panel"] = earnings_panel
+            earnings_call = _gf_extract_earnings_call(earnings_lines)
+            if earnings_call:
+                earnings["call"] = earnings_call
             holdings_visible = any("holder" in line.lower() or "ownership" in line.lower() for line in holdings_lines)
+            google_insider_transactions = _gf_extract_insider_transactions_from_lines(holdings_lines)
+            holdings = {
+                "insiderTransactions": google_insider_transactions,
+                "source": "Google Finance holdings tab" if google_insider_transactions else None,
+            }
+            if not google_insider_transactions:
+                yf_holdings = _gf_yfinance_holdings_fallback(symbol)
+                if yf_holdings:
+                    holdings["fallback"] = yf_holdings
                 
             if price == "N/A" and not stats and not about:
                 continue 
@@ -2835,6 +2972,7 @@ def _scrape_google_finance_safe(ticker: str, raise_on_error: bool = False):
                 "normalizedStats": normalized_stats,
                 "financials": financials,
                 "earnings": earnings,
+                "holdings": holdings,
                 "tabs": {
                     "overview": {
                         "url": overview_tab.get("url"),
@@ -2858,7 +2996,8 @@ def _scrape_google_finance_safe(ticker: str, raise_on_error: bool = False):
                         "status": holdings_tab.get("status"),
                         "lineCount": len(holdings_lines),
                         "serverRendered": holdings_visible,
-                        "note": None if holdings_visible else "Google Finance holdings tab is not server-rendered in this response; use /equities/{symbol}/ownership for yfinance holder data.",
+                        "transactions": len(google_insider_transactions),
+                        "note": None if google_insider_transactions else "Google Finance holdings rows are not server-rendered in this response; holdings.fallback uses yfinance.",
                     },
                 },
                 "marketCap": market_cap,
