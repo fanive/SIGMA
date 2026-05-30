@@ -494,6 +494,7 @@ async def get_equity_profile(symbol: str):
             info.get("currentPrice")
             or info.get("regularMarketPrice")
             or (fi.get("lastPrice") if fi else None)
+            or gf_data.get("priceValue")
         )
         prev = _num(
             info.get("previousClose")
@@ -510,27 +511,33 @@ async def get_equity_profile(symbol: str):
             "previousClose": prev,
             "change": change,
             "changePercent": change_pct,
-            "open": _num(info.get("open") or info.get("regularMarketOpen")),
-            "dayHigh": _num(info.get("dayHigh") or info.get("regularMarketDayHigh")),
-            "dayLow": _num(info.get("dayLow") or info.get("regularMarketDayLow")),
-            "volume": _num(info.get("volume") or info.get("regularMarketVolume")),
-            "marketCap": _num(info.get("marketCap")),
-            "fiftyTwoWeekHigh": _num(info.get("fiftyTwoWeekHigh")),
-            "fiftyTwoWeekLow": _num(info.get("fiftyTwoWeekLow")),
+            "open": _num(info.get("open") or info.get("regularMarketOpen") or (gf_data.get("normalizedStats", {}).get("open") or {}).get("value")),
+            "dayHigh": _num(info.get("dayHigh") or info.get("regularMarketDayHigh") or (gf_data.get("normalizedStats", {}).get("dayHigh") or {}).get("value")),
+            "dayLow": _num(info.get("dayLow") or info.get("regularMarketDayLow") or (gf_data.get("normalizedStats", {}).get("dayLow") or {}).get("value")),
+            "volume": _num(info.get("volume") or info.get("regularMarketVolume") or (gf_data.get("normalizedStats", {}).get("volume") or {}).get("value")),
+            "marketCap": _num(info.get("marketCap") or gf_data.get("marketCap")),
+            "fiftyTwoWeekHigh": _num(info.get("fiftyTwoWeekHigh") or (gf_data.get("normalizedStats", {}).get("fiftyTwoWeekHigh") or {}).get("value")),
+            "fiftyTwoWeekLow": _num(info.get("fiftyTwoWeekLow") or (gf_data.get("normalizedStats", {}).get("fiftyTwoWeekLow") or {}).get("value")),
             "marketState": info.get("marketState") or "UNKNOWN",
             "currency": info.get("currency") or "USD",
             "exchange": info.get("fullExchangeName") or info.get("exchange") or "",
-            "pe": _safe(info.get("trailingPE")),
+            "pe": _safe(info.get("trailingPE") or gf_data.get("peRatio")),
             "eps": _safe(info.get("trailingEps")),
-            "beta": _safe(info.get("beta")),
-            "dividendYield": _safe(info.get("dividendYield")),
-            "sector": info.get("sector"),
+            "beta": _safe(info.get("beta") or (gf_data.get("normalizedStats", {}).get("beta") or {}).get("value")),
+            "dividendYield": _safe(info.get("dividendYield") or gf_data.get("dividendYield")),
+            "sector": info.get("sector") or (gf_data.get("profile") or {}).get("sector"),
             "industry": info.get("industry"),
-            "ceo": ceo,
+            "ceo": ceo or (gf_data.get("profile") or {}).get("ceo"),
             "website": website,
             "image": logo.get("primary"),
             "description": info.get("longBusinessSummary") or gf_data.get("description"),
-            "fullTimeEmployees": _safe(info.get("fullTimeEmployees") or gf_data.get("stats", {}).get("Employees")),
+            "fullTimeEmployees": _safe(info.get("fullTimeEmployees") or gf_data.get("employees")),
+            "googleFinance": {
+                "quote": gf_data.get("quote"),
+                "profile": gf_data.get("profile", {}),
+                "normalizedStats": gf_data.get("normalizedStats", {}),
+                "extracted": gf_data.get("extracted", {}),
+            } if isinstance(gf_data, dict) and not gf_data.get("error") else {},
             "source": "yfinance+google",
             # Minimal compatibility aliases for frontend
             "name": info.get("shortName") or info.get("longName") or sym,
@@ -748,16 +755,29 @@ async def get_equity_intelligence(symbol: str):
             "googleFinance": {
                 "name": google.get("name") if isinstance(google, dict) else None,
                 "priceValue": google.get("priceValue") if isinstance(google, dict) else None,
+                "quoteSummary": google.get("quoteSummary", {}) if isinstance(google, dict) else {},
+                "profile": google.get("profile", {}) if isinstance(google, dict) else {},
+                "tabs": google.get("tabs", {}) if isinstance(google, dict) else {},
                 "stats": google.get("stats", {}) if isinstance(google, dict) else {},
                 "normalizedStats": google.get("normalizedStats", {}) if isinstance(google, dict) else {},
                 "earnings": google_earnings,
                 "financials": {
+                    "periods": (google.get("financials") or {}).get("periods", [])
+                    if isinstance(google, dict) and isinstance(google.get("financials"), dict)
+                    else [],
                     "rows": _limited_list((google.get("financials") or {}).get("rows"), 24)
                     if isinstance(google, dict) and isinstance(google.get("financials"), dict)
                     else [],
+                    "statements": {
+                        key: _limited_list(value, 12)
+                        for key, value in ((google.get("financials") or {}).get("statements", {}) or {}).items()
+                    }
+                    if isinstance(google, dict) and isinstance(google.get("financials"), dict)
+                    else {},
                 },
                 "peers": _limited_list(google.get("peers"), 12) if isinstance(google, dict) else [],
                 "news": _limited_list(google.get("news"), 8) if isinstance(google, dict) else [],
+                "extracted": google.get("extracted", {}) if isinstance(google, dict) else {},
                 "source": "Google Finance",
             },
             "dataSources": {
@@ -1711,6 +1731,13 @@ def _gf_number(value: str | None):
         return None
 
 
+def _gf_metric_value(label: str, raw: str):
+    lower = label.lower()
+    if any(token in lower for token in ("date", "founded", "headquarters", "ceo", "sector", "website", "exchange", "period")):
+        return None
+    return _gf_number(raw)
+
+
 def _gf_abs_url(href: str | None) -> str:
     if not href:
         return ""
@@ -1728,6 +1755,49 @@ def _gf_first_text(soup, selectors: list[str]) -> str:
         text = _gf_clean_text(el.get_text(" ") if el else "")
         if text:
             return text
+    return ""
+
+
+def _gf_text_lines(soup) -> list[str]:
+    skip_exact = {
+        "",
+        "search",
+        "settings",
+        "dark_mode",
+        "light_mode",
+        "arrow_upward",
+        "arrow_downward",
+        "calendar_month",
+        "youtube_live",
+        "bedtime",
+        "Show more",
+        "Show all",
+        "Loading Previous Earnings...",
+        "AI content may include mistakes.",
+        "Send feedback",
+    }
+    lines: list[str] = []
+    for raw in soup.stripped_strings:
+        text = _gf_clean_text(str(raw))
+        if not text or text in skip_exact:
+            continue
+        if text.startswith("Image:"):
+            continue
+        lines.append(text)
+    return lines
+
+
+def _gf_is_numericish(text: str) -> bool:
+    text = _gf_clean_text(text)
+    if text in {"-", "N/A"}:
+        return True
+    return bool(_re.search(r"[$€£¥₹]?\s*-?\d", text))
+
+
+def _gf_next_value(lines: list[str], index: int) -> str:
+    for value in lines[index + 1:index + 5]:
+        if value:
+            return value
     return ""
 
 
@@ -1784,23 +1854,89 @@ def _gf_extract_stats(soup) -> dict[str, str]:
         if key and val and key not in stats:
             stats[key] = val
 
+    # Google Finance Beta also renders many facts as plain text pairs with
+    # short-lived CSS classes. Parsing the visible text keeps the scraper useful
+    # when those classes churn.
+    lines = _gf_text_lines(soup)
+    text_pair_labels = {
+        "Open",
+        "High",
+        "Low",
+        "Mkt. cap",
+        "Market cap",
+        "Avg. vol.",
+        "Avg Volume",
+        "Volume",
+        "Dividend",
+        "Dividend yield",
+        "Quarterly dividend",
+        "Ex-dividend date",
+        "P/E ratio",
+        "52-wk high",
+        "52-wk low",
+        "EPS",
+        "Beta",
+        "Shares outstanding",
+        "No. of employees",
+        "Employees",
+        "CEO",
+        "Founded",
+        "Headquarters",
+        "Sector",
+        "Website",
+        "Last report",
+        "Fiscal period",
+        "EPS / Est. (USD)",
+        "Revenue / Est. (USD)",
+        "Primary exchange",
+        "Previous close",
+        "Day range",
+        "Year range",
+    }
+    for i, line in enumerate(lines):
+        if line in text_pair_labels and line not in stats:
+            value = _gf_next_value(lines, i)
+            if value and value not in text_pair_labels:
+                stats[line] = value
+
     return stats
 
 
 def _gf_normalize_stats(stats: dict[str, str]) -> dict[str, Any]:
     aliases = {
+        "Open": "open",
+        "High": "dayHigh",
+        "Low": "dayLow",
         "Previous close": "previousClose",
         "Day range": "dayRange",
         "Year range": "yearRange",
         "Market cap": "marketCap",
+        "Mkt. cap": "marketCap",
         "Avg Volume": "averageVolume",
+        "Avg. vol.": "averageVolume",
+        "Volume": "volume",
         "P/E ratio": "peRatio",
+        "Dividend": "dividendYield",
         "Dividend yield": "dividendYield",
+        "Quarterly dividend": "quarterlyDividend",
+        "Ex-dividend date": "exDividendDate",
+        "52-wk high": "fiftyTwoWeekHigh",
+        "52-wk low": "fiftyTwoWeekLow",
+        "EPS": "eps",
+        "Beta": "beta",
+        "Shares outstanding": "sharesOutstanding",
+        "No. of employees": "employees",
         "Primary exchange": "primaryExchange",
         "CEO": "ceo",
         "Founded": "founded",
         "Employees": "employees",
         "Headquarters": "headquarters",
+        "Sector": "sector",
+        "Website": "website",
+        "Last report": "lastReport",
+        "Fiscal period": "fiscalPeriod",
+        "EPS / Est. (USD)": "epsEstimate",
+        "Revenue / Est. (USD)": "revenueEstimate",
     }
     out: dict[str, Any] = {}
     for label, raw in stats.items():
@@ -1810,9 +1946,172 @@ def _gf_normalize_stats(stats: dict[str, str]) -> dict[str, Any]:
             key = key[:1].lower() + key[1:]
         out[key] = {
             "raw": raw,
-            "value": _gf_number(raw),
+            "value": _gf_metric_value(label, raw),
         }
     return out
+
+
+def _gf_extract_quote_summary(lines: list[str], price: str, change_text: str, exchange_line: str) -> dict[str, Any]:
+    after_hours_price = None
+    after_hours_change = None
+    for i, line in enumerate(lines):
+        if line == "After hours":
+            for candidate in lines[max(0, i - 5):i]:
+                if candidate != price and _re.search(r"[$€£¥₹]\s*\d", candidate):
+                    after_hours_price = candidate
+            if i >= 1:
+                after_hours_change = lines[i - 1]
+            break
+
+    return {
+        "price": price,
+        "priceValue": _gf_number(price),
+        "regularChange": change_text,
+        "afterHoursPrice": after_hours_price,
+        "afterHoursPriceValue": _gf_number(after_hours_price),
+        "afterHoursChange": after_hours_change,
+        "statusLine": exchange_line,
+        "currency": "USD" if "USD" in exchange_line else None,
+    }
+
+
+def _gf_extract_company_name(lines: list[str], symbol: str, fallback: str) -> str:
+    title_prefix = f"({symbol})"
+    for line in lines[:10]:
+        if title_prefix in line or f" {symbol} " in line:
+            name = line.split(" Stock Price", 1)[0]
+            name = _re.sub(rf"\s*\({symbol}\).*$", "", name).strip()
+            if name and name not in {"Finance", "Google Finance"}:
+                return name
+    if symbol in lines:
+        idx = lines.index(symbol)
+        for candidate in lines[idx + 1:idx + 8]:
+            if candidate in {symbol, f"{symbol}:NASDAQ", "Research", "Beta"}:
+                continue
+            if "_" in candidate or candidate.islower():
+                continue
+            if candidate.startswith("$") or _re.search(r"^[+-]?\d", candidate):
+                continue
+            if candidate not in {"Finance", "Search or ask", "Add to list"}:
+                return candidate
+    return "" if fallback in {"Finance", "Google Finance"} else fallback
+
+
+def _gf_extract_profile(lines: list[str], stats: dict[str, str]) -> dict[str, Any]:
+    description_parts: list[str] = []
+    if "Profile" in lines:
+        start = lines.index("Profile") + 1
+        for line in lines[start:]:
+            if line.startswith("About ") or line in {"Last report", "At a glance", "Previous reports"}:
+                break
+            if len(line) > 80:
+                description_parts.append(line)
+
+    about = {
+        "ceo": stats.get("CEO"),
+        "employees": stats.get("No. of employees") or stats.get("Employees"),
+        "founded": stats.get("Founded"),
+        "headquarters": stats.get("Headquarters"),
+        "sector": stats.get("Sector"),
+        "website": stats.get("Website"),
+    }
+    return {
+        "description": " ".join(description_parts).strip(),
+        **{k: v for k, v in about.items() if v},
+    }
+
+
+def _gf_extract_earnings_panel(lines: list[str]) -> dict[str, Any]:
+    panel: dict[str, Any] = {}
+
+    def value_after(label: str, offset: int = 1) -> str | None:
+        if label not in lines:
+            return None
+        idx = lines.index(label) + offset
+        return lines[idx] if idx < len(lines) else None
+
+    panel["lastReport"] = value_after("Last report")
+    panel["fiscalPeriod"] = value_after("Fiscal period")
+
+    if "EPS / Est. (USD)" in lines:
+        idx = lines.index("EPS / Est. (USD)")
+        chunk = lines[idx + 1:idx + 8]
+        panel["epsActual"] = chunk[0] if len(chunk) > 0 else None
+        panel["epsEstimate"] = chunk[2] if len(chunk) > 2 and chunk[1] == "/" else (chunk[1].replace("/", "").strip() if len(chunk) > 1 else None)
+        panel["epsSurprise"] = next((item for item in chunk if "%" in item), None)
+        panel["epsResult"] = next((item for item in chunk if item.lower() in {"beat", "miss", "met"}), None)
+
+    if "Revenue / Est. (USD)" in lines:
+        idx = lines.index("Revenue / Est. (USD)")
+        chunk = lines[idx + 1:idx + 8]
+        panel["revenueActual"] = chunk[0] if len(chunk) > 0 else None
+        panel["revenueEstimate"] = chunk[1].replace("/", "").strip() if len(chunk) > 1 else None
+        panel["revenueSurprise"] = next((item for item in chunk if "%" in item), None)
+        panel["revenueResult"] = next((item for item in chunk if item.lower() in {"beat", "miss", "met"}), None)
+
+    call_line = next((line for line in lines if "earnings call" in line.lower()), None)
+    if call_line:
+        panel["earningsCall"] = call_line
+        call_idx = lines.index(call_line)
+        panel["earningsCallStatus"] = lines[call_idx + 1] if call_idx + 1 < len(lines) else None
+
+    panel["source"] = "Google Finance earnings tab"
+    return {key: value for key, value in panel.items() if value not in (None, "")}
+
+
+def _gf_extract_related_stocks_from_lines(lines: list[str], ticker: str) -> list[dict[str, Any]]:
+    if "Related stocks" not in lines:
+        return []
+    start = lines.index("Related stocks") + 1
+    stop = next((i for i in range(start, len(lines)) if lines[i] in {"News stories", "Profile", "Previous reports"}), len(lines))
+    segment = lines[start:stop]
+    peers: list[dict[str, Any]] = []
+    seen = {ticker.upper()}
+    i = 0
+    while i + 3 < len(segment):
+        symbol = segment[i].upper()
+        if not _re.fullmatch(r"[A-Z][A-Z0-9.\-]{0,9}", symbol):
+            i += 1
+            continue
+        name = segment[i + 1]
+        price = segment[i + 2]
+        change_pct = segment[i + 3]
+        if symbol in seen or not _gf_is_numericish(price) or "%" not in change_pct:
+            i += 1
+            continue
+        seen.add(symbol)
+        peers.append({
+            "symbol": symbol,
+            "quote": symbol,
+            "exchange": "",
+            "label": name,
+            "price": price,
+            "priceValue": _gf_number(price),
+            "changePercent": change_pct,
+            "url": f"https://www.google.com/finance/quote/{symbol}",
+        })
+        i += 4
+    return peers[:12]
+
+
+def _gf_extract_news_from_lines(lines: list[str]) -> list[dict[str, str]]:
+    if "News stories" not in lines:
+        return []
+    start = lines.index("News stories") + 1
+    stop = next((i for i in range(start, len(lines)) if lines[i] in {"Profile", "Previous reports", "Related stocks"}), len(lines))
+    segment = [line for line in lines[start:stop] if line not in {"From sources across the web", "·"}]
+    news: list[dict[str, str]] = []
+    i = 0
+    while i + 2 < len(segment):
+        source = segment[i]
+        published = segment[i + 1]
+        title = segment[i + 2]
+        if _re.search(r"\b(minute|hour|day|week|month|ago|yesterday|today)\b", published, _re.I) and len(title) > 20:
+            news.append({"title": title, "source": source, "url": "", "published": published})
+            i += 3
+        else:
+            i += 1
+    return news[:8]
 
 
 def _gf_extract_news(soup) -> list[dict[str, str]]:
@@ -1858,11 +2157,17 @@ def _gf_extract_peers(soup, ticker: str) -> list[dict[str, str]]:
             continue
         seen.add(symbol)
         label = _gf_clean_text(anchor.get_text(" "))
+        parent_text = _gf_clean_text(anchor.find_parent(["div", "article"]).get_text(" ") if anchor.find_parent(["div", "article"]) else label)
+        price_match = _re.search(r"([$€£¥₹]\s*[\d,.]+(?:[KMBT])?)", parent_text)
+        pct_match = _re.search(r"([+-]?\d+(?:\.\d+)?%)", parent_text)
         peers.append({
             "symbol": symbol,
             "quote": quote,
             "exchange": quote.split(":", 1)[1] if ":" in quote else "",
             "label": label,
+            "price": price_match.group(1) if price_match else "",
+            "priceValue": _gf_number(price_match.group(1)) if price_match else None,
+            "changePercent": pct_match.group(1) if pct_match else "",
             "url": _gf_abs_url(href),
         })
         if len(peers) >= 12:
@@ -1987,6 +2292,135 @@ def _gf_extract_periods(rows: list[dict[str, Any]]) -> list[str]:
     return []
 
 
+_GF_FINANCIAL_LABELS = {
+    "Revenue",
+    "Cost of goods sold",
+    "Cost of revenue",
+    "Gross profit",
+    "Research and development expenses",
+    "Total research and development expenses",
+    "Selling, general, and admin expenses",
+    "Operating expense",
+    "Total operating expenses",
+    "Operating income",
+    "Other non operating income",
+    "EBT including unusual items",
+    "EBT excluding unusual items",
+    "Income tax expense",
+    "Effective tax rate",
+    "Other operating expenses",
+    "Net income",
+    "Net profit margin",
+    "Earnings per share",
+    "Interest and investment income",
+    "Interest expense",
+    "Net interest expenses",
+    "Depreciation and amortization charges",
+    "EBITDA",
+    "Gain or loss from assets sale",
+    "Cash and short-term investments",
+    "Total assets",
+    "Total liabilities",
+    "Total equity",
+    "Shares outstanding",
+    "Price to book",
+    "Return on assets",
+    "Return on capital",
+    "Cash from operations",
+    "Cash from investing",
+    "Cash from financing",
+    "Net change in cash",
+    "Free cash flow",
+    "Capital expenditure",
+}
+
+
+def _gf_is_period_label(text: str) -> bool:
+    return bool(_re.search(r"\b(20\d{2}|19\d{2}|Q[1-4]|FY|TTM|Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\b", text, _re.I))
+
+
+def _gf_extract_overview_financial_rows(soup) -> dict[str, Any]:
+    lines = _gf_text_lines(soup)
+    if not lines:
+        return {"periods": [], "rows": [], "statements": {}, "rowCount": 0}
+
+    start = -1
+    for marker in ("Previous reports", "Income statement"):
+        if marker in lines:
+            start = lines.index(marker)
+            break
+    if start < 0:
+        return {"periods": [], "rows": [], "statements": {}, "rowCount": 0}
+
+    stop_markers = {
+        "Insiders",
+        "Politicians",
+        "Related stocks",
+        "News stories",
+        "Profile",
+        "Help",
+        "Privacy",
+        "Terms",
+    }
+    segment: list[str] = []
+    for line in lines[start:]:
+        if line in stop_markers and segment:
+            break
+        segment.append(line)
+
+    periods: list[str] = []
+    for i, line in enumerate(segment):
+        if line == "All values in USD":
+            for candidate in segment[i + 1:i + 12]:
+                if candidate in _GF_FINANCIAL_LABELS:
+                    break
+                if _gf_is_period_label(candidate) and candidate not in periods:
+                    periods.append(candidate)
+            if periods:
+                break
+
+    rows: list[dict[str, Any]] = []
+    i = 0
+    while i < len(segment):
+        label = segment[i]
+        if label not in _GF_FINANCIAL_LABELS:
+            i += 1
+            continue
+
+        values: list[str] = []
+        j = i + 1
+        while j < len(segment) and len(values) < max(2, len(periods) or 4):
+            candidate = segment[j]
+            if candidate in _GF_FINANCIAL_LABELS:
+                break
+            if _gf_is_numericish(candidate):
+                values.append(candidate)
+            elif values:
+                break
+            j += 1
+
+        if len(values) >= 2:
+            rows.append({
+                "label": label,
+                "values": values,
+                "numericValues": [_gf_number(v) for v in values],
+                "raw": [label, *values],
+                "statement": _gf_statement_kind(label),
+            })
+            i = j
+        else:
+            i += 1
+
+    statements = _gf_rows_by_statement(rows)
+    return {
+        "periods": periods,
+        "rows": rows[:120],
+        "statements": statements,
+        "rowCount": len(rows),
+        "source": "Google Finance overview page",
+    }
+
+
 def _gf_rows_by_statement(rows: list[dict[str, Any]]) -> dict[str, list[dict[str, Any]]]:
     grouped = {
         "incomeStatement": [],
@@ -2020,19 +2454,86 @@ def _gf_extract_earnings(financial_rows: list[dict[str, Any]], stats: dict[str, 
         "operatingIncomeRows": operating_income_rows[:6],
         "ttmPe": stats.get("P/E ratio"),
         "dividendYield": stats.get("Dividend yield"),
+        "lastReport": stats.get("Last report"),
+        "fiscalPeriod": stats.get("Fiscal period"),
+        "epsEstimate": stats.get("EPS / Est. (USD)"),
+        "revenueEstimate": stats.get("Revenue / Est. (USD)"),
         "source": "Google Finance financials page + overview stats",
     }
 
 
-def _gf_scrape_financials_page(quote: str, headers: dict[str, str], attempted_urls: list[str]) -> dict[str, Any]:
-    url = f"https://www.google.com/finance/quote/{quote}/financials?hl=en"
-    attempted_urls.append(url)
-    try:
-        resp = _requests.get(url, headers=headers, timeout=12)
-        if resp.status_code != 200:
-            return {"url": url, "status": resp.status_code, "rows": [], "statements": {}}
+def _gf_merge_financials(page_financials: dict[str, Any], overview_financials: dict[str, Any]) -> dict[str, Any]:
+    page_rows = page_financials.get("rows") if isinstance(page_financials, dict) else []
+    overview_rows = overview_financials.get("rows") if isinstance(overview_financials, dict) else []
+    rows: list[dict[str, Any]] = []
+    seen: set[tuple[str, tuple[str, ...]]] = set()
+    for row in [*(page_rows if isinstance(page_rows, list) else []), *(overview_rows if isinstance(overview_rows, list) else [])]:
+        label = _gf_clean_text(str(row.get("label") or ""))
+        values = tuple(_gf_clean_text(str(v)) for v in (row.get("values") or []))
+        if not label or not values:
+            continue
+        key = (label.lower(), values)
+        if key in seen:
+            continue
+        seen.add(key)
+        row["label"] = label
+        row["values"] = list(values)
+        row["numericValues"] = [_gf_number(v) for v in values]
+        row["statement"] = row.get("statement") or _gf_statement_kind(label)
+        rows.append(row)
 
-        soup = _BS(resp.text, "html.parser")
+    periods = []
+    for source in (page_financials, overview_financials):
+        if isinstance(source, dict) and source.get("periods"):
+            periods = source.get("periods") or []
+            break
+
+    merged = dict(page_financials or {})
+    merged["overview"] = overview_financials
+    merged["periods"] = periods
+    merged["rows"] = rows[:160]
+    merged["statements"] = _gf_rows_by_statement(rows)
+    merged["rowCount"] = len(rows)
+    merged["sources"] = [
+        src for src in [
+            "Google Finance financials page" if page_rows else "",
+            "Google Finance overview page" if overview_rows else "",
+        ] if src
+    ]
+    return merged
+
+
+def _gf_tab_url(quote: str, tab: str | None = None) -> str:
+    url = f"https://www.google.com/finance/beta/quote/{quote}?hl=en"
+    if tab:
+        url += f"&tab={tab}"
+    return url
+
+
+def _gf_fetch_tab(quote: str, headers: dict[str, str], tab: str | None, attempted_urls: list[str]) -> dict[str, Any]:
+    url = _gf_tab_url(quote, tab)
+    attempted_urls.append(url)
+    resp = _requests.get(url, headers=headers, timeout=12)
+    return {
+        "tab": tab or "overview",
+        "url": url,
+        "status": resp.status_code,
+        "soup": _BS(resp.text, "html.parser") if resp.status_code == 200 else None,
+    }
+
+
+def _gf_scrape_financials_page(quote: str, headers: dict[str, str], attempted_urls: list[str], tab_soup=None) -> dict[str, Any]:
+    url = _gf_tab_url(quote, "financials")
+    try:
+        soup = tab_soup
+        status = 200 if soup is not None else None
+        if soup is None:
+            fetched = _gf_fetch_tab(quote, headers, "financials", attempted_urls)
+            status = fetched.get("status")
+            if status != 200:
+                return {"url": url, "status": status, "rows": [], "statements": {}}
+            soup = fetched.get("soup")
+
         table_rows: list[dict[str, Any]] = []
         for table in _gf_extract_html_tables(soup):
             table_rows.extend(table.get("rows", []))
@@ -2059,7 +2560,7 @@ def _gf_scrape_financials_page(quote: str, headers: dict[str, str], attempted_ur
         statements = _gf_rows_by_statement(rows)
         return {
             "url": url,
-            "status": resp.status_code,
+            "status": status,
             "periods": periods,
             "rows": rows[:120],
             "statements": statements,
@@ -2081,14 +2582,25 @@ def _scrape_google_finance_safe(ticker: str, raise_on_error: bool = False):
     last_err = None
     attempted_urls = []
     for symbol, exch, quote in _gf_candidate_quotes(ticker):
-        url = f"https://www.google.com/finance/quote/{quote}?hl=en"
-        attempted_urls.append(url)
+        url = _gf_tab_url(quote)
         try:
-            resp = _requests.get(url, headers=headers, timeout=10)
-            if resp.status_code != 200:
+            overview_tab = _gf_fetch_tab(quote, headers, None, attempted_urls)
+            if overview_tab.get("status") != 200:
                 continue
             
-            soup = _BS(resp.text, "html.parser")
+            soup = overview_tab.get("soup")
+            if soup is None:
+                continue
+            lines = _gf_text_lines(soup)
+            earnings_tab = _gf_fetch_tab(quote, headers, "earnings", attempted_urls)
+            financials_tab = _gf_fetch_tab(quote, headers, "financials", attempted_urls)
+            holdings_tab = _gf_fetch_tab(quote, headers, "holdings", attempted_urls)
+            earnings_soup = earnings_tab.get("soup") or soup
+            financials_soup = financials_tab.get("soup") or soup
+            holdings_soup = holdings_tab.get("soup") or soup
+            earnings_lines = _gf_text_lines(earnings_soup)
+            financials_lines = _gf_text_lines(financials_soup)
+            holdings_lines = _gf_text_lines(holdings_soup)
             
             price = _gf_first_text(soup, [
                 "div.YMlKec.fxKbKc",
@@ -2101,6 +2613,7 @@ def _scrape_google_finance_safe(ticker: str, raise_on_error: bool = False):
                 "div.PZPZlf",
                 "h1",
             ])
+            company_name = _gf_extract_company_name(lines, symbol, company_name)
             exchange_line = _gf_first_text(soup, [
                 "div.TgMHGc",
                 "div.e1AOyf",
@@ -2121,14 +2634,35 @@ def _scrape_google_finance_safe(ticker: str, raise_on_error: bool = False):
             
             stats = _gf_extract_stats(soup)
             normalized_stats = _gf_normalize_stats(stats)
+            profile = _gf_extract_profile(lines, stats)
+            quote_summary = _gf_extract_quote_summary(lines, price, change_text, exchange_line)
             news = _gf_extract_news(soup)
+            line_news = _gf_extract_news_from_lines(lines)
+            if line_news:
+                seen_news = {(item.get("title") or "").lower() for item in news}
+                news.extend(item for item in line_news if (item.get("title") or "").lower() not in seen_news)
+                news = news[:8]
             peers = _gf_extract_peers(soup, symbol)
-            financials = _gf_scrape_financials_page(quote, headers, attempted_urls)
+            line_peers = _gf_extract_related_stocks_from_lines(lines, symbol)
+            if line_peers:
+                seen_peers = {item.get("symbol") for item in peers}
+                peers.extend(item for item in line_peers if item.get("symbol") not in seen_peers)
+                peers = peers[:12]
+            overview_financials = _gf_extract_overview_financial_rows(soup)
+            tab_financials = _gf_extract_overview_financial_rows(financials_soup)
+            financials_page = _gf_scrape_financials_page(quote, headers, attempted_urls, tab_soup=financials_soup)
+            if (tab_financials.get("rowCount") or 0) > (overview_financials.get("rowCount") or 0):
+                overview_financials = tab_financials
+            financials = _gf_merge_financials(financials_page, overview_financials)
             financial_rows = financials.get("rows") if isinstance(financials, dict) else []
             earnings = _gf_extract_earnings(
                 financial_rows if isinstance(financial_rows, list) else [],
                 stats,
             )
+            earnings_panel = _gf_extract_earnings_panel(earnings_lines)
+            if earnings_panel:
+                earnings["panel"] = earnings_panel
+            holdings_visible = any("holder" in line.lower() or "ownership" in line.lower() for line in holdings_lines)
                 
             if price == "N/A" and not stats and not about:
                 continue 
@@ -2137,6 +2671,7 @@ def _scrape_google_finance_safe(ticker: str, raise_on_error: bool = False):
             pe_ratio = normalized_stats.get("peRatio", {}).get("value")
             dividend_yield = normalized_stats.get("dividendYield", {}).get("value")
             employees = normalized_stats.get("employees", {}).get("value")
+            shares_outstanding = normalized_stats.get("sharesOutstanding", {}).get("value")
                 
             return {
                 "symbol": symbol,
@@ -2147,20 +2682,57 @@ def _scrape_google_finance_safe(ticker: str, raise_on_error: bool = False):
                 "price": price,
                 "priceValue": _gf_number(price),
                 "change": change_text,
+                "quoteSummary": quote_summary,
                 "exchangeLine": exchange_line,
-                "description": about,
+                "description": profile.get("description") or about,
+                "profile": profile,
                 "stats": stats,
                 "normalizedStats": normalized_stats,
                 "financials": financials,
                 "earnings": earnings,
+                "tabs": {
+                    "overview": {
+                        "url": overview_tab.get("url"),
+                        "status": overview_tab.get("status"),
+                        "lineCount": len(lines),
+                    },
+                    "earnings": {
+                        "url": earnings_tab.get("url"),
+                        "status": earnings_tab.get("status"),
+                        "lineCount": len(earnings_lines),
+                        "panel": earnings_panel,
+                    },
+                    "financials": {
+                        "url": financials_tab.get("url"),
+                        "status": financials_tab.get("status"),
+                        "lineCount": len(financials_lines),
+                        "rowCount": financials.get("rowCount") if isinstance(financials, dict) else 0,
+                    },
+                    "holdings": {
+                        "url": holdings_tab.get("url"),
+                        "status": holdings_tab.get("status"),
+                        "lineCount": len(holdings_lines),
+                        "serverRendered": holdings_visible,
+                        "note": None if holdings_visible else "Google Finance holdings tab is not server-rendered in this response; use /equities/{symbol}/ownership for yfinance holder data.",
+                    },
+                },
                 "marketCap": market_cap,
                 "peRatio": pe_ratio,
                 "dividendYield": dividend_yield,
                 "employees": employees,
+                "sharesOutstanding": shares_outstanding,
                 "news": news,
                 "peers": peers,
+                "relatedStocks": peers,
                 "url": url,
                 "attemptedUrls": attempted_urls,
+                "extracted": {
+                    "stats": len(stats),
+                    "financialRows": len(financial_rows) if isinstance(financial_rows, list) else 0,
+                    "news": len(news),
+                    "peers": len(peers),
+                    "profileFields": len(profile),
+                },
                 "source": "Google Finance",
                 "timestamp": datetime.now(timezone.utc).isoformat()
             }
