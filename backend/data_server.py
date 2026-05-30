@@ -1701,6 +1701,34 @@ _GF_EXCHANGES = [
     "CPH", "HEL", "HKG", "TYO", "NSE", "BOM", "ASX",
 ]
 
+_GF_YAHOO_EXCHANGE_MAP = {
+    "NMS": "NASDAQ",
+    "NGM": "NASDAQ",
+    "NCM": "NASDAQ",
+    "NYQ": "NYSE",
+    "ASE": "NYSEAMERICAN",
+    "PCX": "NYSEARCA",
+    "BTS": "BATS",
+    "PNK": "OTCMKTS",
+    "OBB": "OTCMKTS",
+    "TOR": "TSE",
+    "VAN": "TSX",
+    "LSE": "LON",
+    "GER": "ETR",
+    "PAR": "EPA",
+    "MIL": "BIT",
+    "AMS": "AMS",
+    "STO": "STO",
+    "CPH": "CPH",
+    "HEL": "HEL",
+    "HKG": "HKG",
+    "JPX": "TYO",
+    "TAI": "TPE",
+    "NSI": "NSE",
+    "BSE": "BOM",
+    "ASX": "ASX",
+}
+
 
 def _gf_clean_text(value: str | None) -> str:
     return _re.sub(r"\s+", " ", value or "").strip()
@@ -1801,6 +1829,41 @@ def _gf_next_value(lines: list[str], index: int) -> str:
     return ""
 
 
+def _gf_yahoo_exchange_to_google(exchange: str | None, exch_disp: str | None = None) -> str | None:
+    raw = (exchange or "").upper().strip()
+    mapped = _GF_YAHOO_EXCHANGE_MAP.get(raw)
+    if mapped:
+        return mapped
+    disp = (exch_disp or "").upper()
+    if "NASDAQ" in disp:
+        return "NASDAQ"
+    if "NYSE ARCA" in disp:
+        return "NYSEARCA"
+    if "NYSE" in disp:
+        return "NYSE"
+    if "BATS" in disp:
+        return "BATS"
+    if "XETRA" in disp:
+        return "ETR"
+    return raw if raw in _GF_EXCHANGES else None
+
+
+def _gf_search_symbol_candidates(raw: str) -> list[tuple[str, str | None]]:
+    candidates: list[tuple[str, str | None]] = []
+    try:
+        results = yf.Search(raw).quotes or []
+    except Exception:
+        return candidates
+
+    for item in results[:8]:
+        symbol = (item.get("symbol") or "").upper().strip()
+        if not symbol:
+            continue
+        exchange = _gf_yahoo_exchange_to_google(item.get("exchange"), item.get("exchDisp"))
+        candidates.append((symbol, exchange))
+    return candidates
+
+
 def _gf_candidate_quotes(ticker: str) -> list[tuple[str, str | None, str]]:
     raw = ticker.upper().strip()
     if not raw:
@@ -1823,6 +1886,13 @@ def _gf_candidate_quotes(ticker: str) -> list[tuple[str, str | None, str]]:
         symbol, exchange = raw.split(":", 1)
         add(symbol, exchange)
     else:
+        # Support user queries like "NVIDIA" by resolving through Yahoo search
+        # before trying the raw text as if it were already a ticker.
+        for symbol, exchange in _gf_search_symbol_candidates(raw):
+            if exchange:
+                add(symbol, exchange)
+            add(symbol, None)
+
         variants = [raw]
         if "-" in raw:
             variants.append(raw.replace("-", "."))
@@ -1893,9 +1963,33 @@ def _gf_extract_stats(soup) -> dict[str, str]:
         "Day range",
         "Year range",
     }
+    numeric_text_pair_labels = {
+        "Open",
+        "High",
+        "Low",
+        "Mkt. cap",
+        "Market cap",
+        "Avg. vol.",
+        "Avg Volume",
+        "Volume",
+        "Dividend",
+        "Dividend yield",
+        "Quarterly dividend",
+        "P/E ratio",
+        "52-wk high",
+        "52-wk low",
+        "EPS",
+        "Beta",
+        "Shares outstanding",
+        "No. of employees",
+        "Employees",
+        "Previous close",
+    }
     for i, line in enumerate(lines):
         if line in text_pair_labels and line not in stats:
             value = _gf_next_value(lines, i)
+            if line in numeric_text_pair_labels and not _gf_is_numericish(value):
+                continue
             if value and value not in text_pair_labels:
                 stats[line] = value
 
@@ -1995,6 +2089,23 @@ def _gf_extract_company_name(lines: list[str], symbol: str, fallback: str) -> st
             if candidate not in {"Finance", "Search or ask", "Add to list"}:
                 return candidate
     return "" if fallback in {"Finance", "Google Finance"} else fallback
+
+
+def _gf_is_valid_quote_page(lines: list[str], symbol: str, quote: str, company_name: str, price: str, stats: dict[str, str]) -> bool:
+    first_lines = lines[:40]
+    if any("Page Not Found" in line for line in first_lines):
+        return False
+    if company_name in {"", "Finance", "Google Finance", "Page Not Found"}:
+        return False
+
+    quote_seen = quote in lines or symbol in lines
+    has_price = _gf_number(price) is not None
+    has_real_stats = any(
+        label in stats
+        for label in ("Open", "High", "Low", "Mkt. cap", "Market cap", "P/E ratio", "Shares outstanding")
+    )
+    has_profile = "Profile" in lines or any(line.startswith(f"About {company_name}") for line in lines)
+    return quote_seen and (has_price or has_real_stats or has_profile)
 
 
 def _gf_extract_profile(lines: list[str], stats: dict[str, str]) -> dict[str, Any]:
@@ -2277,6 +2388,13 @@ def _gf_statement_kind(label: str) -> str:
     return "other"
 
 
+def _gf_is_financial_row(label: str) -> bool:
+    clean = _gf_clean_text(label)
+    if clean in _GF_FINANCIAL_LABELS:
+        return True
+    return _gf_statement_kind(clean) != "other"
+
+
 def _gf_extract_periods(rows: list[dict[str, Any]]) -> list[str]:
     for row in rows[:8]:
         raw = row.get("raw") or []
@@ -2472,6 +2590,8 @@ def _gf_merge_financials(page_financials: dict[str, Any], overview_financials: d
         values = tuple(_gf_clean_text(str(v)) for v in (row.get("values") or []))
         if not label or not values:
             continue
+        if not _gf_is_financial_row(label):
+            continue
         key = (label.lower(), values)
         if key in seen:
             continue
@@ -2545,6 +2665,8 @@ def _gf_scrape_financials_page(quote: str, headers: dict[str, str], attempted_ur
             label = _gf_clean_text(str(row.get("label") or ""))
             values = [_gf_clean_text(str(v)) for v in (row.get("values") or [])]
             if not label or not values:
+                continue
+            if not _gf_is_financial_row(label):
                 continue
             key = (label.lower(), tuple(values))
             if key in seen:
@@ -2633,6 +2755,10 @@ def _scrape_google_finance_safe(ticker: str, raise_on_error: bool = False):
             ]) or "N/A"
             
             stats = _gf_extract_stats(soup)
+            if not _gf_is_valid_quote_page(lines, symbol, quote, company_name, price, stats):
+                last_err = ValueError(f"Invalid Google Finance quote page for {quote}")
+                continue
+
             normalized_stats = _gf_normalize_stats(stats)
             profile = _gf_extract_profile(lines, stats)
             quote_summary = _gf_extract_quote_summary(lines, price, change_text, exchange_line)
