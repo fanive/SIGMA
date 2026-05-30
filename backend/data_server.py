@@ -530,7 +530,7 @@ async def get_equity_profile(symbol: str):
             "ceo": ceo or (gf_data.get("profile") or {}).get("ceo"),
             "website": website,
             "image": logo.get("primary"),
-            "description": info.get("longBusinessSummary") or gf_data.get("description"),
+            "description": info.get("longBusinessSummary") or (gf_data.get("profile") or {}).get("description"),
             "fullTimeEmployees": _safe(info.get("fullTimeEmployees") or gf_data.get("employees")),
             "googleFinance": {
                 "quote": gf_data.get("quote"),
@@ -1761,9 +1761,28 @@ def _gf_number(value: str | None):
 
 def _gf_metric_value(label: str, raw: str):
     lower = label.lower()
-    if any(token in lower for token in ("date", "founded", "headquarters", "ceo", "sector", "website", "exchange", "period")):
+    if any(token in lower for token in ("date", "founded", "headquarters", "ceo", "sector", "website", "exchange", "period", "report")):
         return None
     return _gf_number(raw)
+
+
+def _gf_prune_empty(value):
+    if isinstance(value, dict):
+        cleaned = {}
+        for key, item in value.items():
+            pruned = _gf_prune_empty(item)
+            if pruned in (None, "", [], {}):
+                continue
+            cleaned[key] = pruned
+        return cleaned
+    if isinstance(value, list):
+        cleaned = []
+        for item in value:
+            pruned = _gf_prune_empty(item)
+            if pruned not in (None, "", [], {}):
+                cleaned.append(pruned)
+        return cleaned
+    return value
 
 
 def _gf_abs_url(href: str | None) -> str:
@@ -2034,14 +2053,17 @@ def _gf_normalize_stats(stats: dict[str, str]) -> dict[str, Any]:
     }
     out: dict[str, Any] = {}
     for label, raw in stats.items():
+        if _gf_clean_text(raw) in {"-", "—", "N/A"}:
+            continue
         key = aliases.get(label)
         if not key:
             key = _re.sub(r"[^a-zA-Z0-9]+", "_", label).strip("_")
             key = key[:1].lower() + key[1:]
-        out[key] = {
-            "raw": raw,
-            "value": _gf_metric_value(label, raw),
-        }
+        metric: dict[str, Any] = {"raw": raw}
+        numeric_value = _gf_metric_value(label, raw)
+        if numeric_value is not None:
+            metric["value"] = numeric_value
+        out[key] = metric
     return out
 
 
@@ -2124,7 +2146,7 @@ def _gf_extract_profile(lines: list[str], stats: dict[str, str]) -> dict[str, An
         "founded": stats.get("Founded"),
         "headquarters": stats.get("Headquarters"),
         "sector": stats.get("Sector"),
-        "website": stats.get("Website"),
+        "website": stats.get("Website") if stats.get("Website") not in {"-", "—", "N/A"} else None,
     }
     return {
         "description": " ".join(description_parts).strip(),
@@ -2798,8 +2820,7 @@ def _scrape_google_finance_safe(ticker: str, raise_on_error: bool = False):
             dividend_yield = normalized_stats.get("dividendYield", {}).get("value")
             employees = normalized_stats.get("employees", {}).get("value")
             shares_outstanding = normalized_stats.get("sharesOutstanding", {}).get("value")
-                
-            return {
+            result = {
                 "symbol": symbol,
                 "query": ticker,
                 "quote": quote,
@@ -2809,8 +2830,6 @@ def _scrape_google_finance_safe(ticker: str, raise_on_error: bool = False):
                 "priceValue": _gf_number(price),
                 "change": change_text,
                 "quoteSummary": quote_summary,
-                "exchangeLine": exchange_line,
-                "description": profile.get("description") or about,
                 "profile": profile,
                 "stats": stats,
                 "normalizedStats": normalized_stats,
@@ -2862,6 +2881,7 @@ def _scrape_google_finance_safe(ticker: str, raise_on_error: bool = False):
                 "source": "Google Finance",
                 "timestamp": datetime.now(timezone.utc).isoformat()
             }
+            return _gf_prune_empty(result)
         except Exception as e:
             last_err = e
             continue
