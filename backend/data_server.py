@@ -241,6 +241,19 @@ def _shares_full_to_list(ticker_obj, limit: int = 60) -> list[dict[str, Any]]:
     return []
 
 
+def _yf_clean_list(value, limit: int = 40) -> list:
+    if isinstance(value, list):
+        return _clean(value[:limit])
+    if isinstance(value, tuple):
+        return _clean(list(value[:limit]))
+    return []
+
+
+def _yf_sec_filings_to_list(ticker_obj, limit: int = 40) -> list:
+    filings = _yf_get(lambda: ticker_obj.sec_filings, [])
+    return _yf_clean_list(filings, limit=limit)
+
+
 def _limited_list(value, limit: int = 20) -> list:
     return value[:limit] if isinstance(value, list) else []
 
@@ -522,9 +535,33 @@ async def get_equity_profile(symbol: str):
             "currency": info.get("currency") or "USD",
             "exchange": info.get("fullExchangeName") or info.get("exchange") or "",
             "pe": _safe(info.get("trailingPE") or gf_data.get("peRatio")),
+            "forwardPE": _safe(info.get("forwardPE")),
+            "pegRatio": _safe(info.get("pegRatio") or info.get("trailingPegRatio")),
+            "priceToBook": _safe(info.get("priceToBook")),
+            "enterpriseValue": _safe(info.get("enterpriseValue")),
+            "enterpriseToRevenue": _safe(info.get("enterpriseToRevenue")),
+            "enterpriseToEbitda": _safe(info.get("enterpriseToEbitda")),
             "eps": _safe(info.get("trailingEps")),
             "beta": _safe(info.get("beta") or (gf_data.get("normalizedStats", {}).get("beta") or {}).get("value")),
             "dividendYield": _safe(info.get("dividendYield") or gf_data.get("dividendYield")),
+            "payoutRatio": _safe(info.get("payoutRatio")),
+            "profitMargins": _safe(info.get("profitMargins")),
+            "grossMargins": _safe(info.get("grossMargins")),
+            "operatingMargins": _safe(info.get("operatingMargins")),
+            "returnOnAssets": _safe(info.get("returnOnAssets")),
+            "returnOnEquity": _safe(info.get("returnOnEquity")),
+            "revenueGrowth": _safe(info.get("revenueGrowth")),
+            "earningsGrowth": _safe(info.get("earningsGrowth")),
+            "freeCashflow": _safe(info.get("freeCashflow")),
+            "operatingCashflow": _safe(info.get("operatingCashflow")),
+            "totalCash": _safe(info.get("totalCash")),
+            "totalDebt": _safe(info.get("totalDebt")),
+            "sharesOutstanding": _safe(info.get("sharesOutstanding")),
+            "floatShares": _safe(info.get("floatShares")),
+            "heldPercentInsiders": _safe(info.get("heldPercentInsiders")),
+            "heldPercentInstitutions": _safe(info.get("heldPercentInstitutions")),
+            "shortRatio": _safe(info.get("shortRatio")),
+            "shortPercentOfFloat": _safe(info.get("shortPercentOfFloat")),
             "sector": info.get("sector") or (gf_data.get("profile") or {}).get("sector"),
             "industry": info.get("industry"),
             "ceo": ceo or (gf_data.get("profile") or {}).get("ceo"),
@@ -620,10 +657,15 @@ async def get_equity_financials(symbol: str):
             "annualIncomeStatement": _stmt_to_list(_yf_get(lambda: t.income_stmt, None)),
             "annualBalanceSheet": _stmt_to_list(_yf_get(lambda: t.balance_sheet, None)),
             "annualCashFlow": _stmt_to_list(_yf_get(lambda: t.cashflow, None)),
+            "ttmIncomeStatement": _stmt_to_list(_yf_get(lambda: t.ttm_income_stmt, None), limit=2),
+            "ttmCashFlow": _stmt_to_list(_yf_get(lambda: t.ttm_cashflow, None), limit=2),
+            "ttmFinancials": _stmt_to_list(_yf_get(lambda: t.ttm_financials, None), limit=2),
+            "valuationMeasures": _stmt_to_list(_yf_get(lambda: t.get_valuation_measures(), None), limit=12),
             "earningsDates": _df_to_list(earnings_dates, limit=16),
+            "secFilings": _yf_sec_filings_to_list(t, limit=30),
             "sharesOutstandingHistory": shares_full,
             "historyMetadata": _clean(_yf_get(lambda: t.history_metadata, {})),
-            "source": "yfinance",
+            "source": "yfinance/yahoo",
         }
 
     try:
@@ -637,6 +679,30 @@ async def get_equity_financials(symbol: str):
 # ---------------------------------------------------------------------------
 # /analysis/{symbol} — analyst targets, recommendations, earnings estimates
 # ---------------------------------------------------------------------------
+
+@equities_router.get("/{symbol}/valuation")
+async def get_equity_valuation(symbol: str):
+    """Yahoo Finance valuation and key-statistics style metrics. Cached 1h."""
+    sym = symbol.upper().strip()
+
+    def _fetch():
+        t = yf.Ticker(sym)
+        info = _yf_get(lambda: t.info, {}) or {}
+        return {
+            "symbol": sym,
+            "keyStatistics": _info_signal_pack(info),
+            "valuationMeasures": _stmt_to_list(_yf_get(lambda: t.get_valuation_measures(), None), limit=12),
+            "analystPriceTargets": _clean(_yf_get(lambda: t.analyst_price_targets, {})) or _target_fallback_from_info(info),
+            "source": "yfinance/yahoo",
+        }
+
+    try:
+        return _cached(_cache_financials, f"valuation:{sym}", _fetch)
+    except RateLimitError as e:
+        raise HTTPException(status_code=429, detail={"error": "rate_limited", "symbol": sym, "message": str(e), "retryAfter": 60})
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"valuation failed for {sym}: {e}")
+
 
 def _intelligence_fetch_yf(sym: str) -> dict:
     """Fetch yfinance analyst/earnings data. Called in a thread with timeout."""
@@ -660,6 +726,8 @@ def _intelligence_fetch_yf(sym: str) -> dict:
     eps_revisions = _df_to_list(_yf_get(lambda: t.eps_revisions, None))
     growth_estimates = _df_to_list(_yf_get(lambda: t.growth_estimates, None))
     earnings_dates = _df_to_list(_yf_get(lambda: t.get_earnings_dates(limit=16), None), limit=16)
+    valuation_measures = _stmt_to_list(_yf_get(lambda: t.get_valuation_measures(), None), limit=12)
+    sec_filings = _yf_sec_filings_to_list(t, limit=10)
 
     return {
         "info": info,
@@ -674,6 +742,8 @@ def _intelligence_fetch_yf(sym: str) -> dict:
         "eps_revisions": eps_revisions,
         "growth_estimates": growth_estimates,
         "earnings_dates": earnings_dates,
+        "valuation_measures": valuation_measures,
+        "sec_filings": sec_filings,
     }
 
 
@@ -745,6 +815,8 @@ async def get_equity_intelligence(symbol: str):
             "epsRevisions": yf_data.get("eps_revisions", []),
             "growthEstimates": growth_estimates,
             "earningsDates": yf_data.get("earnings_dates", []),
+            "valuationMeasures": yf_data.get("valuation_measures", []),
+            "secFilings": yf_data.get("sec_filings", []),
             "profileSignals": _info_signal_pack(info),
             "fallbackSignals": {
                 "target": _target_fallback_from_info(info),
@@ -818,11 +890,12 @@ async def get_equity_ownership(symbol: str):
             "mutualFundHolders": _df_to_list(_yf_get(lambda: t.mutualfund_holders, None), limit=20),
             "insiderTransactions": _df_to_list(_yf_get(lambda: t.insider_transactions, None), limit=25),
             "insiderPurchases": _df_to_list(_yf_get(lambda: t.insider_purchases, None), limit=25),
+            "insiderRosterHolders": _df_to_list(_yf_get(lambda: t.insider_roster_holders, None), limit=25),
             "sustainability": _df_to_list(_yf_get(lambda: t.sustainability, None), limit=40),
             "sharesOutstandingHistory": _shares_full_to_list(t, limit=80),
             "isin": _yf_get(lambda: t.get_isin(), None),
             "fundsData": funds_data,
-            "source": "yfinance",
+            "source": "yfinance/yahoo",
         }
 
     try:
@@ -850,6 +923,10 @@ async def get_equity_yfinance_coverage(symbol: str):
             _yf_probe("quarterly_balance_sheet", lambda: t.quarterly_balance_sheet),
             _yf_probe("cashflow", lambda: t.cashflow),
             _yf_probe("quarterly_cashflow", lambda: t.quarterly_cashflow),
+            _yf_probe("ttm_income_stmt", lambda: t.ttm_income_stmt),
+            _yf_probe("ttm_cashflow", lambda: t.ttm_cashflow),
+            _yf_probe("ttm_financials", lambda: t.ttm_financials),
+            _yf_probe("valuation_measures", lambda: t.get_valuation_measures()),
             _yf_probe("analyst_price_targets", lambda: t.analyst_price_targets),
             _yf_probe("recommendations", lambda: t.recommendations),
             _yf_probe("recommendations_summary", lambda: t.recommendations_summary),
@@ -862,8 +939,10 @@ async def get_equity_yfinance_coverage(symbol: str):
             _yf_probe("growth_estimates", lambda: t.growth_estimates),
             _yf_probe("earnings_dates", lambda: t.get_earnings_dates(limit=16)),
             _yf_probe("calendar", lambda: t.calendar),
+            _yf_probe("actions", lambda: t.actions),
             _yf_probe("dividends", lambda: t.dividends),
             _yf_probe("splits", lambda: t.splits),
+            _yf_probe("capital_gains", lambda: t.capital_gains),
             _yf_probe("options_expirations", lambda: list(t.options or [])),
             _yf_probe("news", lambda: t.news),
             _yf_probe("major_holders", lambda: t.major_holders),
@@ -871,10 +950,12 @@ async def get_equity_yfinance_coverage(symbol: str):
             _yf_probe("mutualfund_holders", lambda: t.mutualfund_holders),
             _yf_probe("insider_transactions", lambda: t.insider_transactions),
             _yf_probe("insider_purchases", lambda: t.insider_purchases),
+            _yf_probe("insider_roster_holders", lambda: t.insider_roster_holders),
             _yf_probe("sustainability", lambda: t.sustainability),
             _yf_probe("shares_full", lambda: t.get_shares_full()),
             _yf_probe("isin", lambda: t.get_isin()),
             _yf_probe("funds_data", lambda: _funds_data_to_dict(t.funds_data)),
+            _yf_probe("sec_filings", lambda: t.sec_filings),
             _yf_probe("history_metadata", lambda: t.history_metadata),
         ]
         available = [p["label"] for p in probes if p.get("available")]
@@ -890,9 +971,12 @@ async def get_equity_yfinance_coverage(symbol: str):
             "recommendations": [
                 "Use /ownership for majorHolders, sustainability, insiderPurchases, sharesOutstandingHistory, and fundsData.",
                 "Use /intelligence for epsTrend, epsRevisions, growthEstimates, and earningsDates.",
-                "Use /financials for statements plus earningsDates, sharesOutstandingHistory, and historyMetadata.",
+                "Use /financials for statements, TTM statements, valuationMeasures, secFilings, earningsDates, sharesOutstandingHistory, and historyMetadata.",
+                "Use /valuation for a compact Yahoo Key Statistics and valuation view.",
+                "Use /sec-filings for Yahoo SEC filing links and exhibit URLs.",
+                "Use /events for calendar, actions, dividends, splits, capitalGains, and upcoming earningsDates.",
             ],
-            "source": "yfinance",
+            "source": "yfinance/yahoo",
             "timestamp": datetime.now(timezone.utc).isoformat(),
         }
 
@@ -941,6 +1025,27 @@ async def get_equity_options(symbol: str, expiration: str | None = Query(default
 # ---------------------------------------------------------------------------
 # /events/{symbol} — earnings calendar, dividends, splits
 # ---------------------------------------------------------------------------
+@equities_router.get("/{symbol}/sec-filings")
+async def get_equity_sec_filings(symbol: str, limit: int = Query(default=40, ge=1, le=100)):
+    """Yahoo Finance SEC filings feed with exhibit URLs. Cached 1h."""
+    sym = symbol.upper().strip()
+
+    def _fetch():
+        t = yf.Ticker(sym)
+        return {
+            "symbol": sym,
+            "secFilings": _yf_sec_filings_to_list(t, limit=limit),
+            "source": "yfinance/yahoo",
+        }
+
+    try:
+        return _cached(_cache_events, f"sec-filings:{sym}:{limit}", _fetch)
+    except RateLimitError as e:
+        raise HTTPException(status_code=429, detail={"error": "rate_limited", "symbol": sym, "message": str(e), "retryAfter": 60})
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"sec filings failed for {sym}: {e}")
+
+
 @equities_router.get("/{symbol}/events")
 async def get_equity_events(symbol: str):
     """Earnings calendar, dividend history, stock splits. Cached 1h."""
@@ -951,9 +1056,13 @@ async def get_equity_events(symbol: str):
         return {
             "symbol": sym,
             "calendar": _clean(_yf_get(lambda: t.calendar, {})),
+            "earningsDates": _df_to_list(_yf_get(lambda: t.get_earnings_dates(limit=12), None), limit=12),
+            "actions": _df_to_list(_yf_get(lambda: t.actions, None), limit=80),
             "dividends": _series_to_list(_yf_get(lambda: t.dividends, None), value_key="dividend", limit=50),
             "splits": _series_to_list(_yf_get(lambda: t.splits, None), value_key="split", limit=50),
-            "source": "yfinance",
+            "capitalGains": _series_to_list(_yf_get(lambda: t.capital_gains, None), value_key="capitalGain", limit=50),
+            "secFilings": _yf_sec_filings_to_list(t, limit=15),
+            "source": "yfinance/yahoo",
         }
 
     try:
