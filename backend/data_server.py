@@ -614,12 +614,12 @@ async def get_equity_financials(symbol: str):
         shares_full = _shares_full_to_list(t, limit=80)
         return {
             "symbol": sym,
-            "quarterlyIncomeStatement": _stmt_to_list(t.quarterly_income_stmt),
-            "quarterlyBalanceSheet": _stmt_to_list(t.quarterly_balance_sheet),
-            "quarterlyCashFlow": _stmt_to_list(t.quarterly_cashflow),
-            "annualIncomeStatement": _stmt_to_list(t.income_stmt),
-            "annualBalanceSheet": _stmt_to_list(t.balance_sheet),
-            "annualCashFlow": _stmt_to_list(t.cashflow),
+            "quarterlyIncomeStatement": _stmt_to_list(_yf_get(lambda: t.quarterly_income_stmt, None)),
+            "quarterlyBalanceSheet": _stmt_to_list(_yf_get(lambda: t.quarterly_balance_sheet, None)),
+            "quarterlyCashFlow": _stmt_to_list(_yf_get(lambda: t.quarterly_cashflow, None)),
+            "annualIncomeStatement": _stmt_to_list(_yf_get(lambda: t.income_stmt, None)),
+            "annualBalanceSheet": _stmt_to_list(_yf_get(lambda: t.balance_sheet, None)),
+            "annualCashFlow": _stmt_to_list(_yf_get(lambda: t.cashflow, None)),
             "earningsDates": _df_to_list(earnings_dates, limit=16),
             "sharesOutstandingHistory": shares_full,
             "historyMetadata": _clean(_yf_get(lambda: t.history_metadata, {})),
@@ -814,9 +814,9 @@ async def get_equity_ownership(symbol: str):
         return {
             "symbol": sym,
             "majorHolders": _df_to_list(_yf_get(lambda: t.major_holders, None), limit=20),
-            "institutionalHolders": _df_to_list(t.institutional_holders, limit=20),
-            "mutualFundHolders": _df_to_list(t.mutualfund_holders, limit=20),
-            "insiderTransactions": _df_to_list(t.insider_transactions, limit=25),
+            "institutionalHolders": _df_to_list(_yf_get(lambda: t.institutional_holders, None), limit=20),
+            "mutualFundHolders": _df_to_list(_yf_get(lambda: t.mutualfund_holders, None), limit=20),
+            "insiderTransactions": _df_to_list(_yf_get(lambda: t.insider_transactions, None), limit=25),
             "insiderPurchases": _df_to_list(_yf_get(lambda: t.insider_purchases, None), limit=25),
             "sustainability": _df_to_list(_yf_get(lambda: t.sustainability, None), limit=40),
             "sharesOutstandingHistory": _shares_full_to_list(t, limit=80),
@@ -915,18 +915,18 @@ async def get_equity_options(symbol: str, expiration: str | None = Query(default
 
     def _fetch():
         t = yf.Ticker(sym)
-        expirations = list(t.options or [])
+        expirations = list(_yf_get(lambda: t.options, []) or [])
         if not expirations:
             return {"symbol": sym, "expirations": [], "calls": [], "puts": [], "source": "yfinance"}
 
         selected = expiration if expiration in expirations else expirations[0]
-        chain = t.option_chain(selected)
+        chain = _yf_get(lambda: t.option_chain(selected), None)
         return {
             "symbol": sym,
             "expirations": expirations,
             "selectedExpiration": selected,
-            "calls": _df_to_list(chain.calls, limit=100),
-            "puts": _df_to_list(chain.puts, limit=100),
+            "calls": _df_to_list(getattr(chain, "calls", None), limit=100),
+            "puts": _df_to_list(getattr(chain, "puts", None), limit=100),
             "source": "yfinance",
         }
 
@@ -950,9 +950,9 @@ async def get_equity_events(symbol: str):
         t = yf.Ticker(sym)
         return {
             "symbol": sym,
-            "calendar": _clean(t.calendar),
-            "dividends": _series_to_list(t.dividends, value_key="dividend", limit=50),
-            "splits": _series_to_list(t.splits, value_key="split", limit=50),
+            "calendar": _clean(_yf_get(lambda: t.calendar, {})),
+            "dividends": _series_to_list(_yf_get(lambda: t.dividends, None), value_key="dividend", limit=50),
+            "splits": _series_to_list(_yf_get(lambda: t.splits, None), value_key="split", limit=50),
             "source": "yfinance",
         }
 
@@ -1070,7 +1070,7 @@ async def get_equity_history(symbol: str, range: str = "1mo", interval: str = "1
 @equities_router.get("/{symbol}/intraday")
 async def get_equity_intraday(symbol: str, interval: str = "5m", range: str = "1d", prepost: bool = True):
     """Intraday bars. Delegates to /history with prepost=True."""
-    return await history(symbol=symbol, range=range, interval=interval, prepost=prepost)
+    return await get_equity_history(symbol=symbol, range=range, interval=interval, prepost=prepost)
 
 
 @market_router.get("/indices")
