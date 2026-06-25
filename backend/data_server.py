@@ -51,6 +51,7 @@ _cache_insider    = TTLCache(maxsize=200, ttl=14400)   # 4h   — OpenInsider SE
 _cache_sec        = TTLCache(maxsize=100, ttl=86400)   # 24h  — SEC EDGAR facts
 _cache_google     = TTLCache(maxsize=200, ttl=300)     # 5min — Google Finance scrape
 _cache_coverage   = TTLCache(maxsize=100, ttl=1800)    # 30min — yfinance coverage diagnostics
+_cache_yf_dataset = TTLCache(maxsize=100, ttl=300)     # 5min - consolidated yfinance dataset
 
 # Stale cache (no TTL) — keeps last known good value across restarts
 _stale: dict = {}
@@ -65,6 +66,12 @@ def _is_rate_limit(exc: Exception) -> bool:
 class RateLimitError(Exception):
     """Raised by _cached when yfinance rate-limits and no stale data is available."""
     pass
+
+
+def _with_stale_marker(value: Any, reason: str) -> Any:
+    if isinstance(value, dict):
+        return {**value, "_stale": True, "_stale_reason": reason}
+    return {"data": value, "_stale": True, "_stale_reason": reason}
 
 
 def _cached(cache: TTLCache, key: str, fn, retries: int = 3, backoff: float = 2.5):
@@ -87,7 +94,7 @@ def _cached(cache: TTLCache, key: str, fn, retries: int = 3, backoff: float = 2.
             if _is_rate_limit(exc):
                 if stale_key in _stale:
                     # Return stale data rather than crashing
-                    return {**_stale[stale_key], "_stale": True, "_stale_reason": "rate_limited"}
+                    return _with_stale_marker(_stale[stale_key], "rate_limited")
                 if attempt < retries - 1:
                     time.sleep(backoff * (attempt + 1))
             else:
@@ -252,6 +259,80 @@ def _yf_clean_list(value, limit: int = 40) -> list:
 def _yf_sec_filings_to_list(ticker_obj, limit: int = 40) -> list:
     filings = _yf_get(lambda: ticker_obj.sec_filings, [])
     return _yf_clean_list(filings, limit=limit)
+
+
+def _normalize_yf_news_item(item: dict[str, Any]) -> dict[str, Any]:
+    content = item.get("content") or item
+    thumbnail = content.get("thumbnail") or {}
+    resolutions = thumbnail.get("resolutions") or []
+    return {
+        "title": content.get("title"),
+        "summary": content.get("summary") or content.get("description"),
+        "publisher": (content.get("provider") or {}).get("displayName") or content.get("publisher"),
+        "link": (content.get("canonicalUrl") or {}).get("url")
+        or (content.get("clickThroughUrl") or {}).get("url")
+        or content.get("link"),
+        "publishedAt": content.get("pubDate") or _safe(content.get("providerPublishTime")),
+        "type": content.get("contentType") or content.get("type"),
+        "thumbnail": thumbnail.get("originalUrl") or (resolutions[0].get("url") if resolutions else None),
+        "source": "yfinance/yahoo",
+    }
+
+
+def _option_chain_payload(ticker_obj, symbol: str, expiration: str | None = None, limit: int = 120) -> dict[str, Any]:
+    expirations = list(_yf_get(lambda: ticker_obj.options, []) or [])
+    if not expirations:
+        return {"symbol": symbol, "expirations": [], "selectedExpiration": None, "calls": [], "puts": []}
+    selected = expiration if expiration in expirations else expirations[0]
+    chain = _yf_get(lambda: ticker_obj.option_chain(selected), None)
+    return {
+        "symbol": symbol,
+        "expirations": expirations,
+        "selectedExpiration": selected,
+        "calls": _df_to_list(getattr(chain, "calls", None), limit=limit),
+        "puts": _df_to_list(getattr(chain, "puts", None), limit=limit),
+    }
+
+
+def _payload_count(value: Any) -> int:
+    if not _has_payload(value):
+        return 0
+    if isinstance(value, dict):
+        return sum(1 for item in value.values() if _has_payload(item))
+    if isinstance(value, list):
+        return len(value)
+    return 1
+
+
+def _dataset_inventory(payload: dict[str, Any]) -> dict[str, Any]:
+    history = payload.get("history") or {}
+    options = payload.get("options") or {}
+    families = {
+        "profile": payload.get("profile"),
+        "quote": payload.get("quote"),
+        "history": history.get("rows"),
+        "financials": payload.get("financials"),
+        "valuation": payload.get("valuation"),
+        "analyst": payload.get("analyst"),
+        "ownership": payload.get("ownership"),
+        "events": payload.get("events"),
+        "options": [
+            *(options.get("expirations") or []),
+            *(options.get("calls") or []),
+            *(options.get("puts") or []),
+        ],
+        "news": payload.get("news"),
+        "metadata": payload.get("metadata"),
+    }
+    counts = {name: _payload_count(value) for name, value in families.items()}
+    available = [name for name, count in counts.items() if count > 0]
+    missing = [name for name, count in counts.items() if count == 0]
+    return {
+        "availableFamilies": available,
+        "missingFamilies": missing,
+        "familyCounts": counts,
+        "coverageRatio": round(len(available) / len(families), 3) if families else 0,
+    }
 
 
 def _limited_list(value, limit: int = 20) -> list:
@@ -906,6 +987,180 @@ async def get_equity_ownership(symbol: str):
         raise HTTPException(status_code=500, detail=f"ownership failed for {sym}: {e}")
 
 
+@equities_router.get("/{symbol}/yfinance")
+async def get_equity_yfinance_dataset(
+    symbol: str,
+    history_range: str = Query(default="1mo", alias="range"),
+    history_interval: str = Query(default="1d", alias="interval"),
+    include_history: bool = Query(default=True),
+    include_raw: bool = Query(default=False),
+    option_expiration: str | None = Query(default=None),
+    news_limit: int = Query(default=20, ge=0, le=50),
+):
+    """Consolidated yfinance payload for research, screens, and future backend work."""
+    sym = symbol.upper().strip()
+    cache_key = f"dataset:{sym}:{history_range}:{history_interval}:{include_history}:{include_raw}:{option_expiration or '_default'}:{news_limit}"
+
+    def _fetch():
+        t = yf.Ticker(sym)
+        info = _yf_get(lambda: t.info, {}) or {}
+        fast_info = _yf_get(lambda: dict(t.fast_info or {}), {}) or {}
+        website = info.get("website")
+        logo = _logo_urls(website, symbol=sym)
+
+        price = _num(info.get("currentPrice") or info.get("regularMarketPrice") or fast_info.get("lastPrice"))
+        prev = _num(info.get("previousClose") or info.get("regularMarketPreviousClose") or fast_info.get("previousClose"))
+        change = price - prev if prev > 0 else 0
+        change_pct = (change / prev * 100) if prev > 0 else 0
+
+        history_rows: list[dict[str, Any]] = []
+        if include_history:
+            hist = _yf_get(lambda: t.history(period=history_range, interval=history_interval, prepost=False, auto_adjust=True), None)
+            if isinstance(hist, pd.DataFrame) and not hist.empty:
+                for dt, row in hist.iterrows():
+                    close_val = row.get("Close")
+                    if close_val is None or pd.isna(close_val):
+                        continue
+                    history_rows.append({
+                        "date": _safe(dt),
+                        "open": _safe(row.get("Open")),
+                        "high": _safe(row.get("High")),
+                        "low": _safe(row.get("Low")),
+                        "close": float(close_val),
+                        "volume": _safe(row.get("Volume")),
+                    })
+
+        raw_news = _yf_get(lambda: t.news, []) or []
+        financials = {
+            "quarterlyIncomeStatement": _stmt_to_list(_yf_get(lambda: t.quarterly_income_stmt, None)),
+            "quarterlyBalanceSheet": _stmt_to_list(_yf_get(lambda: t.quarterly_balance_sheet, None)),
+            "quarterlyCashFlow": _stmt_to_list(_yf_get(lambda: t.quarterly_cashflow, None)),
+            "annualIncomeStatement": _stmt_to_list(_yf_get(lambda: t.income_stmt, None)),
+            "annualBalanceSheet": _stmt_to_list(_yf_get(lambda: t.balance_sheet, None)),
+            "annualCashFlow": _stmt_to_list(_yf_get(lambda: t.cashflow, None)),
+            "ttmIncomeStatement": _stmt_to_list(_yf_get(lambda: t.ttm_income_stmt, None), limit=2),
+            "ttmCashFlow": _stmt_to_list(_yf_get(lambda: t.ttm_cashflow, None), limit=2),
+            "ttmFinancials": _stmt_to_list(_yf_get(lambda: t.ttm_financials, None), limit=2),
+        }
+        valuation_measures = _stmt_to_list(_yf_get(lambda: t.get_valuation_measures(), None), limit=12)
+        analyst_targets = _clean(_yf_get(lambda: t.analyst_price_targets, {})) or _target_fallback_from_info(info)
+        recommendations_summary = _df_to_list(_yf_get(lambda: t.recommendations_summary, None), limit=10)
+        if not recommendations_summary:
+            recommendations_summary = _recommendation_fallback_from_info(info)
+
+        payload: dict[str, Any] = {
+            "symbol": sym,
+            "quote": {
+                "price": price,
+                "previousClose": prev,
+                "change": change,
+                "changePercent": change_pct,
+                "open": _safe(info.get("open") or info.get("regularMarketOpen")),
+                "dayHigh": _safe(info.get("dayHigh") or info.get("regularMarketDayHigh")),
+                "dayLow": _safe(info.get("dayLow") or info.get("regularMarketDayLow")),
+                "volume": _safe(info.get("volume") or info.get("regularMarketVolume") or fast_info.get("lastVolume")),
+                "averageVolume": _safe(info.get("averageVolume") or info.get("averageVolume10days")),
+                "marketCap": _safe(info.get("marketCap") or fast_info.get("marketCap")),
+                "currency": info.get("currency") or fast_info.get("currency"),
+                "exchange": info.get("fullExchangeName") or info.get("exchange"),
+                "marketState": info.get("marketState"),
+            },
+            "profile": {
+                "shortName": info.get("shortName"),
+                "longName": info.get("longName"),
+                "quoteType": info.get("quoteType"),
+                "sector": info.get("sector"),
+                "industry": info.get("industry"),
+                "website": website,
+                "country": info.get("country"),
+                "city": info.get("city"),
+                "state": info.get("state"),
+                "fullTimeEmployees": _safe(info.get("fullTimeEmployees")),
+                "businessSummary": info.get("longBusinessSummary"),
+                "companyOfficers": _clean(info.get("companyOfficers") or []),
+                "logoUrls": logo,
+            },
+            "history": {
+                "range": history_range,
+                "interval": history_interval,
+                "rows": history_rows,
+            },
+            "financials": financials,
+            "valuation": {
+                "keyStatistics": _info_signal_pack(info),
+                "valuationMeasures": valuation_measures,
+                "analystPriceTargets": analyst_targets,
+            },
+            "analyst": {
+                "recommendations": _df_to_list(_yf_get(lambda: t.recommendations, None), limit=25),
+                "recommendationsSummary": recommendations_summary,
+                "upgradesDowngrades": _df_to_list(_yf_get(lambda: t.upgrades_downgrades, None), limit=25),
+                "earningsHistory": _df_to_list(_yf_get(lambda: t.earnings_history, None), limit=12),
+                "earningsEstimate": _df_to_list(_yf_get(lambda: t.earnings_estimate, None), limit=12),
+                "revenueEstimate": _df_to_list(_yf_get(lambda: t.revenue_estimate, None), limit=12),
+                "epsTrend": _df_to_list(_yf_get(lambda: t.eps_trend, None), limit=12),
+                "epsRevisions": _df_to_list(_yf_get(lambda: t.eps_revisions, None), limit=12),
+                "growthEstimates": _df_to_list(_yf_get(lambda: t.growth_estimates, None), limit=12),
+                "earningsDates": _df_to_list(_yf_get(lambda: t.get_earnings_dates(limit=24), None), limit=24),
+            },
+            "ownership": {
+                "majorHolders": _df_to_list(_yf_get(lambda: t.major_holders, None), limit=20),
+                "institutionalHolders": _df_to_list(_yf_get(lambda: t.institutional_holders, None), limit=30),
+                "mutualFundHolders": _df_to_list(_yf_get(lambda: t.mutualfund_holders, None), limit=30),
+                "insiderTransactions": _df_to_list(_yf_get(lambda: t.insider_transactions, None), limit=30),
+                "insiderPurchases": _df_to_list(_yf_get(lambda: t.insider_purchases, None), limit=30),
+                "insiderRosterHolders": _df_to_list(_yf_get(lambda: t.insider_roster_holders, None), limit=30),
+                "sustainability": _df_to_list(_yf_get(lambda: t.sustainability, None), limit=40),
+            },
+            "events": {
+                "calendar": _clean(_yf_get(lambda: t.calendar, {})),
+                "actions": _df_to_list(_yf_get(lambda: t.actions, None), limit=120),
+                "dividends": _series_to_list(_yf_get(lambda: t.dividends, None), value_key="dividend", limit=100),
+                "splits": _series_to_list(_yf_get(lambda: t.splits, None), value_key="split", limit=100),
+                "capitalGains": _series_to_list(_yf_get(lambda: t.capital_gains, None), value_key="capitalGain", limit=100),
+            },
+            "options": _option_chain_payload(t, sym, expiration=option_expiration, limit=120),
+            "news": [_normalize_yf_news_item(item) for item in raw_news[:news_limit]],
+            "metadata": {
+                "isin": _yf_get(lambda: t.get_isin(), None),
+                "historyMetadata": _clean(_yf_get(lambda: t.history_metadata, {})),
+                "secFilings": _yf_sec_filings_to_list(t, limit=50),
+                "sharesOutstandingHistory": _shares_full_to_list(t, limit=100),
+                "fundsData": _funds_data_to_dict(_yf_get(lambda: t.funds_data, None)),
+                "fastInfo": _clean(fast_info),
+            },
+            "endpointMap": {
+                "profile": f"/equities/{sym}/profile",
+                "financials": f"/equities/{sym}/financials",
+                "valuation": f"/equities/{sym}/valuation",
+                "analyst": f"/equities/{sym}/intelligence",
+                "ownership": f"/equities/{sym}/ownership",
+                "events": f"/equities/{sym}/events",
+                "options": f"/equities/{sym}/options",
+                "news": f"/equities/{sym}/news",
+                "history": f"/equities/{sym}/history",
+                "coverage": f"/equities/{sym}/yfinance-coverage",
+            },
+            "source": "yfinance/yahoo",
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+        }
+        if include_raw:
+            payload["rawYfinance"] = {
+                "info": _clean(info),
+                "fastInfo": _clean(fast_info),
+                "news": _clean(raw_news[:news_limit]),
+            }
+        payload["inventory"] = _dataset_inventory(payload)
+        return payload
+
+    try:
+        return _cached(_cache_yf_dataset, cache_key, _fetch)
+    except RateLimitError as e:
+        raise HTTPException(status_code=429, detail={"error": "rate_limited", "symbol": sym, "message": str(e), "retryAfter": 60})
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"yfinance dataset failed for {sym}: {e}")
+
+
 @equities_router.get("/{symbol}/yfinance-coverage")
 async def get_equity_yfinance_coverage(symbol: str):
     """Live yfinance coverage report showing which data families are available for a ticker."""
@@ -969,6 +1224,7 @@ async def get_equity_yfinance_coverage(symbol: str):
             "missing": missing,
             "probes": probes,
             "recommendations": [
+                "Use /yfinance for a consolidated one-call yfinance dataset with inventory metadata.",
                 "Use /ownership for majorHolders, sustainability, insiderPurchases, sharesOutstandingHistory, and fundsData.",
                 "Use /intelligence for epsTrend, epsRevisions, growthEstimates, and earningsDates.",
                 "Use /financials for statements, TTM statements, valuationMeasures, secFilings, earningsDates, sharesOutstandingHistory, and historyMetadata.",
@@ -1665,20 +1921,20 @@ async def get_equity_snapshot(symbol: str):
 
     async def _get_quote():
         try:
-            return await quote(sym)
+            return await get_equity_profile(sym)
         except Exception:
             return {}
 
     async def _get_insider_summary():
         try:
-            data = await insider(sym, days=365)
+            data = await get_equity_insider(sym, days=365)
             return data.get("summary", {})
         except Exception:
             return {}
 
     async def _get_sec_derived():
         try:
-            data = await sec_facts(sym)
+            data = await get_equity_sec_facts(sym)
             return data.get("derived", {})
         except Exception:
             return {}
